@@ -11,7 +11,7 @@ public class CameraController {
 	
 	// settings
 	public final float MAX_ZOOM_IN = .1f,
-			MAX_ZOOM_OUT = 20f,
+			MAX_ZOOM_OUT = 100f,
 			FOLLOW_SPEED = .05f,
 			ZOOM_SPEED = .05f;
 

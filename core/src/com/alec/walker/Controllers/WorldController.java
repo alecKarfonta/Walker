@@ -21,7 +21,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.Array;
 
 public class WorldController {
-	private static final String		TAG					= WorldController.class.getName();
+	private static final String		TAG	= WorldController.class.getName();
 
 	public World					world;
 	private PopulationController	population;
@@ -31,6 +31,7 @@ public class WorldController {
 	private float					top;
 	private float					bottom;
 	public float					groundHeight;
+	public int						end;
 	public int						zoom;
 
 	private float					timestep;
@@ -40,8 +41,7 @@ public class WorldController {
 	public Body						groundBody;
 
 	public ArrayList<Body>			destroyQueue;
-	
-	
+
 	public WorldController() {
 		// create the world with surface gravity
 		world = new World(new Vector2(0f, -9.8f), true);
@@ -49,7 +49,8 @@ public class WorldController {
 
 		destroyQueue = new ArrayList<Body>();
 		zoom = 25;
-		
+		end = 10000;
+
 		init();
 	}
 
@@ -91,7 +92,7 @@ public class WorldController {
 		Shape shape = new ChainShape();
 
 		// make a triangle
-		for (int x = -1500; x < 1500; x++) {
+		for (int x = -(int)(end*.3f) - 10; x < (int)(end*.1f) + 10; x++) {
 			// body definition
 			bodyDef.type = BodyType.StaticBody;
 			bodyDef.position.set(x * 10, groundHeight - 3);
@@ -116,8 +117,8 @@ public class WorldController {
 		shape = new ChainShape();
 
 		// make the floor
-		((ChainShape) shape).createChain(new Vector2[] { new Vector2(left - 10000, 0),
-				new Vector2(right + 10000, 0) });
+		((ChainShape) shape).createChain(new Vector2[] { new Vector2(left - end, 0),
+				new Vector2(right + end, 0) });
 
 		// fixture definition
 		fixtureDef.shape = shape;
@@ -133,8 +134,8 @@ public class WorldController {
 		shape = new ChainShape();
 
 		// make the floor
-		((ChainShape) shape).createChain(new Vector2[] { new Vector2(left - 10000, 0),
-				new Vector2(right + 10000, 0) });
+		((ChainShape) shape).createChain(new Vector2[] { new Vector2(left - end, 0),
+				new Vector2(right + end, 0) });
 		fixtureDef.shape = shape;
 		world.createBody(bodyDef).createFixture(fixtureDef);
 
@@ -153,15 +154,13 @@ public class WorldController {
 		shape = new ChainShape();
 
 		// make the floor
-		((ChainShape) shape).createChain(new Vector2[] { new Vector2(left - 250, 0),
-				new Vector2(right + 250, 0) });
+		((ChainShape) shape).createChain(new Vector2[] { new Vector2(left - end, 0),
+				new Vector2(right + end, 0) });
 
 		fixtureDef.shape = shape;
 		world.createBody(bodyDef).createFixture(fixtureDef);
 
 	}
-	
-
 
 	// destroy stuff
 	public void destroyBody(Body body) {
@@ -170,7 +169,7 @@ public class WorldController {
 		if (!destroyQueue.contains(body))
 			destroyQueue.add(body);
 	}
-	
+
 	private void destroyQueue() {
 		if (!destroyQueue.isEmpty()) {
 			Gdx.app.debug(TAG, "destroy(): destroying queue");
@@ -183,16 +182,14 @@ public class WorldController {
 			destroyQueue.clear();
 		}
 	}
-	
-	
+
 	public Vector2 getGravity() {
 		return world.getGravity();
 	}
-	
+
 	public void setGravity(Vector2 vector) {
 		world.setGravity(vector);
 	}
-	
 
 	public float getTimestep() {
 		return timestep;
@@ -217,9 +214,5 @@ public class WorldController {
 	public void setPositionIterations(int positionIterations) {
 		this.positionIterations = positionIterations;
 	}
-	
-	
 
-	
-	
 }

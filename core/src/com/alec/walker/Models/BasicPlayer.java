@@ -13,6 +13,7 @@ public class BasicPlayer extends InputAdapter implements Player {
 
 	protected ArrayList<Body>	bodies;
 	protected Body				body;
+	public String name;
 
 	
 
@@ -45,6 +46,8 @@ public class BasicPlayer extends InputAdapter implements Player {
 	public Table getPhysicalMenu(int slideWidth, int padding) {
 		return null;
 	}
+	
+	
 
 
 

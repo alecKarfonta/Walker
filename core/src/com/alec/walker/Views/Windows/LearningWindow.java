@@ -25,13 +25,13 @@ public class LearningWindow extends Window {
 
 	private Table	tbl;
 	private Play	play;
-	private Slider sldLearningRate, sldRandomness, sldMutationRate;
+	private Slider	sldLearningRate, sldRandomness, sldMutationRate;
 
 	public LearningWindow(Play play, String title, Skin skin) {
 		super(title, skin);
 		this.play = play;
 	}
-	
+
 	public void update(final BasicAgent agent) {
 		sldLearningRate.setValue(agent.getLearningRate());
 		sldRandomness.setValue(agent.getRandomness());
@@ -52,7 +52,7 @@ public class LearningWindow extends Window {
 		// Min Randomness Slide
 		tbl.add(new Label("Min Randomness: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		Slider sldMinRandomness = new Slider(0, 0.1f, 0.00001f, false, Assets.instance.skin);
+		Slider sldMinRandomness = new Slider(0, 0.2f, 0.00001f, false, Assets.instance.skin);
 		sldMinRandomness.setValue(agent.getMinRandomness());
 		sldMinRandomness.addListener(new ChangeListener() {
 			@Override
@@ -63,13 +63,13 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMinRandomness).width(slideWidth);
-		tbl.add(new Label("0.1", Assets.instance.skin));
+		tbl.add(new Label("0.2", Assets.instance.skin));
 		tbl.row();
-		
+
 		// sldRandomness Slide
 		tbl.add(new Label("Randomness: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		sldRandomness = new Slider(0, 1.0f, 0.00001f, false, Assets.instance.skin);
+		sldRandomness = new Slider(0, 0.2f, 0.00001f, false, Assets.instance.skin);
 		sldRandomness.setValue(agent.getRandomness());
 		sldRandomness.addListener(new ChangeListener() {
 			@Override
@@ -81,14 +81,13 @@ public class LearningWindow extends Window {
 		});
 
 		tbl.add(sldRandomness).width(slideWidth);
-		tbl.add(new Label("1", Assets.instance.skin));
+		tbl.add(new Label("0.2", Assets.instance.skin));
 		tbl.row();
-
 
 		// Max Randomness Slide
 		tbl.add(new Label("Max Randomness: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		final Slider sldMaxRandomness = new Slider(0, 0.5f, 0.00001f, false, Assets.instance.skin);
+		final Slider sldMaxRandomness = new Slider(0, 0.2f, 0.00001f, false, Assets.instance.skin);
 		sldMaxRandomness.setValue(agent.getMaxRandomness());
 		sldMaxRandomness.addListener(new ChangeListener() {
 			@Override
@@ -99,7 +98,7 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMaxRandomness).width(slideWidth);
-		tbl.add(new Label("0.5", Assets.instance.skin));
+		tbl.add(new Label("0.2", Assets.instance.skin));
 		tbl.row();
 
 		// Min LearningRate Slide
@@ -137,7 +136,7 @@ public class LearningWindow extends Window {
 		tbl.add(sldLearningRate).width(slideWidth);
 		tbl.add(new Label("0.2", Assets.instance.skin));
 		tbl.row();
-		
+
 		// Max LearningRate Slide
 		tbl.add(new Label("Max Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
@@ -154,7 +153,7 @@ public class LearningWindow extends Window {
 		tbl.add(sldMaxLearningRate).width(slideWidth);
 		tbl.add(new Label("0.2", Assets.instance.skin));
 		tbl.row();
-		
+
 		// Future Discount Slider
 		tbl.add(new Label("Future Discount: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
@@ -171,7 +170,7 @@ public class LearningWindow extends Window {
 		tbl.add(sldDiscount).width(slideWidth);
 		tbl.add(new Label("1", Assets.instance.skin));
 		tbl.row();
-		
+
 		// Exploration bonus Slider
 		tbl.add(new Label("Exploration Bonus: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
@@ -204,12 +203,11 @@ public class LearningWindow extends Window {
 		tbl.add(slider).width(slideWidth);
 		tbl.add(new Label("1", Assets.instance.skin));
 		tbl.row();
-		
-		
+
 		// Impatience Slider
 		tbl.add(new Label("Impatience: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		slider = new Slider(0, 0.1f, .001f, false, Assets.instance.skin);
+		slider = new Slider(0, 0.1f, .000001f, false, Assets.instance.skin);
 		slider.setValue(GamePreferences.instance.impatience);
 		slider.addListener(new ChangeListener() {
 			@Override
@@ -222,42 +220,22 @@ public class LearningWindow extends Window {
 		tbl.add(slider).width(slideWidth);
 		tbl.add(new Label("0.1", Assets.instance.skin));
 		tbl.row();
-		
 
-		// Mutation Rate Slide
-		tbl.add(new Label("Mutation Rate: ", Assets.instance.skin));
-		tbl.add(new Label("0", Assets.instance.skin));
-		sldMutationRate = new Slider(0, 0.25f, 0.0001f, false, Assets.instance.skin);
-		sldMutationRate.setValue(GamePreferences.instance.mutationRate);
-		sldMutationRate.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				float value = ((Slider) actor).getValue();
-				System.out.println("value = " + Float.toString(value));
-				agent.setMutationRate(value);
-				GamePreferences.instance.mutationRate = value;
-			}
-		});
-		tbl.add(sldMutationRate).width(slideWidth);
-		tbl.add(new Label(".5", Assets.instance.skin));
-		tbl.row();
 		
 
 		tbl.add(agent.getLearningMenu()).colspan(3);
-		
+
 		tbl.row();
-		// isManualControl Checkbox
+		// isDebug Checkbox
 		final CheckBox chbxIsDebug = new CheckBox("Debug", Assets.instance.skin);
 		chbxIsDebug.setChecked(agent.getIsDebug());
 		chbxIsDebug.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
-				agent.setIsDebug(((CheckBox)actor).isChecked());
+				agent.setIsDebug(((CheckBox) actor).isChecked());
 			}
 		});
 		tbl.add(chbxIsDebug);
-		tbl.row();
-		
 
 		// isManualControl Checkbox
 		final CheckBox chbxIsLearning = new CheckBox("Manual Control", Assets.instance.skin);
@@ -269,144 +247,9 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(chbxIsLearning);
+
+
 		tbl.row();
-		
-		// Learn From Leader Button
-		TextButton btnLearnLeader = new TextButton("Learn From Leader", Assets.instance.skin, "small");
-		tbl.add(btnLearnLeader);
-		btnLearnLeader.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {
-					((Play)play).allLearnFrom(((Play)play).findLeader());
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-		// Learn From Selected Button
-		TextButton btnLearnSelected = new TextButton("Learn From Selected", Assets.instance.skin, "small");
-		tbl.add(btnLearnSelected);
-		btnLearnSelected.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {
-					((Play)play).allLearnFrom(agent);
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-		// Learn From Selected Button
-		TextButton btnLearnAll = new TextButton("Learn From All", Assets.instance.skin, "small");
-		tbl.add(btnLearnAll);
-		btnLearnAll.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {
-					((CrawlingCrate)agent).learnFromAll(((Play)play).population.allPlayers, agent.getLearningRate());
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-		tbl.row();
-
-		// Reset Button
-		TextButton btnReset = new TextButton("Reset Q", Assets.instance.skin, "small");
-		tbl.add(btnReset);
-		btnReset.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-
-				try {
-					if (agent instanceof CrawlingCrate) {
-						((CrawlingCrate) agent).initLearning();
-					}
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-
-		// Spawn Button
-		TextButton btnSpawn = new TextButton("Spawn", Assets.instance.skin, "small");
-		tbl.add(btnSpawn);
-		btnSpawn.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {	
-					play.population.spawnCrawlingCrate();
-					}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-		// Clone Button
-		TextButton btnClone = new TextButton("Clone", Assets.instance.skin, "small");
-		tbl.add(btnClone);
-		btnClone.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {	
-					play.population.cloneCrawlingCrate();
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-		// Delete Button
-		TextButton btnDelete = new TextButton("Delete", Assets.instance.skin, "small");
-		tbl.add(btnDelete);
-		btnDelete.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {	
-					play.population.removePlayer(agent);
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
-
-		// Delete Other Button
-		TextButton btnDeleteOthers = new TextButton("Delete Others", Assets.instance.skin, "small");
-		tbl.add(btnDeleteOthers);
-		btnDeleteOthers.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				try {	
-					ArrayList<BasicPlayer> removeQueue = new ArrayList<>();
-					for (BasicPlayer player : play.population.allPlayers) {
-						if (player == agent) {
-							continue;
-						}
-						removeQueue.add(player);
-					}
-					for (BasicPlayer player : removeQueue) {
-						play.population.removePlayer(player);
-					}
-				}
-				catch (Exception ex) {
-					ex.printStackTrace();
-				}
-			}
-		});
-		
 
 		this.add(tbl);
 

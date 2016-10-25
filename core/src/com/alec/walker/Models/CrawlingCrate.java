@@ -14,12 +14,14 @@ import com.alec.walker.Constants;
 import com.alec.walker.GamePreferences;
 import com.alec.walker.MyMath;
 import com.alec.walker.StringHelper;
-import com.badlogic.gdx.Game;
+import com.alec.walker.Views.Play;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.graphics.Camera;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Texture.TextureFilter;
+import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.ParticleEmitter;
 import com.badlogic.gdx.graphics.g2d.Sprite;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
@@ -30,7 +32,6 @@ import com.badlogic.gdx.physics.box2d.BodyDef;
 import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
 import com.badlogic.gdx.physics.box2d.CircleShape;
 import com.badlogic.gdx.physics.box2d.FixtureDef;
-import com.badlogic.gdx.physics.box2d.MassData;
 import com.badlogic.gdx.physics.box2d.PolygonShape;
 import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.physics.box2d.joints.RevoluteJoint;
@@ -41,14 +42,13 @@ import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 
 public class CrawlingCrate extends BasicAgent {
 	private static final String	TAG			= CrawlingCrate.class.getName();
 
 	// Body parts
+	private Play				play;
 	private Body				body, arm, wrist,
 								leftWheel, rightWheel;
 	private PolygonShape		chassisShape;
@@ -58,6 +58,8 @@ public class CrawlingCrate extends BasicAgent {
 
 	// Particle emitter for visualizing reward signal
 	private ParticleEmitter		bodyTrail;
+	private ParticleEmitter		finishParticleEmitter;
+	private BitmapFont			font;
 	// Size
 	private float				width, height;
 	private float[]				bodyShape;
@@ -65,6 +67,8 @@ public class CrawlingCrate extends BasicAgent {
 
 	// Position
 	// Arm parameters
+	private float				armWidth;
+	private float				wristWidth;
 	private float				armLength;
 	private float				wristLength;
 	private float				armSpeed;
@@ -78,6 +82,7 @@ public class CrawlingCrate extends BasicAgent {
 	private float				legSpread;
 	private float				wheelRadius;
 	private float				suspension;
+	private float				rideHeight;
 
 	// Performance stats
 	private float				speed;
@@ -93,6 +98,9 @@ public class CrawlingCrate extends BasicAgent {
 	private float				oldValue, newValue;
 	private float				timeSinceGoodValue;
 
+	public int					rank;
+	public int					finishLine;
+
 	// State is each state property
 	private float[]				state;
 	// Save a weight for each feature
@@ -102,14 +110,21 @@ public class CrawlingCrate extends BasicAgent {
 	// QFunction Weights
 	private float				speedValueWeight, averageSpeedValueWeight;
 
-	private boolean				holdMotors	= true;
+	// Control the reduction in state space
+	private float				precision;
 
-	public CrawlingCrate() {
+	private boolean				holdMotors	= true;
+	public boolean				showName	= false;
+
+	public CrawlingCrate(Play play) {
+		this.play = play;
+
+		rank = 0;
+		finishLine = 1500;
 	}
 
 	public void init(World world, float x, float y,
 			float width, float height) {
-
 		speedValueWeight = GamePreferences.instance.speedValueWeight;
 		averageSpeedValueWeight = (float) Math.random() * 10;
 
@@ -155,12 +170,18 @@ public class CrawlingCrate extends BasicAgent {
 		float defaultLegSpread = 0.5f;
 		float defaultWheelRadius = height / 3.5f;
 		float defaultSuspension = GamePreferences.instance.suspension;
+		float rideHeight = 1;
+		float armWidth = .2f * height;
+		float armLength = 1.5f * height;
+		float wristLength = armLength * 1.5f;
+		float wristWidth = -wristLength * .1f;
+		// Calculate arm lengths based on body size
 
 		init(world, x, y, width, height, randomness, qlearningRate, minRandomness, maxRandomness,
 				minlearningRate, maxLearningRate, learningRateDecay, updateTimer, futureDiscount,
 				speedValueWeight, averageSpeedValueWeight, armSpeed, wristSpeed, armRange,
 				wristRange, armTorque, wristTorque, bodyShape, density, defaultLegSpread,
-				defaultWheelRadius, defaultSuspension);
+				defaultWheelRadius, defaultSuspension, rideHeight, armLength, armWidth, wristLength, wristWidth);
 	}
 
 	public void init(
@@ -179,7 +200,9 @@ public class CrawlingCrate extends BasicAgent {
 			float armTorque, float wristTorque,
 			float[] bodyShape, float density,
 			float legSpread, float wheelRadius,
-			float suspension
+			float suspension, float rideHeight,
+			float armLength, float armWidth,
+			float wristLength, float wristWidth
 
 			) {
 		if (isDebug) {
@@ -202,6 +225,10 @@ public class CrawlingCrate extends BasicAgent {
 		this.futureDiscount = futureDiscount;
 		this.speedValueWeight = speedValueWeight;
 		this.averageSpeedValueWeight = averageSpeedValueWeight;
+		this.wristLength = wristLength;
+		this.wristWidth = wristWidth;
+		this.armLength = armLength;
+		this.armWidth = armWidth;
 		this.armRange = armRange;
 		this.armSpeed = armSpeed;
 		this.wristSpeed = wristSpeed;
@@ -214,6 +241,7 @@ public class CrawlingCrate extends BasicAgent {
 		this.legSpread = legSpread;
 		this.wheelRadius = wheelRadius;
 		this.impatience = GamePreferences.instance.impatience;
+		this.precision = 0.1f;
 
 		// Calculate body shape
 		bodyShape = new float[] { -((width / 2) * .95f), -height / 2, // bottom left
@@ -241,12 +269,9 @@ public class CrawlingCrate extends BasicAgent {
 		this.speed = 0;
 		this.speedDecay = 0.8f;
 		acceleration = 0;
-		state = new float[] { 0.0f, 0.0f,  0.0f, 0.0f, 0.0f, 0.0f,};
+		state = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, };
 		previousState = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, };
 
-		// Calculate arm lengths based on body size
-		armLength = 1f * height;
-		wristLength = armLength * 1.5f;
 
 		initLearning();
 
@@ -281,9 +306,9 @@ public class CrawlingCrate extends BasicAgent {
 		bodyDef.linearDamping = 0.0f;
 
 		PolygonShape armShape = new PolygonShape();
-		armShape.setAsBox(armLength, .1f * height);
+		armShape.setAsBox(armLength, armWidth);
 		fixtureDef.shape = armShape;
-		fixtureDef.density = density * .25f;
+		fixtureDef.density = density * .15f;
 		fixtureDef.filter.categoryBits = Constants.FILTER_CAR;
 		fixtureDef.filter.maskBits = Constants.FILTER_BOUNDARY;
 
@@ -305,11 +330,11 @@ public class CrawlingCrate extends BasicAgent {
 
 		PolygonShape wristShape = new PolygonShape();
 
-		wristShape.set(new float[] { -wristLength * .1f, 0, // bottom left
+		wristShape.set(new float[] { -wristWidth, 0, // bottom left
 
-				wristLength * .1f, 0, // bottom right
+				wristWidth, 0, // bottom right
 
-				wristLength * .1f, wristLength * 1.5f
+				wristWidth, wristLength
 		});
 		// wristShape.setAsBox(wristLength, .05f * height);
 		fixtureDef.shape = wristShape;
@@ -368,6 +393,7 @@ public class CrawlingCrate extends BasicAgent {
 		axisDef.bodyB = leftWheel;
 		axisDef.localAnchorA.set(-width * legSpread + wheelShape.getRadius() * 0.5f,
 				-(height * legSpread) - wheelShape.getRadius() * 2);
+//		axisDef.localAnchorB.set(0,-rideHeight);
 
 		leftAxis = (WheelJoint) world.createJoint(axisDef);
 		leftAxis.enableMotor(false);
@@ -397,12 +423,28 @@ public class CrawlingCrate extends BasicAgent {
 		bodyTrail.getTint().setColors(colors);
 		bodyTrail.start();
 
+		finishParticleEmitter = new ParticleEmitter();
+		try {
+			finishParticleEmitter.load(Gdx.files.internal("data/wall.fx").reader(2024));
+		} catch (Exception ex) {
+			ex.printStackTrace();
+		}
+		finishParticleEmitter.setSprite(particle);
+//		finishParticleEmitter.getScale().setHigh(.5f);
+		
+		finishParticleEmitter.getTint().setActive(true);
+		finishParticleEmitter.getGravity().setActive(false);
+		finishParticleEmitter.getVelocity().setActive(false);
+//		finishParticleEmitter.getTint().setColors(new float[] { 0.0f, 1f, 0f });
+		finishParticleEmitter.start();
+		
 		// Set body's user data to this so it can be referenced from game
 		body.setUserData(this);
 
 	}
 
 	public void initLearning() {
+		// System.out.println("initLearning()");
 		age = new Duration(0);
 		actionCount = 6;
 
@@ -415,11 +457,20 @@ public class CrawlingCrate extends BasicAgent {
 		valueVelocity = 0;
 		timeSinceGoodValue = 0;
 
-		// Init Q Table to all 0's
-		QValues = new float[armRange + 1][wristRange + 1][actionCount];
+		// System.out.println("initLearning() : armRange = " + armRange);
+		// System.out.println("initLearning(): wristRange = " + wristRange);
 
-		for (int armIndex = 0; armIndex < armRange + 1; armIndex++) {
-			for (int wristIndex = 0; wristIndex < wristRange + 1; wristIndex++) {
+		int QArmRange = (int) ((armRange + 1) * precision) + 1;
+		int QWristRange = (int) ((wristRange + 1) * precision) + 1;
+
+		// System.out.println("initLearning() : QArmRange = " + QArmRange);
+		// System.out.println("initLearning(): QWristRange = " + QWristRange);
+
+		// Init Q Table to all 0's
+		QValues = new float[QArmRange][QWristRange][actionCount];
+
+		for (int armIndex = 0; armIndex < QArmRange; armIndex++) {
+			for (int wristIndex = 0; wristIndex < QWristRange; wristIndex++) {
 				for (int actionIndex = 0; actionIndex < actionCount; actionIndex++) {
 					QValues[armIndex][wristIndex][actionIndex] = 0.0f;
 				}
@@ -427,12 +478,11 @@ public class CrawlingCrate extends BasicAgent {
 		}
 
 		// Init visit counts to all 0's
-		SACounts = new int[armRange + 1][wristRange + 1][actionCount + 1];
-
-		for (int armIndex = 0; armIndex < armRange + 1; armIndex++) {
-			for (int wristIndex = 0; wristIndex < wristRange + 1; wristIndex++) {
-				for (int actionIndex = 0; actionIndex < actionCount; actionIndex++) {
-					SACounts[armIndex][wristIndex][actionIndex] = 0;
+		SACounts = new int[QArmRange][QWristRange][actionCount];
+		for (int x = 0; x < QValues.length; x++) {
+			for (int y = 0; y < QValues[x].length; y++) {
+				for (int z = 0; z < QValues[x][y].length; z++) {
+					SACounts[x][y][z] = 0;
 				}
 			}
 		}
@@ -442,7 +492,7 @@ public class CrawlingCrate extends BasicAgent {
 		int weightCount = state.length + 1 + actionCount;
 		weights = new float[weightCount];
 
-		// For each weight 
+		// For each weight
 		for (int x = 0; x < x; x++) {
 			// Init to a small random value
 			weights[x] = (float) (0.01f * Math.random());
@@ -494,16 +544,16 @@ public class CrawlingCrate extends BasicAgent {
 	// Get the Q Value for the state-action pair
 	public float QValue(float[] stateAction) {
 		float sum = 0;
-		
+
 		// For each state feature and action
 		for (int x = 0; x < stateAction.length; x++) {
 			// Add the feature value times the weight to the sum
 			sum += stateAction[x] * weights[x];
 		}
-		
+
 		return sum;
 	}
-	
+
 	public void QFunctionUpdate(float delta) {
 		// Get the immediate reward
 		float reward = getReward();
@@ -524,20 +574,18 @@ public class CrawlingCrate extends BasicAgent {
 						wristJoint.getJointAngle())
 				);
 		wristAngle = MathUtils.clamp(wristAngle, 0, wristRange);
-		
+
+		// Reduce precision of angles
+		armAngle = (int) (armAngle * precision);
+		wristAngle = (int) (wristAngle * precision);
+
 		// Store state vector, where the action is represented by a one-hot
-		state = new float[] { armAngle, wristAngle ,  0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+		state = new float[] { armAngle, wristAngle, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 		// Set previous action index
 		state[previousAction + 2] = 1;
-		System.out.println("state = " + Arrays.toString(state));
-		System.out.println("previousAction = " + previousAction);
-		
 
 		// Get the old value
 		oldValue = QValues[previousArmAngle][previousWristAngle][previousAction];
-		
-		
-		
 
 		// Save current value as previous for next step
 		previousReward = reward;
@@ -549,18 +597,22 @@ public class CrawlingCrate extends BasicAgent {
 		// Get x velocity of body
 		float xVelocity = body.getLinearVelocity().x;
 
+		if (xVelocity > maxSpeed) {
+			maxSpeed = xVelocity;
+		}
+
 		// If velocity is below threshold
 		if (Math.abs(xVelocity) < 0.25f) {
 			// Set to zero
 			xVelocity = 0f;
 			// xVelocity = -(explorationBonus / SACounts[previousArmAngle][previousWristAngle][previousAction]) * .5f;
 		} else {
-//			boolean isNegative = (xVelocity < 0);
+			// boolean isNegative = (xVelocity < 0);
 			// Square the velocity
-//			xVelocity = xVelocity * xVelocity;
-//			if (isNegative) {
-//				xVelocity = -1 * xVelocity;
-//			}
+			// xVelocity = xVelocity * xVelocity;
+			// if (isNegative) {
+			// xVelocity = -1 * xVelocity;
+			// }
 		}
 
 		// Calculate the speed as a moving average of the velocity
@@ -574,19 +626,19 @@ public class CrawlingCrate extends BasicAgent {
 		// float reward = xVelocity;
 		return reward;
 	}
-	
+
 	public void getQValue() {
-		
+
 	}
 
 	public void QUpdate(float delta) {
 
 		// Get the immediate reward
 		float reward = getReward();
-		
+
 		// Increment the visit count for the previous S, A
 		SACounts[previousArmAngle][previousWristAngle][previousAction] += 1;
-		
+
 		// Get the current state [armAngle, wristAngle]
 		int armAngle = (int) Math.round(
 				Math.toDegrees(
@@ -601,9 +653,13 @@ public class CrawlingCrate extends BasicAgent {
 				);
 		wristAngle = MathUtils.clamp(wristAngle, 0, wristRange);
 
+		// Reduce precision of angles
+		armAngle = (int) (armAngle * precision);
+		wristAngle = (int) (wristAngle * precision);
+
 		// Find the max value action
 		// Init to a random action
-		int action = (int) (Math.random() * actionCount);
+		int action = (int) Math.floor(Math.random() * actionCount);
 		float actionValue = QValues[armAngle][wristAngle][action];
 
 		try {
@@ -706,7 +762,7 @@ public class CrawlingCrate extends BasicAgent {
 			}
 
 			// If close to best or worst
-			if (newValue > bestValue * .1f) {
+			if (newValue > bestValue * .5f) {
 				// Reset time since good value
 				timeSinceGoodValue = 0;
 
@@ -717,7 +773,7 @@ public class CrawlingCrate extends BasicAgent {
 			} else {
 
 				timeSinceGoodValue += delta;
-				if (timeSinceGoodValue > 10) {
+				if (timeSinceGoodValue > 720) {
 					randomness = MyMath.lerp(randomness, maxRandomness, impatience
 							* timeSinceGoodValue);
 					learningRate = MyMath.lerp(learningRate, maxLearningRate, impatience
@@ -727,7 +783,17 @@ public class CrawlingCrate extends BasicAgent {
 				// If more than ten minutres without good value
 				if (timeSinceGoodValue > 720) {
 					timeSinceGoodValue = 0;
-					sendHome();
+					// sendHome();
+					CrawlingCrate child = (CrawlingCrate) play.population.makeCrawlingCrate();
+					child.sendHome();
+					// If selected
+					if (this == play.population.selectedPlayer) {
+						// Change to child
+						play.changePlayer(child);
+					}
+					// Remove this player
+					play.population.removePlayer(this);
+
 				}
 			}
 
@@ -777,56 +843,63 @@ public class CrawlingCrate extends BasicAgent {
 			updateTime = 0.0f;
 
 			// Perform Q Update
-//			QUpdate(delta);
+			QUpdate(delta);
 			QFunctionUpdate(delta);
 
-			// If very far from start
-			if (body.getPosition().x < -10000 || body.getPosition().x > 10000) {
-				sendHome();
-				// Play
-				return;
+			
+			if (body.getPosition().x >= finishLine) {
+				// Push finish line back
+//				finishLine = finishLine + (int)(finishLine * .25f);
+//				finishLine = Math.min(finishLine, 10000);
+				play.finishLine(this);
 			}
-
-			// If outside range
-			if (previousWristAngle < 2) {
+			
+			if (body.getPosition().y < -100) {
+				sendHome();
+			}// If outside range
+			if (previousWristAngle <= 0) {
 				if (wristJoint.getMotorSpeed() < 0) {
 					// System.out.println("Error: wrist angle below 0");
 					wristJoint.enableMotor(true);
-					wristJoint.setMotorSpeed(wristSpeed * .1f);
+					wristJoint.setMotorSpeed(wristSpeed * .01f);
 					return;
 				}
 			}
-			if (previousWristAngle >= wristRange - 2) {
+			if (previousWristAngle >= QValues[0].length) {
 				if (wristJoint.getMotorSpeed() > 0) {
 					// System.out.println("Error: wrist angle above range");
 					wristJoint.enableMotor(true);
-					wristJoint.setMotorSpeed(-wristSpeed * .1f);
+					wristJoint.setMotorSpeed(-wristSpeed * .01f);
 					return;
 				}
 
 			}
-			if (previousArmAngle < 2) {
+			if (previousArmAngle <= 0) {
 				if (armJoint.getMotorSpeed() < 0) {
 					// System.out.println("Error: arm angle below 0");
 					armJoint.enableMotor(true);
-					armJoint.setMotorSpeed(armSpeed * .1f);
+					armJoint.setMotorSpeed(armSpeed * .01f);
 					return;
 				}
 			}
-			if (previousArmAngle >= armRange - 2) {
+			if (previousArmAngle >= QValues.length -1) {
 				if (armJoint.getMotorSpeed() > 0) {
 					// System.out.println("Error: arm angle above range");
 					armJoint.enableMotor(true);
-					armJoint.setMotorSpeed(-armSpeed * .1f);
+					armJoint.setMotorSpeed(-armSpeed * .01f);
 					return;
 				}
 			}
-
+			
 		}
+		
+
+		
 	}
+	
 
 	public void render(SpriteBatch spriteBatch, Camera camera,
-			float delta) {
+			float delta, boolean showFinish) {
 
 		// Get the color for the reward display
 		Color color;
@@ -851,6 +924,15 @@ public class CrawlingCrate extends BasicAgent {
 		bodyTrail.getScale().setHigh(value * .5f);
 		bodyTrail.setPosition(body.getPosition().x, body.getPosition().y + (height * 2f));
 		bodyTrail.draw(spriteBatch, delta);
+		
+		finishParticleEmitter.setPosition(finishLine, 0);
+		finishParticleEmitter.draw(spriteBatch, delta);
+
+		// Show name
+		if (showName) {
+			font.draw(spriteBatch, rank + " " + name, body.getPosition().x,
+					body.getPosition().y + 12);
+		}
 		spriteBatch.end();
 
 	}
@@ -902,7 +984,7 @@ public class CrawlingCrate extends BasicAgent {
 		// Suspension Slider
 		tbl.add(new Label("Suspension: ", Assets.instance.skin));
 		tbl.add(new Label("1", Assets.instance.skin));
-		final Slider sldSuspension = new Slider(0, 10, .01f, false, Assets.instance.skin);
+		final Slider sldSuspension = new Slider(0, 4, .01f, false, Assets.instance.skin);
 		sldSuspension.setValue(leftAxis.getSpringFrequencyHz());
 		sldSuspension.addListener(new ChangeListener() {
 			@Override
@@ -914,7 +996,7 @@ public class CrawlingCrate extends BasicAgent {
 			}
 		});
 		tbl.add(sldSuspension).width(slideWidth);
-		tbl.add(new Label("10", Assets.instance.skin));
+		tbl.add(new Label("4", Assets.instance.skin));
 		tbl.row();
 
 		// Friction Slider
@@ -1011,6 +1093,7 @@ public class CrawlingCrate extends BasicAgent {
 		tbl.add(sldAccelerationValue).width(slideWidth);
 		tbl.add(new Label("10", Assets.instance.skin));
 		tbl.row();
+		tbl.pack();
 
 		return tbl;
 	}
@@ -1037,7 +1120,7 @@ public class CrawlingCrate extends BasicAgent {
 		return tbl;
 	}
 
-	// LearnFromLeader(Player) - Move the Q-Values toward Player's Q-Values, with learning rate  
+	// LearnFromLeader(Player) - Move the Q-Values toward Player's Q-Values, with learning rate
 	public void learnFromLeader(Player leader, float learningRate) {
 
 		if (this.equals(leader) || this == leader) {
@@ -1071,15 +1154,15 @@ public class CrawlingCrate extends BasicAgent {
 				if (agent instanceof CrawlingCrate) {
 
 					// Transfer QTable
-					for (int x = 0; x <= QValues.length; x++) {
-						for (int y = 0; y <= QValues[x].length; y++) {
-							for (int z = 0; z <= QValues[x][y].length; z++) {
+					for (int x = 0; x < QValues.length; x++) {
+						for (int y = 0; y < QValues[x].length; y++) {
+							for (int z = 0; z < QValues[x][y].length; z++) {
 								// update Q-Value, reduced by learning rate
 								QValues[x][y][z] = ((1 - learningRate) * QValues[x][y][z])
 										+ (learningRate * ((CrawlingCrate) agent).QValues[x][y][z]);
 								// throw in a bit of randomness
 								// QValues[x][y][z] += (Math.random() > 0.5f ? -0.001 : 0.001);
-								//SACounts[x][y][z] += (((CrawlingCrate) agent)).SACounts[x][y][z];
+								// SACounts[x][y][z] += (((CrawlingCrate) agent)).SACounts[x][y][z];
 							}
 						}
 					}
@@ -1089,15 +1172,15 @@ public class CrawlingCrate extends BasicAgent {
 	}
 
 	public CrawlingCrate spawn(World world) {
-		CrawlingCrate child = new CrawlingCrate();
+		CrawlingCrate child = new CrawlingCrate(this.play);
 		Vector2 position = body.getPosition();
 
-		 child.isDebug = true;
+		child.isDebug = false;
 		float mutatedWidth = width
-				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * 0.5f * width * Math
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * 2.0 * width * Math
 						.random()));
 		float mutatedHeight = height
-				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * 0.5f * height * Math
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * 2.0 * height * Math
 						.random()));
 
 		float mutatedUpdateTimer = updateTimer
@@ -1106,8 +1189,13 @@ public class CrawlingCrate extends BasicAgent {
 		float mutatedDensity = density
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * density * Math
 						.random()));
+		float mutatedMinRandomness = minRandomness
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * minRandomness * Math.random()));
 		float mutatedMaxRandomness = maxRandomness
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * maxRandomness * Math
+						.random()));
+		float mutatedMinLearningRate = minLearningRate
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * minLearningRate * Math
 						.random()));
 		float mutatedMaxLearningRate = maxLearningRate
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f) * (mutationRate * maxLearningRate * Math
@@ -1129,42 +1217,60 @@ public class CrawlingCrate extends BasicAgent {
 				* (mutationRate * futureDiscount * Math.random()));
 		float mutatedSpeedWeight = speedValueWeight
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
-				* (mutationRate * speedValueWeight * Math.random()));
+				* (mutationRate * 0.5 * speedValueWeight * Math.random()));
 		float mutatedAverageSpeedWeight = averageSpeedValueWeight
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
-				* (mutationRate * averageSpeedValueWeight * Math.random()));
+				* (mutationRate * 0.5 * averageSpeedValueWeight * Math.random()));
 
 		float mutatedLegSpread = legSpread
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
-				* (mutationRate * legSpread * Math.random()));
+				* (mutationRate * 2.0 * legSpread * Math.random()));
 
 		float mutatedWheelRadius = wheelRadius
 				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
-				* (mutationRate * wheelRadius * Math.random()));
+				* (mutationRate * 1.5 * wheelRadius * Math.random()));
 
 		float mutatedSuspension = suspension
-				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
+				+ (float) ((Math.random() >= 0.5f ? 1.0f : -1.0f)
 				* (mutationRate * 0.5 * suspension * Math.random()));
+		
+		float mutatedArmLength = armLength
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
+				* (mutationRate * 2.0 * armLength * Math.random()));
+
+		float mutatedArmWidth = armWidth
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
+				* (mutationRate * 2.0 * armWidth * Math.random()));
+		
+		float mutatedWristLength = wristLength
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
+				* (mutationRate * 2.0 * armLength * Math.random()));
+		
+		float mutatedWristWidth = wristWidth
+				+ (float) ((Math.random() > 0.5f ? 1.0f : -1.0f)
+				* (mutationRate * 2.0 * wristWidth * Math.random()));
 
 		child.init(world,
 				position.x, position.y,
 				mutatedWidth, mutatedHeight,
 				mutatedMaxRandomness, mutatedMaxLearningRate,
-				minRandomness, mutatedMaxRandomness,
-				minLearningRate, mutatedMaxLearningRate,
+				mutatedMinRandomness, mutatedMaxRandomness,
+				mutatedMinLearningRate, mutatedMaxLearningRate,
 				learningRateDecay, mutatedUpdateTimer,
 				mutatedFutureDiscount, mutatedSpeedWeight,
 				mutatedAverageSpeedWeight,
 				mutatedArmSpeed, mutatedWristSpeed,
 				armRange, wristRange,
 				mutatedArmTorque, mutatedWristTorque, bodyShape,
-				mutatedDensity, mutatedLegSpread, mutatedWheelRadius, mutatedSuspension);
+				mutatedDensity, mutatedLegSpread, mutatedWheelRadius, mutatedSuspension,
+				rideHeight,
+				mutatedArmLength, mutatedArmWidth,mutatedWristLength, mutatedWristWidth);
 
 		return child;
 	}
 
 	public CrawlingCrate clone(World world) {
-		CrawlingCrate child = new CrawlingCrate();
+		CrawlingCrate child = new CrawlingCrate(this.play);
 		Vector2 position = body.getPosition();
 
 		// child.isDebug = true;
@@ -1253,15 +1359,15 @@ public class CrawlingCrate extends BasicAgent {
 		worstValue = 0;
 
 		// Reset visit counts
-		SACounts = new int[armRange + 1][wristRange + 1][actionCount + 1];
-
-		for (int armIndex = 0; armIndex < armRange + 1; armIndex++) {
-			for (int wristIndex = 0; wristIndex < wristRange + 1; wristIndex++) {
-				for (int actionIndex = 0; actionIndex < actionCount; actionIndex++) {
-					SACounts[armIndex][wristIndex][actionIndex] = 0;
-				}
-			}
-		}
+		// SACounts = new int[armRange][wristRange][actionCount];
+		//
+		// for (int armIndex = 0; armIndex < armRange; armIndex++) {
+		// for (int wristIndex = 0; wristIndex < wristRange; wristIndex++) {
+		// for (int actionIndex = 0; actionIndex < actionCount; actionIndex++) {
+		// SACounts[armIndex][wristIndex][actionIndex] = 0;
+		// }
+		// }
+		// }
 		super.sendHome();
 	};
 
@@ -1284,6 +1390,9 @@ public class CrawlingCrate extends BasicAgent {
 	public ArrayList<String> getStats() {
 		ArrayList<String> stats = new ArrayList<String>();
 		// stats.add("Goal:" + goals[goal]);
+//		stats.add("Name:" + name);
+//		stats.add("Rank:" + rank);
+//		stats.add("Finish:" + finishLine);
 		stats.add("X:" + StringHelper.getDecimalFormat(body.getPosition().x, 0));
 		if (age.getStandardHours() > 0) {
 			stats.add("Age:" + age.getStandardHours() + "h");
@@ -1292,7 +1401,7 @@ public class CrawlingCrate extends BasicAgent {
 		} else {
 			stats.add("Age:" + age.getStandardSeconds() + "s");
 		}
-		stats.add("Mutation Rate:" + mutationRate);
+//		stats.add("Mutation Rate:" + mutationRate);
 
 		// stats.add("Reward:" + String.format("%+1.6f", previousReward));
 		// stats.add("Exploration Bonus:" + String.format("%+1.6f", previousExplorationValue));
@@ -1305,16 +1414,17 @@ public class CrawlingCrate extends BasicAgent {
 		// stats.add("Wrist Angle:" + StringHelper.getDecimalFormat(previousWristAngle, 1));
 		stats.add("Angles:" + StringHelper.getDecimalFormat(previousArmAngle, 1) + ", "
 				+ StringHelper.getDecimalFormat(previousWristAngle, 1));
-		stats.add("State = " + Arrays.toString(state));
+//		stats.add("State = " + Arrays.toString(state));
 
 		// stats.add("Best Value:" + String.format("%+1.6f", bestValue));
 		// stats.add("Worst Value:" + String.format("%+1.6f", worstValue));
+		stats.add("Max Speed:" + String.format("%+1.2f", maxSpeed));
 		stats.add("Value Range:" + String.format("%+1.2f", worstValue) + ", "
 				+ String.format("%+1.2f", bestValue));
-		// stats.add("TimeSinceGoodValue:" + String.format("%+1.6f", timeSinceGoodValue));
-		// stats.add("Impatience:" + String.format("%+1.6f", impatience));
-		// stats.add("Learning Rate:" + String.format("%+1.6f", learningRate));
-		// stats.add("Randomness:" + String.format("%+1.6f", randomness));
+//		stats.add("TimeSinceGoodValue:" + String.format("%+1.6f", timeSinceGoodValue));
+		 stats.add("Impatience:" + String.format("%+1.6f", impatience));
+		 stats.add("Learning Rate:" + String.format("%+1.6f", learningRate));
+		 stats.add("Randomness:" + String.format("%+1.6f", randomness));
 
 		// stats.add("MaxAction:" + previousMaxAction);
 		// stats.add("MaxActionValue:" + String.format("%+1.6f", previousMaxActionValue));
@@ -1336,20 +1446,20 @@ public class CrawlingCrate extends BasicAgent {
 				+ String.format("%+1.2f", newValue - oldValue) + ")");
 		// stats.add("UpdateTimer:" + String.format("%+1.6f", updateTimer));
 
-		stats.add("Q-Values: ["
-				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][0])
-				+ ", " + String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][1])
-				+ ", "
-				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][2]) + ", "
-				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][3]) + ", "
-				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][4]) + ", "
-				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][5]) + " ] ");
-		stats.add("Action Visits: [" + SACounts[previousArmAngle][previousWristAngle][0]
-				+ ", " + SACounts[previousArmAngle][previousWristAngle][1] + ", "
-				+ SACounts[previousArmAngle][previousWristAngle][2] + ", "
-				+ SACounts[previousArmAngle][previousWristAngle][3] + ", "
-				+ SACounts[previousArmAngle][previousWristAngle][4] + ", "
-				+ SACounts[previousArmAngle][previousWristAngle][5] + " ] ");
+//		stats.add("Q-Values: ["
+//				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][0])
+//				+ ", " + String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][1])
+//				+ ", "
+//				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][2]) + ", "
+//				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][3]) + ", "
+//				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][4]) + ", "
+//				+ String.format("%+1.2f", QValues[previousArmAngle][previousWristAngle][5]) + " ] ");
+//		stats.add("Action Visits: [" + SACounts[previousArmAngle][previousWristAngle][0]
+//				+ ", " + SACounts[previousArmAngle][previousWristAngle][1] + ", "
+//				+ SACounts[previousArmAngle][previousWristAngle][2] + ", "
+//				+ SACounts[previousArmAngle][previousWristAngle][3] + ", "
+//				+ SACounts[previousArmAngle][previousWristAngle][4] + ", "
+//				+ SACounts[previousArmAngle][previousWristAngle][5] + " ] ");
 		return stats;
 
 	}

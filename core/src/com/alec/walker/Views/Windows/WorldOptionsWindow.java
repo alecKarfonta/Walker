@@ -3,6 +3,8 @@ package com.alec.walker.Views.Windows;
 import com.alec.Assets;
 import com.alec.walker.Constants;
 import com.alec.walker.GamePreferences;
+import com.alec.walker.Models.BasicPlayer;
+import com.alec.walker.Models.CrawlingCrate;
 import com.alec.walker.Views.Play;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.World;
@@ -41,7 +43,7 @@ public class WorldOptionsWindow extends Window {
 		int slideWidth = 300;
 		
 
-		Table tbl = new Table();
+		final Table tbl = new Table();
 
 		// Timestep slide
 		tbl.add(new Label("Timestep: ", Assets.instance.skin));
@@ -64,7 +66,7 @@ public class WorldOptionsWindow extends Window {
 		// VelocityIterations slide
 		tbl.add(new Label("Velocity Step: ", Assets.instance.skin));
 		tbl.add(new Label("1", Assets.instance.skin));
-		Slider sldVelocityIterations = new Slider(1, 25, 1, false,
+		Slider sldVelocityIterations = new Slider(1, 50, 1, false,
 				Assets.instance.skin);
 		sldVelocityIterations.setValue(GamePreferences.instance.velocityIterations);
 		sldVelocityIterations.addListener(new ChangeListener() {
@@ -75,13 +77,13 @@ public class WorldOptionsWindow extends Window {
 			}
 		});
 		tbl.add(sldVelocityIterations).width(slideWidth);
-		tbl.add(new Label("25", Assets.instance.skin));
+		tbl.add(new Label("50", Assets.instance.skin));
 		tbl.row();
 		
 		// PositionIterations slide
 		tbl.add(new Label("Position Step: ", Assets.instance.skin));
 		tbl.add(new Label("1", Assets.instance.skin));
-		Slider sldPositionIterations = new Slider(1, 25, 1, false,
+		Slider sldPositionIterations = new Slider(1, 50, 1, false,
 				Assets.instance.skin);
 		sldPositionIterations.setValue(GamePreferences.instance.positionIterations);
 		sldPositionIterations.addListener(new ChangeListener() {
@@ -92,7 +94,7 @@ public class WorldOptionsWindow extends Window {
 			}
 		});
 		tbl.add(sldPositionIterations).width(slideWidth);
-		tbl.add(new Label("25", Assets.instance.skin));
+		tbl.add(new Label("50", Assets.instance.skin));
 		tbl.row();
 		
 		Vector2 gravity = play.world.getGravity();
@@ -142,12 +144,13 @@ public class WorldOptionsWindow extends Window {
 		
 		// IsRendering Checkbox
 		tbl.add(new Label("Render", Assets.instance.skin));
-		chkIsRender = new CheckBox("World", Assets.instance.skin);
+		CheckBox chkIsRender = new CheckBox("World", Assets.instance.skin);
 		chkIsRender.setChecked(true);
 		chkIsRender.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
-				play.setIsRendering(chkIsRender.isChecked());
+				boolean value = ((CheckBox)actor).isChecked();
+				play.setIsRendering(value);
 			}
 		});
 		tbl.add(chkIsRender);
@@ -159,10 +162,28 @@ public class WorldOptionsWindow extends Window {
 		chkIsRender.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
-				play.setIsRenderingAll(chkIsRender.isChecked());
+				boolean value = ((CheckBox)actor).isChecked();
+				play.setIsRenderingAll(value);
 			}
 		});
 		tbl.add(chkIsRender);
+		
+		// IsRenderingNames Checkbox
+		CheckBox chkIsRenderNames = new CheckBox("Names", Assets.instance.skin);
+		chkIsRenderNames.setChecked(false);
+		chkIsRenderNames.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				boolean value = ((CheckBox)actor).isChecked();
+				
+				for (BasicPlayer player : play.population.allPlayers) {
+					if (player instanceof CrawlingCrate) {
+						((CrawlingCrate) player).showName = value;
+					}
+				}
+			}
+		});
+		tbl.add(chkIsRenderNames);
 //		tbl.row();
 		
 		// Stats check box
@@ -178,19 +199,6 @@ public class WorldOptionsWindow extends Window {
 		});
 		tbl.row();
 
-		// Default
-		TextButton btn = new TextButton("Default Settings", Assets.instance.skin, "small");
-		btn.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				GamePreferences.instance.clear();
-				GamePreferences.instance.init();
-				GamePreferences.instance.load();
-				init();
-			}
-		});
-		tbl.add(btn).padRight(padding);
-		tbl.add(btn).padLeft(padding);
 		
 		this.add(tbl);
 		

@@ -9,7 +9,7 @@ public class CameraHelper {
 	
 	// settings
 	private final float MAX_ZOOM_IN = 1f;
-	private final float MAX_ZOOM_OUT = 200.0f;
+	private final float MAX_ZOOM_OUT = 1000.0f;
 	private final float FOLLOW_SPEED = 2.0f;
 	private final float ZOOM_SPEED = 1.0f;
 

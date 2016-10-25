@@ -96,6 +96,8 @@ public class Assets implements Disposable, AssetErrorListener {
 			
 			defaultSmall.getRegion().getTexture().setFilter(TextureFilter.Linear, TextureFilter.Linear);
 			defaultNormal.getRegion().getTexture().setFilter(TextureFilter.Linear, TextureFilter.Linear);
+
+			defaultSmall.getData().setScale(0.5f);
 		}
 	}
 	

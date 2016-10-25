@@ -12,7 +12,6 @@ import com.alec.walker.GamePreferences;
 import com.alec.walker.StringHelper;
 import com.alec.walker.Controllers.BallFactory;
 import com.alec.walker.Controllers.CameraController;
-import com.alec.walker.Controllers.MyContactListener;
 import com.alec.walker.Controllers.PopulationController;
 import com.alec.walker.Controllers.WorldController;
 import com.alec.walker.Models.BasicAgent;
@@ -23,6 +22,7 @@ import com.alec.walker.Models.CrawlingCrate;
 import com.alec.walker.Models.LeggedCrate;
 import com.alec.walker.Models.Player;
 import com.alec.walker.Views.Windows.CreateWindow;
+import com.alec.walker.Views.Windows.EvolutionWindow;
 import com.alec.walker.Views.Windows.LearningWindow;
 import com.alec.walker.Views.Windows.PhysicalWindow;
 import com.alec.walker.Views.Windows.WorldOptionsWindow;
@@ -40,15 +40,9 @@ import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.math.Vector3;
 import com.badlogic.gdx.physics.box2d.Body;
-import com.badlogic.gdx.physics.box2d.BodyDef;
-import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
 import com.badlogic.gdx.physics.box2d.Box2DDebugRenderer;
-import com.badlogic.gdx.physics.box2d.ChainShape;
 import com.badlogic.gdx.physics.box2d.Fixture;
-import com.badlogic.gdx.physics.box2d.FixtureDef;
 import com.badlogic.gdx.physics.box2d.QueryCallback;
-import com.badlogic.gdx.physics.box2d.Shape;
-import com.badlogic.gdx.physics.box2d.World;
 import com.badlogic.gdx.physics.box2d.joints.MouseJoint;
 import com.badlogic.gdx.physics.box2d.joints.MouseJointDef;
 import com.badlogic.gdx.scenes.scene2d.Actor;
@@ -61,7 +55,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
-import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 
 public class Play extends AbstractGameScreen {
 	private static final String	TAG	= Play.class.getName();
@@ -87,12 +81,14 @@ public class Play extends AbstractGameScreen {
 	private Vector2				dragPosition;
 
 	public boolean				isPaused, isShowStats, isRendering, isRenderingAll;
+	public boolean				isNaturalSelection;
 
 	private BitmapFont			font;
 
 	// GUI
 	private CreateWindow		winCreate;
 	private WorldOptionsWindow	winOptions;
+	public EvolutionWindow		evolutionWindow;
 	public LearningWindow		learningWindow;
 	public PhysicalWindow		physicalWindow;
 	private TextButton			btnWinOptSave;
@@ -107,10 +103,12 @@ public class Play extends AbstractGameScreen {
 
 		stage = new Stage();
 		world = new WorldController();
-		population = new PopulationController(world);
+		population = new PopulationController(this);
+
+		isNaturalSelection = true;
 
 		isRendering = true;
-		isRenderingAll = true;
+		isRenderingAll = false;
 		isPaused = false;
 
 		boolean drawBodies = true;
@@ -123,6 +121,7 @@ public class Play extends AbstractGameScreen {
 				drawInactiveBodies, drawVelocities, drawContacts);
 
 		Gdx.gl.glClearColor(0, 0, 0, 1);
+
 	}
 
 	@Override
@@ -145,30 +144,42 @@ public class Play extends AbstractGameScreen {
 		}
 
 		// Update Player
-		((CrawlingCrate) player).update(delta);
+		// ((CrawlingCrate) player).update(delta);
 		// Render player
-		((CrawlingCrate) player).render(spriteBatch, camera, delta);
-		
-		
+		// ((CrawlingCrate) player).render(spriteBatch, camera, delta);
+
+		// Update each player
+		int otherPlayerCount = population.allPlayers.size();
 		// For each other player
-		for (BasicPlayer otherPlayer : population.allPlayers) {
-
-			if (otherPlayer == player) {
-				continue;
-			}
-
+		for (int index = 0; index < otherPlayerCount; index++) {
+			BasicPlayer otherPlayer = population.allPlayers.get(index);
 			// If is a crawling crate
 			if (player instanceof CrawlingCrate) {
-				// If is not paused
-				if (!isPaused) {
-					// Update
-					((CrawlingCrate) otherPlayer).update(delta);
-				}
 				// If is rendering
-				if (isRendering && isRenderingAll) {
+				if ((isRendering && ((otherPlayer == player) || (isRenderingAll)))) {
 					// Render
-					((CrawlingCrate) otherPlayer).render(spriteBatch, camera, delta);
+					boolean showFinish = (otherPlayer == player);
+					((CrawlingCrate) otherPlayer).render(spriteBatch, camera, delta, showFinish);
 				}
+			}
+		}
+
+		// Render each player
+		otherPlayerCount = population.allPlayers.size();
+
+		for (int index = 0; index < otherPlayerCount; index++) {
+			try {
+				BasicPlayer otherPlayer = population.allPlayers.get(index);
+				// If is a crawling crate
+				if (otherPlayer instanceof CrawlingCrate) {
+					// If is not paused
+					if (!isPaused) {
+						// Update
+						((CrawlingCrate) otherPlayer).update(delta);
+					}
+				}
+			} catch (Exception ex) {
+				continue;
 			}
 		}
 
@@ -215,24 +226,26 @@ public class Play extends AbstractGameScreen {
 		}
 
 		// fps
-		if (GamePreferences.instance.showFpsCounter) {
-			int fps = Gdx.graphics.getFramesPerSecond();
-			if (fps >= 45) {
-				font.setColor(Color.GREEN);
-			} else if (fps >= 30) {
-				font.setColor(Color.YELLOW);
-			} else {
-				font.setColor(Color.RED);
-			}
-			font.draw(spriteBatch, "FPS: " + fps, -(world.width * .5f) + 10,
-					-(world.height * .5f) + 15);
-			font.setColor(Color.WHITE);
+		// if (GamePreferences.instance.showFpsCounter) {
+		int fps = Gdx.graphics.getFramesPerSecond();
+		if (fps >= 45) {
+			font.setColor(Color.GREEN);
+		} else if (fps >= 30) {
+			font.setColor(Color.YELLOW);
+		} else {
+			font.setColor(Color.RED);
 		}
+		font.draw(spriteBatch, "FPS: " + fps, -(world.width * .5f) + 10,
+				-(world.height * .5f) + 15);
+		font.setColor(Color.WHITE);
+		// }
 		spriteBatch.end();
 	}
 
 	public void update(float delta) {
 		// Update timers
+		
+		population.update(delta);
 	}
 
 	@Override
@@ -254,11 +267,9 @@ public class Play extends AbstractGameScreen {
 		mainTable = new Table(Assets.instance.skin);
 		mainTable.setFillParent(true);
 		isShowStats = GamePreferences.instance.isShowingStats;
-		createGUI();
 
 		StringHelper.getInstance();
 		StringHelper.init();
-		font = Assets.instance.fonts.defaultSmall;
 
 		hitBody = new Body[2];				// up to three bodies could be clicked at once
 		testPoint = new Vector3();
@@ -417,6 +428,8 @@ public class Play extends AbstractGameScreen {
 			inputMultiplexer.addProcessor((CrawlingCrate) player);
 		}
 
+		createGUI();
+
 	}
 
 	public void createGUI() {
@@ -425,10 +438,19 @@ public class Play extends AbstractGameScreen {
 
 		// Get a font from assets
 		font = Assets.instance.fonts.defaultSmall;
-
+		font.getData().setScale(1);
 		/* create some buttons */
 		int padding = GamePreferences.instance.padding;
 		;
+		// Rank Button
+		TextButton btnRank = new TextButton("Rank", Assets.instance.skin, "small");
+		mainTable.add(btnRank).padRight(padding);
+		btnRank.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				population.rank();
+			}
+		});
 
 		// Pause Button
 		TextButton btnWinOptStats = new TextButton("Stats", Assets.instance.skin, "small");
@@ -493,6 +515,25 @@ public class Play extends AbstractGameScreen {
 			}
 		});
 		mainTable.add(homeBtn).padRight(padding);
+		
+
+		// Reset Button
+		TextButton btnReset = new TextButton("Reset Q", Assets.instance.skin, "small");
+		mainTable.add(btnReset);
+		btnReset.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+
+				try {
+					if (player instanceof CrawlingCrate) {
+						((CrawlingCrate) player).initLearning();
+					}
+				}
+				catch (Exception ex) {
+					ex.printStackTrace();
+				}
+			}
+		});
 
 		// Manual Button
 		TextButton manualBtn = new TextButton("Manual", Assets.instance.skin, "small");
@@ -511,7 +552,9 @@ public class Play extends AbstractGameScreen {
 		btnLeader.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
-				changePlayer(findLeader());
+				player = findLeader();
+				population.selectPlayer(player);
+				changePlayer(player);
 			}
 		});
 
@@ -523,7 +566,17 @@ public class Play extends AbstractGameScreen {
 			public void changed(ChangeEvent event, Actor actor) {
 				showWindow(learningWindow, !learningWindow.isVisible());
 				event.handle();
-				// learnFrom(player);
+			}
+		});
+		
+		// Evolution window toggle button
+		TextButton btnEvolution = new TextButton("Evolution", Assets.instance.skin, "small");
+		mainTable.add(btnEvolution).padRight(padding);
+		btnEvolution.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				showWindow(evolutionWindow, !evolutionWindow.isVisible());
+				event.handle();
 			}
 		});
 
@@ -561,9 +614,21 @@ public class Play extends AbstractGameScreen {
 				GamePreferences.instance.save();
 			}
 		});
+		// Default
+		btn = new TextButton("Default Settings", Assets.instance.skin, "small");
+		btn.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				GamePreferences.instance.clear();
+				GamePreferences.instance.init();
+				GamePreferences.instance.load();
+				
+			}
+		});
+		mainTable.add(btn);
 
-		mainTable.padTop(25);
-		mainTable.padRight(25);
+//		mainTable.padTop(25);
+//		mainTable.padRight(25);
 		mainTable.right();
 		mainTable.bottom();
 
@@ -584,6 +649,15 @@ public class Play extends AbstractGameScreen {
 		}
 		learningWindow.bottom();
 		learningWindow.right();
+		
+		evolutionWindow = new EvolutionWindow(this, "Evolution", Assets.instance.skin);
+//		if (player != null) {
+			evolutionWindow.init((CrawlingCrate) player);
+//		}
+//		evolutionWindow.bottom();
+//		evolutionWindow.right();
+		evolutionWindow.center();
+		evolutionWindow.setPosition(0, 200);
 
 		physicalWindow = new PhysicalWindow("Physical", Assets.instance.skin);
 		if (player != null) {
@@ -602,6 +676,7 @@ public class Play extends AbstractGameScreen {
 		stage.addActor(mainTable);
 		stage.addActor(winOptions);
 		stage.addActor(winCreate);
+		stage.addActor(evolutionWindow);
 		stage.addActor(learningWindow);
 		stage.addActor(physicalWindow);
 
@@ -737,6 +812,7 @@ public class Play extends AbstractGameScreen {
 			if (player instanceof CrawlingCrate) {
 				learningWindow.init((CrawlingCrate) player);
 				physicalWindow.init((CrawlingCrate) player);
+				evolutionWindow.init((CrawlingCrate) player);
 			}
 		} catch (Exception ex) {
 			ex.printStackTrace();
@@ -752,6 +828,133 @@ public class Play extends AbstractGameScreen {
 
 		population.nextPlayer();
 
+	}
+
+	public void finishLine(Player player) {
+		this.player = player;
+
+		// Rank the population
+		population.rank();
+
+		population.selectPlayer(player);
+		changePlayer(player);
+
+
+		player.sendHome();
+
+		// If natural selection is on
+		if (isNaturalSelection) {
+			// CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) player);
+
+			// Child learn from parent
+			// child.learnFromLeader(player, 0.95f);
+
+			// Save the current population size
+			int populationSize = population.allPlayers.size();
+			System.out.println("populationSize = " + populationSize);
+
+			// Send the top three home
+			for (int index = 0; index < 3; index++) {
+				population.allPlayers.get(index).sendHome();
+			}
+			System.out.println("populationSize = " + populationSize);
+
+			// Remove rest of population
+//			for (int index = 3; index < populationSize; index++) {
+//				population.removePlayer(population.allPlayers.get(index));
+//			}
+			System.out.println("populationSize = " + populationSize);
+
+			// Remove all others
+//			 soleSurvivor(player);
+
+			CrawlingCrate second = (CrawlingCrate) population.allPlayers.get(1);
+			CrawlingCrate third = (CrawlingCrate) population.allPlayers.get(2);
+
+			ArrayList<BasicPlayer> removeQueue = new ArrayList<>();
+			for (BasicPlayer otherPlayer : population.allPlayers) {
+				if (player == otherPlayer || otherPlayer == second || otherPlayer == third ) {
+					continue;
+				}
+
+				removeQueue.add(otherPlayer);
+
+			}
+			for (BasicPlayer otherPlayer : removeQueue) {
+				population.removePlayer(otherPlayer);
+			}
+			System.out.println("populationSize = " + populationSize);
+
+			System.out.println("Make 30 childrend = " + populationSize);
+			for (int index = 0; index <= 30; index++) {
+				CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) player);
+
+				// Child learn from parent
+				child.learnFromLeader(player, 0.95f);
+			}
+			for (int index = 0; index <= 18; index++) {
+				CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) second);
+
+				// Child learn from parent
+				child.learnFromLeader(second, 0.95f);
+			}
+			for (int index = 0; index <= 10; index++) {
+				CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) third);
+
+				// Child learn from parent
+				child.learnFromLeader(third, 0.95f);
+			}
+			
+		}
+		
+
+		// CrawlingCrate second = (CrawlingCrate) population.allPlayers.get(1);
+		// for (int index = 0; index <= populationSize * .25f + 1; index++) {
+		// CrawlingCrate child = population.spawnCrawlingCrate(second);
+		// // Child learn from parent
+		// child.learnFromLeader(second, 0.95f);
+		// }
+
+		// CrawlingCrate third = (CrawlingCrate) population.allPlayers.get(2);
+		// for (int index = 0; index <= populationSize * .25f + 1; index++) {
+		// CrawlingCrate child = population.spawnCrawlingCrate(third);
+		// // Child learn from parent
+		// child.learnFromLeader(third, 0.95f);
+		// }
+		// }
+		// child.sendHome();
+
+		// All learn from player
+		// for (BasicPlayer otherPlayer : population.allPlayers) {
+		// if (otherPlayer instanceof CrawlingCrate) {
+		// ((CrawlingCrate)(otherPlayer)).learnFromLeader(otherPlayer, 0.9f);
+		// }
+		// }
+
+	}
+
+	// Remove all players except one
+	public void soleSurvivor(Player player) {
+		this.player = player;
+
+		ArrayList<BasicPlayer> removeQueue = new ArrayList<>();
+		for (BasicPlayer otherPlayer : population.allPlayers) {
+			if (player == otherPlayer) {
+				continue;
+			}
+
+			// With some small probability let them survive
+			if (Math.random() > 0.98f) {
+				otherPlayer.sendHome();
+				continue;
+			}
+
+			removeQueue.add(otherPlayer);
+
+		}
+		for (BasicPlayer otherPlayer : removeQueue) {
+			population.removePlayer(otherPlayer);
+		}
 	}
 
 	@Override

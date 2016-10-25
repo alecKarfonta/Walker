@@ -44,7 +44,7 @@ public class PhysicalWindow extends Window {
 		// Arm Speed Slider
 		tbl.add(new Label("Arm Speed: ", Assets.instance.skin));
 		tbl.add(new Label("0.01", Assets.instance.skin));
-		final Slider sldArmSpeed = new Slider(0.01f, 4.0f, 0.01f, false, Assets.instance.skin);
+		final Slider sldArmSpeed = new Slider(0.01f, 4.0f, 0.001f, false, Assets.instance.skin);
 		sldArmSpeed.setValue(player.getArmSpeed());
 		sldArmSpeed.addListener(new ChangeListener() {
 			@Override
@@ -60,7 +60,7 @@ public class PhysicalWindow extends Window {
 		// Wrist Speed Slider
 		tbl.add(new Label("Wrist Speed: ", Assets.instance.skin));
 		tbl.add(new Label("0.01", Assets.instance.skin));
-		final Slider sldWristSpeed = new Slider(0.01f, 4.0f, 0.01f, false, Assets.instance.skin);
+		final Slider sldWristSpeed = new Slider(0.01f, 4.0f, 0.001f, false, Assets.instance.skin);
 		sldWristSpeed.setValue(player.getWristSpeed());
 		sldWristSpeed.addListener(new ChangeListener() {
 			@Override
@@ -107,23 +107,23 @@ public class PhysicalWindow extends Window {
 
 		
 		// Gravity slide
-		tbl.add(new Label("Gravity: ", Assets.instance.skin));
-		tbl.add(new Label("-3", Assets.instance.skin));
-		final Slider sldGravity = new Slider(-3, 3, .2f, false,
-				Assets.instance.skin);
-		sldGravity.setValue(GamePreferences.instance.gravity);
-		sldGravity.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				GamePreferences.instance.gravity = ((Slider)actor).getValue();
-				for (Body body : player.getBodies()) {
-					body.setGravityScale(-((Slider)actor).getValue());
-				}
-			}
-		});
-		tbl.add(sldGravity).width(slideWidth);
-		tbl.add(new Label("3", Assets.instance.skin));
-		tbl.row();
+//		tbl.add(new Label("Gravity: ", Assets.instance.skin));
+//		tbl.add(new Label("-3", Assets.instance.skin));
+//		final Slider sldGravity = new Slider(-3, 3, 1f, false,
+//				Assets.instance.skin);
+//		sldGravity.setValue(GamePreferences.instance.gravity);
+//		sldGravity.addListener(new ChangeListener() {
+//			@Override
+//			public void changed(ChangeEvent event, Actor actor) {
+//				GamePreferences.instance.gravity = ((Slider)actor).getValue();
+//				for (Body body : player.getBodies()) {
+//					body.setGravityScale(-((Slider)actor).getValue());
+//				}
+//			}
+//		});
+//		tbl.add(sldGravity).width(slideWidth);
+//		tbl.add(new Label("3", Assets.instance.skin));
+//		tbl.row();
 
 		// Add default menu
 		this.add(tbl);
