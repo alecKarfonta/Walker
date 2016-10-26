@@ -3,7 +3,7 @@ Description
 
 
 Project Details
-	The project is written in Java and depends heavily on Libgdx and Box2d. Libgdx is a game development framework meant for building cross-platform games. Box2d is a popular physics engine. Like any Libgdx application there are several different projects. The root project simple called Walker contains metadata for the application. Walker-Core contains the logic of the application. Walker-Android is the Android launcher but also holds the resources for all platforms in the assets folder. Walker-Desktop is the launcher for PCs (Mac, Linux), and should have a link to the assets folder in the Android project. This is the project you will want to export for an exutable jar.
+	The project is written in Java and depends heavily on Libgdx and Box2d. Libgdx is a game development framework meant for building cross-platform games. Box2d is a popular physics engine. Like any Libgdx application there are several different projects. The root project, simply called Walker, contains metadata for the application. Walker-Core contains the logic. Walker-Android is the Android launcher but also holds the resources for all platforms in the assets folder. Walker-Desktop is the launcher for PCs (Mac, Linux), and should have a link to the assets folder in the Android project. This is the project you will want to export for an exutable jar.
 
 
 Import
@@ -14,6 +14,8 @@ Documentation (or lack there of)
 
 Thanks for checking this out. I would appreciate any suggestions or contributions. Have fun.
 
+Demo Videos:
+https://www.youtube.com/watch?v=eLz44zbX7eg&list=PLurQzF05Vl07U8HYvq45MQIaAsCh2vieP&index=5
 
 
 Interface Quick Guide
