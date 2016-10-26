@@ -7,7 +7,7 @@ Project Details
 
 
 Import
-	I would recommend using Eclipse. This is a Gradle project. So import as a Gradle project, go to the root folder with all of the projects and hit 'build Gradle project'. Then select the projects you want to import, you will need at least the meta project, -Core, -Android, and -Desktop. See the Libgdx getting started guide for more information. 
+	I would recommend using Eclipse. This is a Gradle project. So import as a Gradle project, go to the root folder with all of the projects and hit 'build'. Then select the projects you want to import, you will need at least the meta project, -Core, -Android, and -Desktop. See the Libgdx getting started guide for more information. 
 
 Documentation (or lack there of)
 	You might notice there is not much documentation. This is mostly experiemtal code that is contiually being replaced so I did not take the time to write proper class and method descriptions. The comments are also sparse and often wrong. I did try to make very verbose variable names. Also I use simple, consise lines that only do one thing at a time. 
