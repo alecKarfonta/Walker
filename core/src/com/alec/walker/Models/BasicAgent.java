@@ -67,7 +67,7 @@ public class BasicAgent extends BasicPlayer implements AbstractAgent {
 		futureDiscount = GamePreferences.instance.futureDiscount;
 		explorationBonus = GamePreferences.instance.explorationBonus;
 
-		memoryCount = 7;
+		memoryCount = 15;
 		previousActions = EvictingQueue.create(memoryCount);
 		previousStates = EvictingQueue.create(memoryCount);
 		previousValues = EvictingQueue.create(memoryCount);

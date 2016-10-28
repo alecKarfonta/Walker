@@ -94,6 +94,7 @@ public class CrawlingCrate extends BasicAgent {
 	// Q-Values
 	public float[][][]			QValues;
 	public int[][][]			SACounts;
+	public int					stateFeatureCount;
 	private int					previousArmAngle, previousWristAngle;
 	private float				previousReward, previousExplorationValue;
 	private float				oldValue, newValue;
@@ -104,9 +105,9 @@ public class CrawlingCrate extends BasicAgent {
 	public int					finishLine;
 
 	// State is each state property
-	private float[]				state;
+	public float[]				state;
 	// Save a weight for each feature
-	private float[]				weights;
+	public float[]				weights;
 	private float[]				previousState;
 
 	// QFunction Weights
@@ -123,6 +124,8 @@ public class CrawlingCrate extends BasicAgent {
 
 		rank = 0;
 		finishLine = 1500;
+		stateFeatureCount = 4;
+		actionCount = 6;
 	}
 
 	public void init(World world, float x, float y) {
@@ -241,6 +244,9 @@ public class CrawlingCrate extends BasicAgent {
 		this.armWidth = armWidth;
 		this.armRange = armRange;
 		this.armSpeed = armSpeed;
+		// No limit
+		// this.armRange = 360;
+		// this.wristRange = 360;
 		this.wristSpeed = wristSpeed;
 		this.armTorque = armTorque;
 		this.wristRange = wristRange;
@@ -276,8 +282,8 @@ public class CrawlingCrate extends BasicAgent {
 		this.speed = 0;
 		this.speedDecay = 0.2f;
 		acceleration = 0;
-		state = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-		previousState = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,  0.0f, 0.0f};
+		state = new float[stateFeatureCount + actionCount + 1];
+		previousState = new float[stateFeatureCount + actionCount + 1];
 
 		initLearning();
 
@@ -495,8 +501,8 @@ public class CrawlingCrate extends BasicAgent {
 		}
 
 		// Init Q-Function weights
-		// Calculate number of weights by adding number of state features and actions
-		int weightCount = state.length + 1 + actionCount;
+		// Calculate number of weights by adding number of state features and actions, plus 1 for the bias
+		int weightCount = state.length;
 		weights = new float[weightCount];
 
 		// For each weight
@@ -562,34 +568,16 @@ public class CrawlingCrate extends BasicAgent {
 	}
 
 	public void QFunctionUpdate(float delta) {
-		// Get the immediate reward
-		float reward = getReward();
-
-		// Get the current state [armAngle, wristAngle]
-		float armAngle = Math.round(
-				Math.toDegrees(
-						armJoint.getJointAngle()
-						)
-				);
-		armAngle = MathUtils.clamp(armAngle, 0, armRange);
-
-		float wristAngle = (int) Math.round(
-				Math.toDegrees(
-						wristJoint.getJointAngle())
-				);
-		wristAngle = MathUtils.clamp(wristAngle, 0, wristRange);
-
-		// Convert angle to [0.0-1.0] where 1.0 is the max angle
-		armAngle = MyMath.convertRanges((float) (armAngle), 0.0f, (float) (armRange), 0.0f, 1.0f);
-		wristAngle = MyMath.convertRanges((float) (wristAngle), 0.0f, (float) (wristRange), 0.0f,
-				1.0f);
-
-		// Store state vector, where the action is represented by a one-hot
-		state = new float[] { armAngle, wristAngle, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		// Save previous state
+		previousState = new float[] { 
+				previousState[0], previousState[1], previousState[2], previousState[3], // State features
+				0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, // Actions 
+				1.0f // Bias
+				};
 		// Set previous action index
-		state[previousAction + 2] = 1;
+		previousState[previousAction + stateFeatureCount] = 1;
 
-		// Calculate the expected reward
+		// Calculate the expected reward from the previous state and action
 		float expectedReward = 0;
 
 		// For each state feature and action
@@ -597,17 +585,75 @@ public class CrawlingCrate extends BasicAgent {
 			// Add the feature value times the weight to the sum
 			expectedReward += previousState[x] * weights[x];
 		}
-
-		// Calculate difference of expected and actual reward
-		float expectedRewardDelta = reward - expectedReward;
 		// Save old value for display
 		oldValue = expectedReward;
 
-		// Update weights
-		for (int x = 0; x < previousState.length; x++) {
-			weights[x] = learningRate * expectedRewardDelta * previousState[x];
+		// Get the immediate reward
+		float reward = getReward();
+
+		// Get the current state [armAngle, wristAngle]
+		float armAngle = Math.round(
+				Math.abs(
+						Math.toDegrees(
+								armJoint.getJointAngle()
+								)
+						) % 360
+				);
+		// armAngle = MathUtils.clamp(armAngle, 0, armRange);
+
+		float wristAngle = (int) Math.round(
+				Math.abs(
+						Math.toDegrees(
+								wristJoint.getJointAngle())
+						) % 360
+				);
+		// wristAngle = MathUtils.clamp(wristAngle, 0, wristRange);
+
+		// Convert angle to [0.0-1.0] where 1.0 is the max angle
+		armAngle = MyMath.convertRanges((float) (armAngle), 0.0f, (float) (360), 0.0f, 1.0f);
+		wristAngle = MyMath.convertRanges((float) (wristAngle), 0.0f, (float) (360), 0.0f, 1.0f);
+
+		// Get the speed of each motor
+		float armMotorSpeed = armJoint.getJointSpeed();
+		float wristMotorSpeed = wristJoint.getJointSpeed();
+
+		// find max value action from the current state, used in the Q update for the previous state
+		int maxActionIndex = 0;
+		float maxActionValue = Float.MIN_VALUE;
+
+		// For each action
+		for (int x = 0; x < actionCount; x++) {
+			// Reset state
+			float[] actionState = new float[] { 
+					armAngle, wristAngle, armMotorSpeed, wristMotorSpeed, 
+					0.0f, 0.0f,0.0f, 0.0f, 0.0f, 0.0f, 
+					1.0f 
+					};
+			// Set action
+			actionState[x + stateFeatureCount] = 1;
+			// Calculate expected reward for action
+			float actionReward = 0;
+			for (int y = 0; y < state.length; y++) {
+				actionReward += actionState[y] * weights[y];
+			}
+			// If expected action reward greater than max so far
+			if (actionReward > maxActionValue) {
+				// Save max action index and value
+				maxActionIndex = x;
+				maxActionValue = actionReward;
+			}
 		}
 
+		// Calculate difference between the actual Q value (immediate reward plus max action reward)
+		// and the Q function value
+		float qDifference = (reward + (futureDiscount * maxActionValue)) - expectedReward;
+
+		// Update weights
+		for (int x = 0; x < previousState.length; x++) {
+			weights[x] = weights[x] + (learningRate * qDifference * previousState[x]);
+		}
+
+		// Recalculate expected reward with new weights, to display the delta
 		float newExpectedReward = 0;
 		// For each state feature and action
 		for (int x = 0; x < previousState.length; x++) {
@@ -617,45 +663,29 @@ public class CrawlingCrate extends BasicAgent {
 		// Calculate new value
 		newValue = newExpectedReward;
 
-		// find max value action
-		int maxActionIndex = 0;
-		float maxActionValue = 0;
-
-		// For each action
-		for (int x = 0; x < actionCount; x++) {
-			// Reset state
-			state = new float[] { armAngle, wristAngle, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-			// Set action
-			state[x + 2] = 1;
-			// Calculate expected reward for action
-			float expectedActionReward = 0;
-			for (int y = 0; y < state.length; y++) {
-				expectedActionReward += state[y] * weights[y];
-			}
-			// If expected action reward greater than max so far
-			if (expectedActionReward > maxActionValue) {
-				// Save max action index and value
-				maxActionIndex = x;
-				maxActionValue = expectedActionReward;
-			}
-		}
-
+		// Get the next action as either the max action or a random action
 		int nextAction = maxActionIndex;
-		// Check if random action
+		// If randomness is greater than a random roll
 		if (randomness > Math.random()) {
+			// Next action is random
 			nextAction = (int) (actionCount * Math.random());
 		}
-
-		// Reset state
-		state = new float[] { armAngle, wristAngle, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-		// Set action
-		state[nextAction + 2] = 1;
 
 		// If is not manual control
 		if (!isManualControl) {
 			// Take action
 			act(nextAction);
+		} else {
+
 		}
+		
+		float[] state = new float[] { 
+				armAngle, wristAngle, armMotorSpeed, wristMotorSpeed, 
+				0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 
+				1.0f 
+				};
+		// Set action
+		state[nextAction + stateFeatureCount] = 1;
 
 		// If is best reward so far
 		if (reward > bestValue) {
@@ -670,7 +700,6 @@ public class CrawlingCrate extends BasicAgent {
 		// Save current value as previous for next step
 		previousValue = newValue;
 		previousReward = reward;
-		previousAction = nextAction;
 		previousState = state.clone();
 	}
 
@@ -705,6 +734,7 @@ public class CrawlingCrate extends BasicAgent {
 		// Flip reward
 		// reward = -reward;
 		// float reward = xVelocity;
+		previousSpeed = speed;
 		return reward;
 	}
 
@@ -925,6 +955,7 @@ public class CrawlingCrate extends BasicAgent {
 			// QUpdate(delta);
 			QFunctionUpdate(delta);
 
+			// If past the finish line
 			if (body.getPosition().x >= finishLine) {
 				// Push finish line back
 				// finishLine = finishLine + (int)(finishLine * .25f);
@@ -936,40 +967,44 @@ public class CrawlingCrate extends BasicAgent {
 				sendHome();
 			}
 
+			float armAngle = (float) Math.toDegrees(armJoint.getJointAngle());
+
+			float wristAngle = (float) Math.toDegrees(wristJoint.getJointAngle());
+			
 			// If outside range
-			// if (previousWristAngle <= 0) {
-			// if (wristJoint.getMotorSpeed() < 0) {
-			// // System.out.println("Error: wrist angle below 0");
-			// wristJoint.enableMotor(true);
-			// wristJoint.setMotorSpeed(wristSpeed * .01f);
-			// return;
-			// }
-			// }
-			// if (previousWristAngle >= QValues[0].length) {
-			// if (wristJoint.getMotorSpeed() > 0) {
-			// // System.out.println("Error: wrist angle above range");
-			// wristJoint.enableMotor(true);
-			// wristJoint.setMotorSpeed(-wristSpeed * .01f);
-			// return;
-			// }
-			//
-			// }
-			// if (previousArmAngle <= 0) {
-			// if (armJoint.getMotorSpeed() < 0) {
-			// // System.out.println("Error: arm angle below 0");
-			// armJoint.enableMotor(true);
-			// armJoint.setMotorSpeed(armSpeed * .01f);
-			// return;
-			// }
-			// }
-			// if (previousArmAngle >= QValues.length -1) {
-			// if (armJoint.getMotorSpeed() > 0) {
-			// // System.out.println("Error: arm angle above range");
-			// armJoint.enableMotor(true);
-			// armJoint.setMotorSpeed(-armSpeed * .01f);
-			// return;
-			// }
-			// }
+			if (wristAngle <= 0) {
+				if (wristJoint.getMotorSpeed() < 0) {
+					// System.out.println("Error: wrist angle below 0");
+					wristJoint.enableMotor(true);
+					wristJoint.setMotorSpeed(wristSpeed * .01f);
+					return;
+				}
+			}
+			if (wristAngle >= wristRange) {
+				if (wristJoint.getMotorSpeed() > 0) {
+					// System.out.println("Error: wrist angle above range");
+					wristJoint.enableMotor(true);
+					wristJoint.setMotorSpeed(-wristSpeed * .01f);
+					return;
+				}
+
+			}
+			if (armAngle <= 0) {
+				if (armJoint.getMotorSpeed() < 0) {
+					// System.out.println("Error: arm angle below 0");
+					armJoint.enableMotor(true);
+					armJoint.setMotorSpeed(armSpeed * .01f);
+					return;
+				}
+			}
+			if (armAngle >= armRange) {
+				if (armJoint.getMotorSpeed() > 0) {
+					// System.out.println("Error: arm angle above range");
+					armJoint.enableMotor(true);
+					armJoint.setMotorSpeed(-armSpeed * .01f);
+					return;
+				}
+			}
 
 		}
 
@@ -1198,25 +1233,16 @@ public class CrawlingCrate extends BasicAgent {
 	}
 
 	// LearnFromLeader(Player) - Move the Q-Values toward Player's Q-Values, with learning rate
-	public void learnFromLeader(Player leader, float learningRate) {
+	public void learnFromLeader(Player leader, float transferRate) {
 
 		if (this.equals(leader) || this == leader) {
 			return;
 		}
 
-		// Transfer QTable
-		for (int x = 0; x < QValues.length; x++) {
-			for (int y = 0; y < QValues[x].length; y++) {
-				for (int z = 0; z < QValues[x][y].length; z++) {
-					// update Q-Value, reduced by learning rate
-					QValues[x][y][z] = ((1 - learningRate) * QValues[x][y][z])
-							+ (learningRate * ((CrawlingCrate) leader).QValues[x][y][z]);
-					// throw in a bit of randomness
-					// QValues[x][y][z] += (Math.random() > 0.5f ? -0.001 : 0.001);
-
-					// SACounts[x][y][z] += (((CrawlingCrate) leader)).SACounts[x][y][z];
-				}
-			}
+		// Update weights
+		for (int x = 0; x < weights.length; x++) {
+			weights[x] = ((1 - transferRate) * weights[x])
+					+ (transferRate * ((CrawlingCrate) leader).weights[x]);
 		}
 	}
 
@@ -1407,13 +1433,13 @@ public class CrawlingCrate extends BasicAgent {
 		// System.out.println("keyUp()");
 		switch (keycode) {
 			case Keys.DOWN:
-				if (armJoint.getMotorSpeed() > 0) {
+				if (armJoint.getMotorSpeed() < 0) {
 					armJoint.enableMotor(holdMotors);
 					armJoint.setMotorSpeed(0);
 				}
 				break;
 			case Keys.UP:
-				if (armJoint.getMotorSpeed() < 0) {
+				if (armJoint.getMotorSpeed() > 0) {
 					armJoint.enableMotor(holdMotors);
 					armJoint.setMotorSpeed(0);
 				}
@@ -1522,23 +1548,23 @@ public class CrawlingCrate extends BasicAgent {
 		// stats.add("Visited " + SACounts[previousArmAngle][previousWristAngle][previousAction]);
 		if (previousState != null) {
 
-			stats.add("State:   [" + String.format("%+1.2f", previousState[0]) + ", "
-					+ String.format("%+1.2f", previousState[1]) + ", " +
-					String.format("%+1.2f", previousState[2]) + ", "
-					+ String.format("%+1.2f", previousState[3])
-					+ ", " + String.format("%+1.2f", previousState[4]) + ", " +
-					String.format("%+1.2f", previousState[5]) + ", " +
-					String.format("%+1.2f", previousState[6]) + ", " +
-					String.format("%+1.2f", previousState[7]) 
-					);
+			StringBuilder stateString = new StringBuilder();
+			stateString.append("State : ");
+			for (int x = 0; x < previousState.length; x++) {
+				stateString.append(String.format("%+1.2f", previousState[x]));
+				stateString.append("|");
+			}
+			stats.add(stateString.toString());
 		}
-		stats.add("Weights: [" + String.format("%+1.2f", weights[0]) + ", "
-				+ String.format("%+1.2f", weights[1]) + ", " +
-				String.format("%+1.2f", weights[2]) + ", " + String.format("%+1.2f", weights[3])
-				+ ", " + String.format("%+1.2f", weights[4]) + ", " +
-				String.format("%+1.2f", weights[5]) + ", " + String.format("%+1.2f", weights[6])
-				+ ", " + String.format("%+1.2f", weights[7]));
 
+		StringBuilder weightString = new StringBuilder();
+		weightString.append("Weight :");
+		for (int x = 0; x < weights.length; x++) {
+			weightString.append(String.format("%+1.2f", weights[x]));
+			weightString.append("|");
+		}
+		stats.add(weightString.toString());
+		
 		stats.add("Actions:" + previousActions.toString());
 		// stats.add("QValues:" + previousValues.toString());
 		// stats.add("Old QValue:" + String.format("%+1.6f", oldValue));

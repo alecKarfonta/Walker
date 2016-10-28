@@ -767,7 +767,7 @@ public class Play extends AbstractGameScreen {
 				continue;
 			}
 			try {
-				((CrawlingCrate) player).learnFromLeader(teacher, 0.9f);
+				((CrawlingCrate) player).learnFromLeader(teacher, (1 - GamePreferences.instance.forgetRate));
 			} catch (Exception ex) {
 				ex.printStackTrace();
 			}
