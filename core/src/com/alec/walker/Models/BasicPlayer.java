@@ -20,7 +20,7 @@ public class BasicPlayer extends InputAdapter implements Player {
 	public void sendHome() {
 		System.out.println("sendHome()");
 		for (Body body : getBodies()) {
-			body.setTransform(new Vector2(0, 0), 0);
+			body.setTransform(new Vector2(0, 15), (float) Math.toRadians(0));
 			body.setLinearVelocity(new Vector2(0, 0));
 		}
 

@@ -139,7 +139,8 @@ public class WorldController {
 		fixtureDef.shape = shape;
 		world.createBody(bodyDef).createFixture(fixtureDef);
 
-		bodyDef.position.set(0, groundHeight + 60);
+		// Make the ceiling
+		bodyDef.position.set(0, groundHeight + 120);
 		// clear the shape for the next chain
 		shape = new ChainShape();
 

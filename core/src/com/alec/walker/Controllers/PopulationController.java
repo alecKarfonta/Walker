@@ -59,10 +59,8 @@ public class PopulationController {
 				}
 			}
 		}
-
 		last_names = new ArrayList<String>();
 		csvFile = "last_names.csv";
-
 		try {
 			br = new BufferedReader(new FileReader(csvFile));
 			while ((line = br.readLine()) != null) {
@@ -107,18 +105,17 @@ public class PopulationController {
 		        return 0;
 		    }
 		});
+		// Reindex
 		for (int index = 0; index < allPlayers.size(); index++) {
 			((CrawlingCrate)(allPlayers.get(index))).rank = index;
 		}
 	}
 
 	public void init() {
-
 		selectedPlayer = allPlayers.get(0);
 	}
 
 	public void update(float delta) {
-
 		age = age.plus((long) (delta * 1000));
 	}
 
@@ -140,12 +137,11 @@ public class PopulationController {
 		return worldAge;
 	}
 
-	public BasicAgent makeCrawlingCrate() {
+	public CrawlingCrate makeCrawlingCrate() {
 
 		CrawlingCrate crate = new CrawlingCrate(this.play);
 		crate.init(world.world,
-				(0 * (allPlayers.size() + 1)), world.groundHeight + 10, // (x,y)
-				8, 4);
+				(0 * (allPlayers.size() + 1)), world.groundHeight + 25);
 		
 		// Select a first last name randomly
 		crate.name = first_names.get(new Random().nextInt(first_names.size())) + " " + last_names.get(new Random().nextInt(last_names.size()));
@@ -154,7 +150,7 @@ public class PopulationController {
 
 		selectedPlayer = crate;
 
-		return (BasicAgent) selectedPlayer;
+		return (CrawlingCrate) selectedPlayer;
 	}
 
 	public void cloneCrawlingCrate() {

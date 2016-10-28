@@ -81,6 +81,23 @@ public class EvolutionWindow extends Window {
 		});
 		tbl.add(sldFinishLine).width(slideWidth);
 		tbl.add(new Label("10k", Assets.instance.skin));
+		tbl.row();
+
+		// Forget rate slide
+		tbl.add(new Label("Forget Rate: ", Assets.instance.skin));
+		tbl.add(new Label("0", Assets.instance.skin));
+		Slider sldForgetRate = new Slider(0.0f, 0.99f, 0.01f, false, Assets.instance.skin);
+		sldForgetRate.setValue(GamePreferences.instance.forgetRate);
+		sldForgetRate.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				float value = (float)((Slider) actor).getValue();
+				System.out.println("forgetRate = " + Float.toString(value));
+				GamePreferences.instance.forgetRate = value;
+			}
+		});
+		tbl.add(sldForgetRate).width(slideWidth);
+		tbl.add(new Label(".99", Assets.instance.skin));
 
 		tbl.row();
 

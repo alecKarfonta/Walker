@@ -44,6 +44,7 @@ public class GamePreferences {
 	public float					impatience;
 	public float					speedValueWeight;
 	public float					mutationRate;
+	public float					forgetRate;
 	
 	
 	// UI 
@@ -98,6 +99,7 @@ public class GamePreferences {
 		impatience = prefs.getFloat("impatience", 0.0001f);
 		speedValueWeight = prefs.getFloat("speedValueWeight", 1f);
 		mutationRate = prefs.getFloat("mutationRate", 0.01f);
+		forgetRate = prefs.getFloat("forgetRate", 0.10f);
 		
 		// Game Properties
 		isShowingStats = prefs.getBoolean("isShowingStats", false);
@@ -117,8 +119,8 @@ public class GamePreferences {
 		slideWidth = prefs.getInteger("slideWidth", 400);
 	}
 
-	// Save using reflection: each property is saved using to appropriate
-	// write method based on it's name and type
+	// Save using reflection: each property is saved using the appropriate
+	// write method based on it's name and type. 
 	public void save() {
 		System.out.println("GamePrefences.save()");
 

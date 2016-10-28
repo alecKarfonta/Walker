@@ -28,6 +28,7 @@ import com.alec.walker.Views.Windows.PhysicalWindow;
 import com.alec.walker.Views.Windows.WorldOptionsWindow;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
+import com.badlogic.gdx.Game;
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.InputMultiplexer;
 import com.badlogic.gdx.InputProcessor;
@@ -116,7 +117,7 @@ public class Play extends AbstractGameScreen {
 		boolean drawAABBs = false;
 		boolean drawInactiveBodies = true;
 		boolean drawVelocities = false;
-		boolean drawContacts = true;
+		boolean drawContacts = false;
 		debugRenderer = new Box2DDebugRenderer(drawBodies, drawJoints, drawAABBs,
 				drawInactiveBodies, drawVelocities, drawContacts);
 
@@ -547,6 +548,7 @@ public class Play extends AbstractGameScreen {
 		});
 		mainTable.add(manualBtn).padRight(padding);
 
+		// Leader button
 		TextButton btnLeader = new TextButton("Leader", Assets.instance.skin, "small");
 		mainTable.add(btnLeader).padRight(padding);
 		btnLeader.addListener(new ChangeListener() {
@@ -798,7 +800,10 @@ public class Play extends AbstractGameScreen {
 	}
 
 	public void changePlayer(Player player) {
-		// System.out.println("changePlayer()");
+		 System.out.println("changePlayer()");
+		 if (player == null) {
+			 return;
+		 }
 		this.player = player;
 
 		// handle the input
@@ -838,7 +843,6 @@ public class Play extends AbstractGameScreen {
 
 		population.selectPlayer(player);
 		changePlayer(player);
-
 
 		player.sendHome();
 
@@ -890,19 +894,19 @@ public class Play extends AbstractGameScreen {
 				CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) player);
 
 				// Child learn from parent
-				child.learnFromLeader(player, 0.95f);
+				child.learnFromLeader(player, (1.0f - GamePreferences.instance.forgetRate));
 			}
 			for (int index = 0; index <= 18; index++) {
 				CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) second);
 
 				// Child learn from parent
-				child.learnFromLeader(second, 0.95f);
+				child.learnFromLeader(second, (1.0f - GamePreferences.instance.forgetRate));
 			}
 			for (int index = 0; index <= 10; index++) {
 				CrawlingCrate child = population.spawnCrawlingCrate((CrawlingCrate) third);
 
 				// Child learn from parent
-				child.learnFromLeader(third, 0.95f);
+				child.learnFromLeader(third, (1.0f - GamePreferences.instance.forgetRate));
 			}
 			
 		}
