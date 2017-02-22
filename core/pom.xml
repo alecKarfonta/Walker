@@ -55,10 +55,66 @@
 		</dependency>
 		<!-- https://mvnrepository.com/artifact/com.google.guava/guava -->
 		<dependency>
-		    <groupId>com.google.guava</groupId>
-		    <artifactId>guava</artifactId>
-		    <version>19.0</version>
+			<groupId>com.google.guava</groupId>
+			<artifactId>guava</artifactId>
+			<version>19.0</version>
 		</dependency>
+
+		<!-- https://mvnrepository.com/artifact/org.deeplearning4j/deeplearning4j-core -->
+		<dependency>
+			<groupId>org.deeplearning4j</groupId>
+			<artifactId>deeplearning4j-core</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+
+
+
+		<!-- RL4J -->
+		<!-- https://mvnrepository.com/artifact/org.deeplearning4j/rl4j-api -->
+		<dependency>
+			<groupId>org.deeplearning4j</groupId>
+			<artifactId>rl4j-api</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+
+		<!-- https://mvnrepository.com/artifact/org.deeplearning4j/rl4j-gym -->
+		<dependency>
+			<groupId>org.deeplearning4j</groupId>
+			<artifactId>rl4j-gym</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+		<!-- https://mvnrepository.com/artifact/org.deeplearning4j/rl4j-core -->
+		<dependency>
+			<groupId>org.deeplearning4j</groupId>
+			<artifactId>rl4j-core</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+
+		<!-- https://mvnrepository.com/artifact/org.deeplearning4j/rl4j -->
+<!-- 		<dependency> -->
+<!-- 			<groupId>org.deeplearning4j</groupId> -->
+<!-- 			<artifactId>rl4j</artifactId> -->
+<!-- 			<version>0.6.0</version> -->
+<!-- 		</dependency> -->
+
+
+
+		<!-- ND4J -->
+		<!-- https://mvnrepository.com/artifact/org.nd4j/nd4j-api -->
+		<dependency>
+			<groupId>org.nd4j</groupId>
+			<artifactId>nd4j-api</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+
+		<!-- https://mvnrepository.com/artifact/org.nd4j/nd4j-common -->
+		<dependency>
+			<groupId>org.nd4j</groupId>
+			<artifactId>nd4j-common</artifactId>
+			<version>0.6.0</version>
+		</dependency>
+
+
 
 
 

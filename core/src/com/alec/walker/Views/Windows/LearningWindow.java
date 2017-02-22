@@ -20,6 +20,7 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 
 public class LearningWindow extends Window {
 
@@ -39,6 +40,7 @@ public class LearningWindow extends Window {
 
 	public void init(final BasicAgent agent) {
 
+		
 		// Clear old
 		this.removeActor(tbl);
 
@@ -248,6 +250,16 @@ public class LearningWindow extends Window {
 		});
 		tbl.add(chbxIsLearning);
 
+
+		// Save Button
+		TextButton btnSave = new TextButton("Save Q", Assets.instance.skin, "small");
+		tbl.add(btnSave).padRight(padding);
+		btnSave.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				((CrawlingCrate)agent).saveState();
+			}
+		});
 
 		tbl.row();
 

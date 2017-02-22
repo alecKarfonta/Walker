@@ -424,11 +424,6 @@ public class Car extends BasicAgent {
 		// TODO Auto-generated method stub
 		return 0;
 	}
-	@Override
-	public Table getPhysicalMenu(int slideWidth, int padding) {
-		// TODO Auto-generated method stub
-		return null;
-	}
 
 
 }

@@ -28,7 +28,7 @@ public class PopulationController {
 	private ArrayList<String>				first_names;
 	private ArrayList<String>				last_names;
 
-	public ArrayList<BasicPlayer>	allPlayers	= new ArrayList<BasicPlayer>();
+	public ArrayList<CrawlingCrate>	allPlayers	= new ArrayList<CrawlingCrate>();
 
 	public PopulationController(Play play) {
 		this.play = play;
@@ -83,11 +83,11 @@ public class PopulationController {
 	
 	public void rank() {
 		// Rank population
-		Collections.sort(allPlayers, new Comparator<BasicPlayer>() {
+		Collections.sort(allPlayers, new Comparator<CrawlingCrate>() {
 		    @Override
-		    public int compare(BasicPlayer o1, BasicPlayer o2) {
-		    	float x1 = o1.getBody().getPosition().x;
-		    	float x2 = o2.getBody().getPosition().x;
+		    public int compare(CrawlingCrate o1, CrawlingCrate o2) {
+		    	float x1 = o1.body.getPosition().x;
+		    	float x2 = o2.body.getPosition().x;
 		    	
 		    	// Ascending
 		    	if (x1 < x2) {

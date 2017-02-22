@@ -42,11 +42,6 @@ public class BasicPlayer extends InputAdapter implements Player {
 	}
 
 
-	@Override
-	public Table getPhysicalMenu(int slideWidth, int padding) {
-		return null;
-	}
-	
 	
 
 

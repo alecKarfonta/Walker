@@ -19,7 +19,6 @@ public interface Player {
 	public void sendHome();
 
 
-	public Table getPhysicalMenu(int slideWidth, int padding);
 	
 
 }

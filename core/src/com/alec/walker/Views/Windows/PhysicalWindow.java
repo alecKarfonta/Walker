@@ -1,18 +1,14 @@
 package com.alec.walker.Views.Windows;
 
-import com.alec.Assets;
 import com.alec.walker.GamePreferences;
 import com.alec.walker.Models.CrawlingCrate;
-import com.badlogic.gdx.physics.box2d.Body;
-import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.alec.walker.Models.LeggedCrate;
+import com.alec.walker.Models.Player;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 
 public class PhysicalWindow extends Window {
 	
@@ -23,10 +19,9 @@ public class PhysicalWindow extends Window {
 		super(title, skin);
 	}
 
-	public void init(CrawlingCrate crate) {
-		final CrawlingCrate player = crate;
+	public void init(Player player) {
 		// Clear old
-		this.removeActor(tbl);
+		//this.removeActor(tbl);
 		
 		this.removeActor(playerTbl);
 
@@ -41,69 +36,7 @@ public class PhysicalWindow extends Window {
 		tbl.columnDefaults(2).padRight(padding);
 
 
-		// Arm Speed Slider
-		tbl.add(new Label("Arm Speed: ", Assets.instance.skin));
-		tbl.add(new Label("0.01", Assets.instance.skin));
-		final Slider sldArmSpeed = new Slider(0.01f, 4.0f, 0.001f, false, Assets.instance.skin);
-		sldArmSpeed.setValue(player.getArmSpeed());
-		sldArmSpeed.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				player.setArmSpeed(((Slider)actor).getValue());
-				GamePreferences.instance.armSpeed = player.getArmSpeed();
-			}
-		});
-		tbl.add(sldArmSpeed).width(slideWidth);
-		tbl.add(new Label("4", Assets.instance.skin));
-		tbl.row();
-
-		// Wrist Speed Slider
-		tbl.add(new Label("Wrist Speed: ", Assets.instance.skin));
-		tbl.add(new Label("0.01", Assets.instance.skin));
-		final Slider sldWristSpeed = new Slider(0.01f, 4.0f, 0.001f, false, Assets.instance.skin);
-		sldWristSpeed.setValue(player.getWristSpeed());
-		sldWristSpeed.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				player.setWristSpeed(((Slider)actor).getValue());
-				GamePreferences.instance.wristSpeed = player.getWristSpeed();
-			}
-		});
-		tbl.add(sldWristSpeed).width(slideWidth);
-		tbl.add(new Label("4", Assets.instance.skin));
-		tbl.row();
-
-		// Arm Torque Slider
-		tbl.add(new Label("Arm Torque: ", Assets.instance.skin));
-		tbl.add(new Label("1", Assets.instance.skin));
-		final Slider sldArmTorque = new Slider(1, 5000, 1, false, Assets.instance.skin);
-		sldArmTorque.setValue(player.getArmTorque());
-		sldArmTorque.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				player.setArmTorque(((Slider)actor).getValue());
-				GamePreferences.instance.armTorque = player.getArmTorque();
-			}
-		});
-		tbl.add(sldArmTorque).width(slideWidth);
-		tbl.add(new Label("5000", Assets.instance.skin));
-		tbl.row();
-
-		// Arm Torque Slider
-		tbl.add(new Label("Wrist Torque: ", Assets.instance.skin));
-		tbl.add(new Label("1", Assets.instance.skin));
-		final Slider sldWristTorque = new Slider(1, 5000, 1, false, Assets.instance.skin);
-		sldWristTorque.setValue(player.getWristTorque());
-		sldWristTorque.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				player.setWristTorque(((Slider)actor).getValue());
-				GamePreferences.instance.wristTorque = player.getWristTorque();
-			}
-		});
-		tbl.add(sldWristTorque).width(slideWidth);
-		tbl.add(new Label("5000", Assets.instance.skin));
-		tbl.row();
+		
 
 		
 		// Gravity slide
@@ -128,7 +61,13 @@ public class PhysicalWindow extends Window {
 		// Add default menu
 		this.add(tbl);
 		// Add player menu
-		playerTbl = player.getPhysicalMenu();
+		if (player instanceof CrawlingCrate) {
+			playerTbl = ((CrawlingCrate)player).getPhysicalMenu();
+		} else if (player instanceof LeggedCrate) {
+			playerTbl = ((LeggedCrate)player).getPhysicalMenu();
+			
+		}
+		
 		this.add(playerTbl).colspan(4);
 //		this.bottom();
 		this.right();

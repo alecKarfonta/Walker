@@ -150,7 +150,7 @@ public class WorldOptionsWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				boolean value = ((CheckBox)actor).isChecked();
-				play.setIsRendering(value);
+				play.isRendering = value;
 			}
 		});
 		tbl.add(chkIsRender);
@@ -163,7 +163,7 @@ public class WorldOptionsWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				boolean value = ((CheckBox)actor).isChecked();
-				play.setIsRenderingAll(value);
+				play.isRenderingAll = value;
 			}
 		});
 		tbl.add(chkIsRender);

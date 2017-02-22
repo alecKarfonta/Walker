@@ -63,37 +63,39 @@ public class EvolutionWindow extends Window {
 		tbl.add(sldMutationRate).width(slideWidth);
 		tbl.add(new Label(".5", Assets.instance.skin));
 		tbl.row();
-		
+
 		// Finish Line Slide
 		tbl.add(new Label("Finish Line: ", Assets.instance.skin));
 		tbl.add(new Label("100", Assets.instance.skin));
-		Slider sldFinishLine= new Slider(100, 10000, 100, false, Assets.instance.skin);
-		sldFinishLine.setValue(((CrawlingCrate)(agent)).finishLine);
-		sldFinishLine.addListener(new ChangeListener() {
-			@Override
-			public void changed(ChangeEvent event, Actor actor) {
-				int value = (int)((Slider) actor).getValue();
-				System.out.println("value = " + Float.toString(value));
-				for (BasicPlayer player : play.population.allPlayers) {
-					((CrawlingCrate)(player)).finishLine = value;
+		Slider sldFinishLine = new Slider(100, 10000, 100, false, Assets.instance.skin);
+		if (agent instanceof CrawlingCrate) {
+			sldFinishLine.setValue(((CrawlingCrate) (agent)).finishLine);
+			sldFinishLine.addListener(new ChangeListener() {
+				@Override
+				public void changed(ChangeEvent event, Actor actor) {
+					int value = (int) ((Slider) actor).getValue();
+					System.out.println("value = " + Float.toString(value));
+					for (BasicPlayer player : play.population.allPlayers) {
+						((CrawlingCrate) (player)).finishLine = value;
+					}
 				}
-			}
-		});
+			});
+		}
 		tbl.add(sldFinishLine).width(slideWidth);
 		tbl.add(new Label("10k", Assets.instance.skin));
 		tbl.row();
 
 		// Forget rate slide
-		tbl.add(new Label("Forget Rate: ", Assets.instance.skin));
+		tbl.add(new Label("Transfer Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
 		Slider sldForgetRate = new Slider(0.0f, 0.99f, 0.01f, false, Assets.instance.skin);
-		sldForgetRate.setValue(GamePreferences.instance.forgetRate);
+		sldForgetRate.setValue(GamePreferences.instance.transferRate);
 		sldForgetRate.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
-				float value = (float)((Slider) actor).getValue();
-				System.out.println("forgetRate = " + Float.toString(value));
-				GamePreferences.instance.forgetRate = value;
+				float value = (float) ((Slider) actor).getValue();
+				System.out.println("transferRate = " + Float.toString(value));
+				GamePreferences.instance.transferRate = value;
 			}
 		});
 		tbl.add(sldForgetRate).width(slideWidth);
@@ -125,7 +127,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					((Play) play).allLearnFrom(agent);
+					((Play) play).allLearnFrom((CrawlingCrate) agent);
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();
@@ -151,7 +153,6 @@ public class EvolutionWindow extends Window {
 
 		tbl.row();
 
-
 		// Spawn Button
 		TextButton btnSpawn = new TextButton("Spawn", Assets.instance.skin, "small");
 		tbl.add(btnSpawn);
@@ -159,7 +160,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					play.population.spawnCrawlingCrate((CrawlingCrate)agent);
+					play.population.spawnCrawlingCrate((CrawlingCrate) agent);
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();

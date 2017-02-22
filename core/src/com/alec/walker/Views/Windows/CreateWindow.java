@@ -85,13 +85,13 @@ public class CreateWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				// Pause rendering
-				((Play) play).setIsRendering(false);
+				((Play) play).isRendering = false;
 				int count = (int) sldCount.getValue();
 				for (int index = 0; index < count; index++) {
 					((Play) play).population.makeCrawlingCrate();
 				}
 				// Resume rendering
-				((Play) play).setIsRendering(true);
+				((Play) play).isRendering = true;
 
 			}
 		});
@@ -106,13 +106,13 @@ public class CreateWindow extends Window {
 			public void changed(ChangeEvent event, Actor actor) {
 
 				// Pause rendering
-				((Play) play).setIsRendering(false);
+				((Play) play).isRendering = false;
 				int count = (int) sldCount.getValue();
 				for (int index = 0; index < count; index++) {
 					(((Play) play)).makeLeggedCrate();
 				}
 				// Resume rendering
-				((Play) play).setIsRendering(true);
+				((Play) play).isRendering = true;
 			}
 		});
 		tbl.add(btn).padRight(padding);

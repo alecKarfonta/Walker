@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 
 import com.alec.Assets;
+import com.alec.walker.GamePreferences;
 import com.alec.walker.StringHelper;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
@@ -32,9 +33,10 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Slider;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 
 public class LeggedCrate extends BasicAgent {
-	
+
 	private Body						body, rightArm, rightWrist,
 										rightFoot, leftArm, leftWrist,
 										leftFoot, leftWheel, rightWheel;
@@ -61,6 +63,7 @@ public class LeggedCrate extends BasicAgent {
 	private int							wristRange;
 	private float						armLength;
 	private float						wristLength;
+	private float						density;
 
 	private float						x, y;
 	private float						width, height;
@@ -119,10 +122,9 @@ public class LeggedCrate extends BasicAgent {
 	private float						updateTimeout	= 0.0000010f;
 	private float						speedWeight, deltaWeight, accelerationWeight, heightWeight;
 
-	private Slider				sldMinRandomness, sldMaxRandomness, sldMinLearningRate,
-	sldMaxLearningRate;
+	private Slider						sldMinRandomness, sldMaxRandomness, sldMinLearningRate,
+										sldMaxLearningRate;
 
-	
 	public LeggedCrate(World world,
 			float x, float y,
 			float width, float height) {
@@ -505,7 +507,7 @@ public class LeggedCrate extends BasicAgent {
 		bodyTrail.setPosition(body.getWorldCenter().x, body.getWorldCenter().y);
 		bodyTrail.draw(spriteBatch, delta);
 
-		 spriteBatch.end();
+		spriteBatch.end();
 		previousY = y;
 		previousX = x;
 		previousAngle = angle;
@@ -611,20 +613,36 @@ public class LeggedCrate extends BasicAgent {
 		return tbl;
 	}
 
-	
-	public float QFunction() {
+	public float QFunctionUpdate() {
 		float value = 0.0f;
 		switch (goal) {
 
 		// Stand Up
 			case 0:
 
-				value =
-						(body.getLinearVelocity().y * qFunctionWeights.get("yVelocity"))
-								+ ((y - maxY) * qFunctionWeights.get("yPosition"))
-								+ (angle * qFunctionWeights.get("bodyAngle"));
+				value = (deltaY * deltaWeight) + (1f * (y - maxY)) + (10f * (y - initY));
+
+				float yVelocity = body.getLinearVelocity().y;
+				if (Math.abs(yVelocity) < .001f) {
+					yVelocity = 0;
+				}
+
+				speed = (1 - speedDecay) * speed + (speedDecay * (yVelocity));
+				acceleration = (1 - accelerationDecay) * acceleration
+						+ (accelerationDecay * (speed - previousSpeed));
+
+				// check if tipping over
+				if (Math.abs(angle) > 30 || Math.abs(angle) > 350) {
+					// value -= .5f;
+				}
+
+				value = ((y - initY) * heightWeight) + (deltaY * deltaWeight)
+						+ ((speed * speedWeight) + (acceleration * accelerationWeight));
+
 				break;
 		}
+		
+		
 
 		return value;
 	}
@@ -736,7 +754,7 @@ public class LeggedCrate extends BasicAgent {
 			randomness = Math.max(minRandomness, randomness *= .999f);
 		}
 
-		// get join angles
+		// get joint angles
 		float angleIncrement = 0.1f;
 		int leftArmAngle = (int) Math.round(Math.toDegrees(leftArmJoint.getJointAngle())
 				* angleIncrement);
@@ -785,7 +803,11 @@ public class LeggedCrate extends BasicAgent {
 			action = maxAction;
 		}
 
-		takeAction(action);
+		// If is not manual control
+		if (!isManualControl) {
+			// Take action
+			takeAction(action);
+		}
 
 		// Evaluate previous action
 
@@ -1106,8 +1128,203 @@ public class LeggedCrate extends BasicAgent {
 		return isPlayer;
 	}
 
+	public Table getPhysicalMenu() {
+		int slideWidth = GamePreferences.instance.slideWidth;
+		int padding = GamePreferences.instance.padding;
 
+		Table tbl = new Table();
+		tbl.columnDefaults(0).padRight(padding);
+		tbl.columnDefaults(1).padRight(padding);
+		tbl.columnDefaults(2).padRight(padding);
 
+		// Arm Speed Slider
+		tbl.add(new Label("Arm Speed: ", Assets.instance.skin));
+		tbl.add(new Label("0.01", Assets.instance.skin));
+		final Slider sldArmSpeed = new Slider(0.01f, 4.0f, 0.001f, false, Assets.instance.skin);
+		sldArmSpeed.setValue(armSpeed);
+		sldArmSpeed.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				armSpeed = ((Slider) actor).getValue();
+				GamePreferences.instance.armSpeed = armSpeed;
+				leftArmJoint.setMotorSpeed(armSpeed);
+				rightArmJoint.setMotorSpeed(armSpeed);
+			}
+		});
+		tbl.add(sldArmSpeed).width(slideWidth);
+		tbl.add(new Label("4", Assets.instance.skin));
+		tbl.row();
 
+		// Wrist Speed Slider
+		tbl.add(new Label("Wrist Speed: ", Assets.instance.skin));
+		tbl.add(new Label("0.01", Assets.instance.skin));
+		final Slider sldWristSpeed = new Slider(0.01f, 4.0f, 0.001f, false, Assets.instance.skin);
+		sldWristSpeed.setValue(wristSpeed);
+		sldWristSpeed.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				wristSpeed = ((Slider) actor).getValue();
+				GamePreferences.instance.wristSpeed = wristSpeed;
+				leftWristJoint.setMotorSpeed(wristSpeed);
+				rightWristJoint.setMotorSpeed(wristSpeed);
+			}
+		});
+		tbl.add(sldWristSpeed).width(slideWidth);
+		tbl.add(new Label("4", Assets.instance.skin));
+		tbl.row();
+
+		// Arm Torque Slider
+		tbl.add(new Label("Arm Torque: ", Assets.instance.skin));
+		tbl.add(new Label("1", Assets.instance.skin));
+		final Slider sldArmTorque = new Slider(1, 5000, 1, false, Assets.instance.skin);
+		sldArmTorque.setValue(armTorque);
+		sldArmTorque.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				armTorque = ((Slider) actor).getValue();
+				GamePreferences.instance.armTorque = armTorque;
+				leftArmJoint.setMaxMotorTorque(armTorque);
+				rightArmJoint.setMaxMotorTorque(armTorque);
+			}
+		});
+		tbl.add(sldArmTorque).width(slideWidth);
+		tbl.add(new Label("5000", Assets.instance.skin));
+		tbl.row();
+
+		// Arm Torque Slider
+		tbl.add(new Label("Wrist Torque: ", Assets.instance.skin));
+		tbl.add(new Label("1", Assets.instance.skin));
+		final Slider sldWristTorque = new Slider(1, 5000, 1, false, Assets.instance.skin);
+		sldWristTorque.setValue(wristTorque);
+		sldWristTorque.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				wristTorque = ((Slider) actor).getValue();
+				GamePreferences.instance.wristTorque = wristTorque;
+				leftWristJoint.setMaxMotorTorque(wristTorque);
+				rightWristJoint.setMaxMotorTorque(wristTorque);
+			}
+		});
+		tbl.add(sldWristTorque).width(slideWidth);
+		tbl.add(new Label("5000", Assets.instance.skin));
+		tbl.row();
+
+		// Arm Range Slider
+		tbl.add(new Label("Arm Range: ", Assets.instance.skin));
+		tbl.add(new Label("0", Assets.instance.skin));
+		final Slider sldArmRange = new Slider(0, 360, 1, false, Assets.instance.skin);
+		sldArmRange.setValue(armRange);
+		sldArmRange.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				armRange = (int) ((Slider) actor).getValue();
+				leftArmJoint.setLimits(0, (int) Math.toRadians(armRange));
+				rightArmJoint.setLimits(0, (int) Math.toRadians(armRange));
+				GamePreferences.instance.armRange = armRange;
+			}
+		});
+		tbl.add(sldArmRange).width(slideWidth);
+		tbl.add(new Label("360", Assets.instance.skin));
+		tbl.row();
+
+		// Wrist Range Slider
+		tbl.add(new Label("Wrist Range: ", Assets.instance.skin));
+		tbl.add(new Label("0", Assets.instance.skin));
+		final Slider sldWristRange = new Slider(0, 360, 1, false, Assets.instance.skin);
+		sldWristRange.setValue(wristRange);
+		sldWristRange.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				wristRange = (int) ((Slider) actor).getValue();
+				leftWristJoint.setLimits(0, (int) Math.toRadians(wristRange));
+				rightWristJoint.setLimits(0, (int) Math.toRadians(wristRange));
+				GamePreferences.instance.wristRange = wristRange;
+			}
+		});
+		tbl.add(sldWristRange).width(slideWidth);
+		tbl.add(new Label("360", Assets.instance.skin));
+		tbl.row();
+
+		// Suspension Slider
+		// tbl.add(new Label("Suspension: ", Assets.instance.skin));
+		// tbl.add(new Label("1", Assets.instance.skin));
+		// final Slider sldSuspension = new Slider(0, 4, .01f, false, Assets.instance.skin);
+		// sldSuspension.setValue(leftAxis.getSpringFrequencyHz());
+		// sldSuspension.addListener(new ChangeListener() {
+		// @Override
+		// public void changed(ChangeEvent event, Actor actor) {
+		// leftAxis.setSpringFrequencyHz(((Slider) actor).getValue());
+		//
+		// rightAxis.setSpringFrequencyHz(((Slider) actor).getValue());
+		// GamePreferences.instance.suspension = ((Slider) actor).getValue();
+		// }
+		// });
+		// tbl.add(sldSuspension).width(slideWidth);
+		// tbl.add(new Label("4", Assets.instance.skin));
+		// tbl.row();
+
+		// Friction Slider
+		tbl.add(new Label("Friction: ", Assets.instance.skin));
+		tbl.add(new Label("0", Assets.instance.skin));
+		final Slider sldFriction = new Slider(0, 1000, .01f, false, Assets.instance.skin);
+		sldFriction.setValue(leftWrist.getFixtureList().first().getFriction());
+		sldFriction.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				float value = ((Slider) actor).getValue();
+				GamePreferences.instance.friction = value;
+				leftWrist.getFixtureList().first().setFriction(value);
+			}
+		});
+		tbl.add(sldFriction).width(slideWidth);
+		tbl.add(new Label("1000", Assets.instance.skin));
+		tbl.row();
+
+		// Density Slider
+		tbl.add(new Label("Density: ", Assets.instance.skin));
+		tbl.add(new Label("0", Assets.instance.skin));
+		final Slider slider = new Slider(0, 10, .01f, false, Assets.instance.skin);
+		slider.setValue(density);
+		slider.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				float value = ((Slider) actor).getValue();
+				GamePreferences.instance.density = value;
+
+				body.getFixtureList().get(0).setDensity(value);
+			}
+		});
+		tbl.add(slider).width(slideWidth);
+		tbl.add(new Label("10", Assets.instance.skin));
+		tbl.row();
+
+		// Dampening Slider
+		tbl.add(new Label("Dampening: ", Assets.instance.skin));
+		tbl.add(new Label("0", Assets.instance.skin));
+		final Slider sldDampening = new Slider(0, 2, .01f, false, Assets.instance.skin);
+		sldDampening.setValue(body.getLinearDamping());
+		sldDampening.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				GamePreferences.instance.linearDampening = ((Slider) actor).getValue();
+				body.setLinearDamping(((Slider) actor).getValue());
+			}
+		});
+		tbl.add(sldDampening).width(slideWidth);
+		tbl.add(new Label("10", Assets.instance.skin));
+		tbl.row();
+
+		return tbl;
+	}
+
+	@Override
+	public float getLearningRate() {
+		return qLearningRate;
+	}
+
+	@Override
+	public void setLearningRate(float qLearningRate) {
+		this.qLearningRate = qLearningRate;
+	}
 
 }

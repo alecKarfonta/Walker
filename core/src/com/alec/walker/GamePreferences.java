@@ -44,7 +44,7 @@ public class GamePreferences {
 	public float					impatience;
 	public float					speedValueWeight;
 	public float					mutationRate;
-	public float					forgetRate;
+	public float					transferRate;
 	
 	
 	// UI 
@@ -99,7 +99,7 @@ public class GamePreferences {
 		impatience = prefs.getFloat("impatience", 0.0001f);
 		speedValueWeight = prefs.getFloat("speedValueWeight", 1f);
 		mutationRate = prefs.getFloat("mutationRate", 0.01f);
-		forgetRate = prefs.getFloat("forgetRate", 0.10f);
+		transferRate = prefs.getFloat("transferRate", 0.10f);
 		
 		// Game Properties
 		isShowingStats = prefs.getBoolean("isShowingStats", false);
