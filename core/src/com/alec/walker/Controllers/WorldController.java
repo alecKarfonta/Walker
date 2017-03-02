@@ -3,22 +3,18 @@ package com.alec.walker.Controllers;
 import java.util.ArrayList;
 
 import com.alec.walker.GamePreferences;
-import com.alec.walker.Views.Play;
 import com.badlogic.gdx.Gdx;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.BodyDef;
-import com.badlogic.gdx.physics.box2d.Box2DDebugRenderer;
+import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
 import com.badlogic.gdx.physics.box2d.ChainShape;
 import com.badlogic.gdx.physics.box2d.FixtureDef;
+import com.badlogic.gdx.physics.box2d.Joint;
 import com.badlogic.gdx.physics.box2d.Shape;
 import com.badlogic.gdx.physics.box2d.World;
-import com.badlogic.gdx.physics.box2d.BodyDef.BodyType;
-import com.badlogic.gdx.scenes.scene2d.Stage;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.Timer;
+import com.badlogic.gdx.utils.Timer.Task;
 
 public class WorldController {
 	private static final String		TAG	= WorldController.class.getName();
@@ -41,13 +37,13 @@ public class WorldController {
 	public Body						groundBody;
 
 	public ArrayList<Body>			destroyQueue;
+	public ArrayList<Joint>			destroyJointQueue;
 
 	public WorldController() {
 		// create the world with surface gravity
 		world = new World(new Vector2(0f, -9.8f), true);
 		world.setContactListener(new MyContactListener(this));
 
-		destroyQueue = new ArrayList<Body>();
 		zoom = 25;
 		end = 10000;
 
@@ -69,6 +65,7 @@ public class WorldController {
 		groundHeight = bottom + 10;
 
 		destroyQueue = new ArrayList<Body>();
+		destroyJointQueue = new ArrayList<Joint>();
 
 		createGround();
 	}
@@ -92,7 +89,7 @@ public class WorldController {
 		Shape shape = new ChainShape();
 
 		// make a triangle
-		for (int x = -(int)(end*.3f) - 10; x < (int)(end*.1f) + 10; x++) {
+		for (int x = -(int) (end * .3f) - 10; x < (int) (end * .1f) + 10; x++) {
 			// body definition
 			bodyDef.type = BodyType.StaticBody;
 			bodyDef.position.set(x * 10, groundHeight - 3);
@@ -128,6 +125,7 @@ public class WorldController {
 		// add the floor to the world
 		groundBody = world.createBody(bodyDef);
 		groundBody.createFixture(fixtureDef);
+		groundBody.setUserData("Ground");
 
 		bodyDef.position.set(0, groundHeight - 3);
 		// clear the shape for the next chain
@@ -172,16 +170,33 @@ public class WorldController {
 	}
 
 	private void destroyQueue() {
-		if (!destroyQueue.isEmpty()) {
-			Gdx.app.debug(TAG, "destroy(): destroying queue");
-			for (Body body : destroyQueue) {
-				if (body != null) {
-					world.destroyBody(body);
-				}
 
+		if (!destroyJointQueue.isEmpty()) {
+			Gdx.app.debug(TAG, "destroy(): destroying joints");
+			for (Joint joint : destroyJointQueue) {
+				if (joint != null) {
+					world.destroyJoint(joint);
+				}
 			}
-			destroyQueue.clear();
+			destroyJointQueue.clear();
 		}
+		Timer.schedule(new Task() {
+			@Override
+			public void run() {
+				if (!destroyQueue.isEmpty()) {
+					Gdx.app.debug(TAG, "destroy(): destroying queue");
+					for (Body body : destroyQueue) {
+						if (body != null) {
+							world.destroyBody(body);
+						}
+
+					}
+					destroyQueue.clear();
+				}
+			}
+
+		}, 2.0f);
+
 	}
 
 	public Vector2 getGravity() {

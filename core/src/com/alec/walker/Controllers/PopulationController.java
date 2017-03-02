@@ -1,5 +1,11 @@
 package com.alec.walker.Controllers;
 
+import com.alec.walker.Models.BasicPlayer;
+import com.alec.walker.Models.StandingCrate;
+import com.alec.walker.Models.Player;
+import com.alec.walker.Models.StandingCrate;
+import com.alec.walker.Views.Play;
+
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
@@ -9,31 +15,23 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.Random;
 
-import org.joda.time.Duration;
-
-import com.alec.walker.Models.BasicAgent;
-import com.alec.walker.Models.BasicPlayer;
-import com.alec.walker.Models.CrawlingCrate;
-import com.alec.walker.Models.Player;
-import com.alec.walker.Views.Play;
-
 public class PopulationController {
 	// private ArrayList<BasicAgent> agents = new ArrayList<BasicAgent>();
 	private Play					play;
 	private WorldController			world;
-	private Duration				age;
+	//private Duration				age;
 
 	public Player					selectedPlayer;
 
 	private ArrayList<String>				first_names;
 	private ArrayList<String>				last_names;
 
-	public ArrayList<CrawlingCrate>	allPlayers	= new ArrayList<CrawlingCrate>();
+	public ArrayList<StandingCrate>	allPlayers	= new ArrayList<StandingCrate>();
 
 	public PopulationController(Play play) {
 		this.play = play;
 		this.world = play.world;
-		this.age = new Duration(0);
+		//this.age = new Duration(0);
 
 		// Load the list of names
 		String csvFile = "names.csv";
@@ -83,9 +81,9 @@ public class PopulationController {
 	
 	public void rank() {
 		// Rank population
-		Collections.sort(allPlayers, new Comparator<CrawlingCrate>() {
+		Collections.sort(allPlayers, new Comparator<StandingCrate>() {
 		    @Override
-		    public int compare(CrawlingCrate o1, CrawlingCrate o2) {
+		    public int compare(StandingCrate o1, StandingCrate o2) {
 		    	float x1 = o1.body.getPosition().x;
 		    	float x2 = o2.body.getPosition().x;
 		    	
@@ -107,7 +105,7 @@ public class PopulationController {
 		});
 		// Reindex
 		for (int index = 0; index < allPlayers.size(); index++) {
-			((CrawlingCrate)(allPlayers.get(index))).rank = index;
+			((StandingCrate)(allPlayers.get(index))).rank = index;
 		}
 	}
 
@@ -116,32 +114,33 @@ public class PopulationController {
 	}
 
 	public void update(float delta) {
-		age = age.plus((long) (delta * 1000));
+//		age = age.plus((long) (delta * 1000));
 	}
 
 	public void removePlayer(BasicPlayer player) {
-		world.destroyQueue.addAll(player.getBodies());
+		world.destroyQueue.addAll(player.bodies);
+		world.destroyJointQueue.addAll(player.getJoints());
 		allPlayers.remove(player);
 	}
 
-	public String getAge() {
-		// Bot count
-		String worldAge = "";
-		if (age.getStandardHours() > 0) {
-			worldAge = age.getStandardHours() + "h";
-		} else if (age.getStandardMinutes() > 0) {
-			worldAge = age.getStandardMinutes() + "m";
-		} else {
-			worldAge = age.getStandardSeconds() + "s";
-		}
-		return worldAge;
-	}
+//	public String getAge() {
+//		// Bot count
+//		String worldAge = "";
+//		if (age.getStandardHours() > 0) {
+//			worldAge = age.getStandardHours() + "h";
+//		} else if (age.getStandardMinutes() > 0) {
+//			worldAge = age.getStandardMinutes() + "m";
+//		} else {
+//			worldAge = age.getStandardSeconds() + "s";
+//		}
+//		return worldAge;
+//	}
 
-	public CrawlingCrate makeCrawlingCrate() {
+	public StandingCrate makeStandingCrate() {
 
-		CrawlingCrate crate = new CrawlingCrate(this.play);
+		StandingCrate crate = new StandingCrate(this.play);
 		crate.init(world.world,
-				(0 * (allPlayers.size() + 1)), world.groundHeight + 25);
+				(0 * (allPlayers.size() + 1)), world.groundHeight + 10 +  crate.height * 2);
 		
 		// Select a first last name randomly
 		crate.name = first_names.get(new Random().nextInt(first_names.size())) + " " + last_names.get(new Random().nextInt(last_names.size()));
@@ -150,29 +149,22 @@ public class PopulationController {
 
 		selectedPlayer = crate;
 
-		return (CrawlingCrate) selectedPlayer;
+		return (StandingCrate) selectedPlayer;
 	}
 
-	public void cloneCrawlingCrate() {
-		CrawlingCrate crate = ((CrawlingCrate) selectedPlayer).clone(world.world);
+	public void cloneStandingCrate() {
+		StandingCrate crate = ((StandingCrate) selectedPlayer).clone(world.world);
 
 		// Copy name
-		crate.name = ((CrawlingCrate) selectedPlayer).name;
+		crate.name = ((StandingCrate) selectedPlayer).name;
 
 		
 		allPlayers.add(crate);
 	}
 
-	public CrawlingCrate spawnCrawlingCrate(CrawlingCrate parent) {
-		System.out.println("PopulationControler.spawnCrawlingCrate(" + parent.name + ")");
-		CrawlingCrate crate = parent.spawn(world.world);
-		
-		// Same last name as parent
-		String lastName = parent.name.split(" ")[1];
-		// Generate a new first name
-		String firstName = first_names.get(new Random().nextInt(first_names.size()));
-		crate.name = firstName + " " + lastName;
-		System.out.println("Spawned " + crate.name + " from " + parent.name);
+	public StandingCrate spawnStandingCrate(StandingCrate parent) {
+		System.out.println("PopulationControler.spawnStandingCrate(" + parent.name + ")");
+		StandingCrate crate = parent.spawn(world.world);
 		
 		crate.finishLine = parent.finishLine;
 		

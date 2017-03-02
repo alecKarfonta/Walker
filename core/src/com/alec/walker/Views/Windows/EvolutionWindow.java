@@ -1,25 +1,18 @@
 package com.alec.walker.Views.Windows;
 
-import java.util.ArrayList;
-
 import com.alec.Assets;
-import com.alec.walker.Constants;
 import com.alec.walker.GamePreferences;
 import com.alec.walker.Models.BasicAgent;
 import com.alec.walker.Models.BasicPlayer;
-import com.alec.walker.Models.CrawlingCrate;
+import com.alec.walker.Models.StandingCrate;
 import com.alec.walker.Views.Play;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.InputListener;
-import com.badlogic.gdx.scenes.scene2d.ui.CheckBox;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
-import com.badlogic.gdx.scenes.scene2d.ui.Window;
+import com.badlogic.gdx.scenes.scene2d.ui.*;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
+
+import java.util.ArrayList;
 
 public class EvolutionWindow extends Window {
 
@@ -46,6 +39,24 @@ public class EvolutionWindow extends Window {
 
 		tbl = new Table();
 		tbl.row();
+		// Bot Count Slide
+		tbl.add(new Label("Bot Count: ", Assets.instance.skin));
+		tbl.add(new Label("1", Assets.instance.skin));
+		Slider sldBotCount = new Slider(1, 64, 1, false, Assets.instance.skin);
+		sldBotCount.setValue(GamePreferences.instance.mutationRate);
+		sldBotCount.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				int value = (int) ((Slider) actor).getValue();
+				System.out.println("value = " + value);
+				play.botCount = value;
+				GamePreferences.instance.botCount = value;
+			}
+		});
+		tbl.add(sldBotCount).width(slideWidth);
+		tbl.add(new Label("128", Assets.instance.skin));
+		tbl.row();
+		
 		// Mutation Rate Slide
 		tbl.add(new Label("Mutation Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
@@ -68,15 +79,15 @@ public class EvolutionWindow extends Window {
 		tbl.add(new Label("Finish Line: ", Assets.instance.skin));
 		tbl.add(new Label("100", Assets.instance.skin));
 		Slider sldFinishLine = new Slider(100, 10000, 100, false, Assets.instance.skin);
-		if (agent instanceof CrawlingCrate) {
-			sldFinishLine.setValue(((CrawlingCrate) (agent)).finishLine);
+		if (agent instanceof StandingCrate) {
+			sldFinishLine.setValue(((StandingCrate) (agent)).finishLine);
 			sldFinishLine.addListener(new ChangeListener() {
 				@Override
 				public void changed(ChangeEvent event, Actor actor) {
 					int value = (int) ((Slider) actor).getValue();
 					System.out.println("value = " + Float.toString(value));
 					for (BasicPlayer player : play.population.allPlayers) {
-						((CrawlingCrate) (player)).finishLine = value;
+						((StandingCrate) (player)).finishLine = value;
 					}
 				}
 			});
@@ -127,7 +138,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					((Play) play).allLearnFrom((CrawlingCrate) agent);
+					((Play) play).allLearnFrom((StandingCrate) agent);
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();
@@ -142,7 +153,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					((CrawlingCrate) agent).learnFromAll(((Play) play).population.allPlayers,
+					((StandingCrate) agent).learnFromAll(((Play) play).population.allPlayers,
 							agent.getLearningRate());
 				}
 				catch (Exception ex) {
@@ -160,7 +171,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					play.population.spawnCrawlingCrate((CrawlingCrate) agent);
+					play.population.spawnStandingCrate((StandingCrate) agent);
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();
@@ -175,7 +186,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					play.population.cloneCrawlingCrate();
+					play.population.cloneStandingCrate();
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();

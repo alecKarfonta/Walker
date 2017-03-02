@@ -1,19 +1,19 @@
 package com.alec.walker.Models;
 
-import java.util.ArrayList;
-
 import com.badlogic.gdx.InputAdapter;
-import com.badlogic.gdx.graphics.Camera;
-import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.physics.box2d.Joint;
+
+import java.util.ArrayList;
 
 public class BasicPlayer extends InputAdapter implements Player {
 
-	protected ArrayList<Body>	bodies;
-	protected Body				body;
+	public ArrayList<Body>	bodies;
+	public ArrayList<Joint>	joints;
+	public Body				body;
 	public String name;
+	public int	isTouchingGround;
 
 	
 
@@ -39,6 +39,10 @@ public class BasicPlayer extends InputAdapter implements Player {
 	@Override
 	public ArrayList<String> getStats() {
 		return null;
+	}
+
+	public ArrayList<Joint> getJoints() {
+		return joints;
 	}
 
 

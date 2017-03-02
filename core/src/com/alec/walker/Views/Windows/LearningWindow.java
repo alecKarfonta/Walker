@@ -1,13 +1,11 @@
 package com.alec.walker.Views.Windows;
 
-import java.util.ArrayList;
-
 import com.alec.Assets;
 import com.alec.walker.Constants;
 import com.alec.walker.GamePreferences;
 import com.alec.walker.Models.BasicAgent;
-import com.alec.walker.Models.BasicPlayer;
 import com.alec.walker.Models.CrawlingCrate;
+import com.alec.walker.Models.StandingCrate;
 import com.alec.walker.Views.Play;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
@@ -20,7 +18,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
-import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 
 public class LearningWindow extends Window {
 
@@ -40,7 +37,6 @@ public class LearningWindow extends Window {
 
 	public void init(final BasicAgent agent) {
 
-		
 		// Clear old
 		this.removeActor(tbl);
 
@@ -107,7 +103,8 @@ public class LearningWindow extends Window {
 		tbl.add(new Label("Min Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
 
-		final Slider sldMinLearningRate = new Slider(0, 0.2f, 0.0001f, false, Assets.instance.skin);
+		final Slider sldMinLearningRate = new Slider(0, 0.01f, 0.00001f, false,
+				Assets.instance.skin);
 		sldMinLearningRate.setValue(agent.getMinLearningRate());
 		sldMinLearningRate.addListener(new ChangeListener() {
 			@Override
@@ -118,14 +115,14 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMinLearningRate).width(slideWidth);
-		tbl.add(new Label("0.2", Assets.instance.skin));
+		tbl.add(new Label("0.01", Assets.instance.skin));
 		tbl.row();
 
 		// LearningRate Slide
 		tbl.add(new Label("Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
 
-		sldLearningRate = new Slider(0, 0.2f, 0.0001f, false, Assets.instance.skin);
+		sldLearningRate = new Slider(0, 0.01f, 0.00001f, false, Assets.instance.skin);
 		sldLearningRate.setValue(agent.getLearningRate());
 		sldLearningRate.addListener(new ChangeListener() {
 			@Override
@@ -136,13 +133,14 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldLearningRate).width(slideWidth);
-		tbl.add(new Label("0.2", Assets.instance.skin));
+		tbl.add(new Label("0.01", Assets.instance.skin));
 		tbl.row();
 
 		// Max LearningRate Slide
 		tbl.add(new Label("Max Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		final Slider sldMaxLearningRate = new Slider(0, 0.2f, 0.0001f, false, Assets.instance.skin);
+		final Slider sldMaxLearningRate = new Slider(0, 0.01f, 0.00001f, false,
+				Assets.instance.skin);
 		sldMaxLearningRate.setValue(agent.getMaxLearningRate());
 		sldMaxLearningRate.addListener(new ChangeListener() {
 			@Override
@@ -153,7 +151,7 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMaxLearningRate).width(slideWidth);
-		tbl.add(new Label("0.2", Assets.instance.skin));
+		tbl.add(new Label("0.01", Assets.instance.skin));
 		tbl.row();
 
 		// Future Discount Slider
@@ -223,8 +221,6 @@ public class LearningWindow extends Window {
 		tbl.add(new Label("0.1", Assets.instance.skin));
 		tbl.row();
 
-		
-
 		tbl.add(agent.getLearningMenu()).colspan(3);
 
 		tbl.row();
@@ -250,14 +246,46 @@ public class LearningWindow extends Window {
 		});
 		tbl.add(chbxIsLearning);
 
-
 		// Save Button
 		TextButton btnSave = new TextButton("Save Q", Assets.instance.skin, "small");
 		tbl.add(btnSave).padRight(padding);
 		btnSave.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
-				((CrawlingCrate)agent).saveState();
+				if (agent instanceof StandingCrate) {
+					((StandingCrate) agent).saveState();
+				} else if (agent instanceof CrawlingCrate) {
+					((CrawlingCrate) agent).saveState();	
+				}
+			}
+		});
+
+		// Load Button
+		TextButton btnLoad = new TextButton("Load Q", Assets.instance.skin, "small");
+		tbl.add(btnLoad).padRight(padding);
+		btnLoad.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				if (agent instanceof StandingCrate) {
+					((StandingCrate) agent).loadState();
+				} else if (agent instanceof CrawlingCrate) {
+					((CrawlingCrate) agent).loadState();	
+				}
+				
+			}
+		});
+
+		// Load Button
+		TextButton btnResetMinMax = new TextButton("Reset MinMax", Assets.instance.skin, "small");
+		tbl.add(btnResetMinMax).padRight(padding);
+		btnResetMinMax.addListener(new ChangeListener() {
+			@Override
+			public void changed(ChangeEvent event, Actor actor) {
+				if (agent instanceof StandingCrate) {
+					((StandingCrate) agent).resetMinMax();
+				} else if (agent instanceof CrawlingCrate) {
+					((CrawlingCrate) agent).resetMinMax();	
+				}
 			}
 		});
 

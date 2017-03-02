@@ -1,31 +1,15 @@
 package com.alec.walker.Views;
 
-import static com.badlogic.gdx.scenes.scene2d.actions.Actions.alpha;
-import static com.badlogic.gdx.scenes.scene2d.actions.Actions.sequence;
-import static com.badlogic.gdx.scenes.scene2d.actions.Actions.touchable;
-
-import java.util.ArrayList;
-
 import com.alec.Assets;
 import com.alec.walker.Constants;
-import com.alec.walker.GamePreferences;
-import com.alec.walker.StringHelper;
 import com.alec.walker.Controllers.BallFactory;
 import com.alec.walker.Controllers.CameraController;
 import com.alec.walker.Controllers.PopulationController;
 import com.alec.walker.Controllers.WorldController;
-import com.alec.walker.Models.BasicAgent;
-import com.alec.walker.Models.BasicPlayer;
-import com.alec.walker.Models.Car;
-import com.alec.walker.Models.Crate;
-import com.alec.walker.Models.CrawlingCrate;
-import com.alec.walker.Models.LeggedCrate;
-import com.alec.walker.Models.Player;
-import com.alec.walker.Views.Windows.CreateWindow;
-import com.alec.walker.Views.Windows.EvolutionWindow;
-import com.alec.walker.Views.Windows.LearningWindow;
-import com.alec.walker.Views.Windows.PhysicalWindow;
-import com.alec.walker.Views.Windows.WorldOptionsWindow;
+import com.alec.walker.GamePreferences;
+import com.alec.walker.Models.*;
+import com.alec.walker.StringHelper;
+import com.alec.walker.Views.Windows.*;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input.Keys;
 import com.badlogic.gdx.InputAdapter;
@@ -55,9 +39,18 @@ import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.ui.Window;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
+import com.badlogic.gdx.utils.Timer;
+import com.badlogic.gdx.utils.Timer.Task;
+
+import java.io.File;
+import java.util.ArrayList;
+
+import static com.badlogic.gdx.scenes.scene2d.actions.Actions.*;
 
 public class Play extends AbstractGameScreen {
-	private static final String	TAG	= Play.class.getName();
+	private static final String	TAG			= Play.class.getName();
+
+	public int					botCount	= 10;
 
 	public Stage				stage;
 	private Box2DDebugRenderer	debugRenderer;
@@ -74,7 +67,7 @@ public class Play extends AbstractGameScreen {
 	public WorldController		world;
 	public Player				player;
 	private MouseJoint			mouseJoint;
-	private Body				hitBody[];					// up to three bodies could be clicked at once
+	private Body				hitBody[];							// up to three bodies could be clicked at once
 	private Body				tempBody;
 	private Vector3				testPoint;
 	private Vector2				dragPosition;
@@ -136,15 +129,14 @@ public class Play extends AbstractGameScreen {
 		cameraHelper.applyTo(camera);
 		guiCamera.update();
 
-
 		// Update Player
-		if (player instanceof CrawlingCrate) {
-			((CrawlingCrate) player).update(delta);
+		if (player instanceof StandingCrate) {
+			((StandingCrate) player).update(delta);
 		} else {
 			((LeggedCrate) player).update(delta);
 		}
 		// Render player
-		// ((CrawlingCrate) player).render(spriteBatch, camera, delta);
+		// ((StandingCrate) player).render(spriteBatch, camera, delta);
 
 		// Update each player
 		int otherPlayerCount = population.allPlayers.size();
@@ -152,12 +144,12 @@ public class Play extends AbstractGameScreen {
 		for (int index = 0; index < otherPlayerCount; index++) {
 			BasicPlayer otherPlayer = population.allPlayers.get(index);
 			// If is a crawling crate
-			if (otherPlayer instanceof CrawlingCrate) {
+			if (otherPlayer instanceof StandingCrate) {
 				// If is rendering
 				if ((isRendering && ((otherPlayer == player) || (isRenderingAll)))) {
 					// Render
 					boolean showFinish = (otherPlayer == player);
-					((CrawlingCrate) otherPlayer).render(spriteBatch, shapeRenderer, camera, delta,
+					((StandingCrate) otherPlayer).render(spriteBatch, shapeRenderer, camera, delta,
 							showFinish);
 				}
 			} else if (otherPlayer instanceof LeggedCrate) {
@@ -168,7 +160,6 @@ public class Play extends AbstractGameScreen {
 				}
 			}
 		}
-
 
 		if (isRendering) {
 			// render the screen
@@ -195,9 +186,9 @@ public class Play extends AbstractGameScreen {
 		int count = 0;
 		if (isShowStats) {
 
-			font.draw(spriteBatch, "Population Age: " + population.getAge(),
-					-(world.width * .5f) + 10,
-					(world.height * .5f) - 5 - (20 * count));
+//			font.draw(spriteBatch, "Population Age: " + population.getAge(),
+//					-(world.width * .5f) + 10,
+//					(world.height * .5f) - 5 - (20 * count));
 
 			font.draw(spriteBatch, "Bot Count: " + population.allPlayers.size(),
 					-(world.width * .5f) + 10,
@@ -233,11 +224,10 @@ public class Play extends AbstractGameScreen {
 		// Update timers
 
 		// If player is agent
-		if (player instanceof CrawlingCrate) {
+		if (player instanceof StandingCrate) {
 			// Update the learning window with current player values
-			learningWindow.update((CrawlingCrate) player);
+			learningWindow.update((StandingCrate) player);
 		}
-		
 
 		// Render each player
 		int otherPlayerCount = population.allPlayers.size();
@@ -246,11 +236,11 @@ public class Play extends AbstractGameScreen {
 			try {
 				BasicPlayer otherPlayer = population.allPlayers.get(index);
 				// If is a crawling crate
-				if (otherPlayer instanceof CrawlingCrate) {
+				if (otherPlayer instanceof StandingCrate) {
 					// If is not paused
 					if (!isPaused) {
 						// Update
-						((CrawlingCrate) otherPlayer).update(delta);
+						((StandingCrate) otherPlayer).update(delta);
 					}
 				} else if (otherPlayer instanceof LeggedCrate) {
 					// If is not paused
@@ -306,7 +296,7 @@ public class Play extends AbstractGameScreen {
 						GamePreferences.instance.showFpsCounter = !GamePreferences.instance.showFpsCounter;
 						break;
 					case Keys.NUM_1:
-						player = population.makeCrawlingCrate();
+						player = population.makeStandingCrate();
 						break;
 					case Keys.NUM_2:
 						makeLeggedCrate();
@@ -439,13 +429,11 @@ public class Play extends AbstractGameScreen {
 
 		inputMultiplexer.addProcessor(gameInput);
 
-
 		createGUI();
 
-		player = population.makeCrawlingCrate();
-		
+		player = population.makeStandingCrate();
+
 		changePlayer(player);
-		
 
 		if (player instanceof InputAdapter) {
 			inputMultiplexer.addProcessor((InputProcessor) player);
@@ -471,7 +459,6 @@ public class Play extends AbstractGameScreen {
 				population.rank();
 			}
 		});
-		
 
 		// Pause Button
 		TextButton btnWinOptStats = new TextButton("Stats", Assets.instance.skin, "small");
@@ -545,8 +532,8 @@ public class Play extends AbstractGameScreen {
 			public void changed(ChangeEvent event, Actor actor) {
 
 				try {
-					if (player instanceof CrawlingCrate) {
-						((CrawlingCrate) player).initLearning();
+					if (player instanceof StandingCrate) {
+						((StandingCrate) player).initLearning();
 					}
 				}
 				catch (Exception ex) {
@@ -673,8 +660,8 @@ public class Play extends AbstractGameScreen {
 
 		evolutionWindow = new EvolutionWindow(this, "Evolution", Assets.instance.skin);
 		// if (player != null) {
-		if (player instanceof CrawlingCrate) {
-			evolutionWindow.init((CrawlingCrate) player);
+		if (player instanceof StandingCrate) {
+			evolutionWindow.init((StandingCrate) player);
 		} else if (player instanceof LeggedCrate) {
 			evolutionWindow.init((LeggedCrate) player);
 		}
@@ -777,7 +764,7 @@ public class Play extends AbstractGameScreen {
 
 	}
 
-	public void allLearnFrom(CrawlingCrate teacher) {
+	public void allLearnFrom(StandingCrate teacher) {
 		System.out.println("learnFrom()");
 
 		if (teacher == null) {
@@ -785,13 +772,13 @@ public class Play extends AbstractGameScreen {
 		}
 
 		for (Player player : population.allPlayers) {
-			if (player instanceof CrawlingCrate) {
+			if (player instanceof StandingCrate) {
 
-				if (((CrawlingCrate) player).name == teacher.name) {
+				if (((StandingCrate) player).name == teacher.name) {
 					continue;
 				}
 				try {
-					((CrawlingCrate) player).learnFromLeader(teacher,
+					((StandingCrate) player).learnFrom(teacher,
 							GamePreferences.instance.transferRate);
 				} catch (Exception ex) {
 					ex.printStackTrace();
@@ -802,7 +789,7 @@ public class Play extends AbstractGameScreen {
 
 	}
 
-	public CrawlingCrate findLeader() {
+	public StandingCrate findLeader() {
 		// If only one player
 		if (population.allPlayers.size() == 1) {
 			// Return player
@@ -810,11 +797,11 @@ public class Play extends AbstractGameScreen {
 		}
 
 		// Find the player with the greatest X value
-		float leaderX = -100000;
+		float leaderX = -1000;
 
-		CrawlingCrate leader = null;
+		StandingCrate leader = null;
 
-		for (CrawlingCrate otherPlayer : population.allPlayers) {
+		for (StandingCrate otherPlayer : population.allPlayers) {
 			if (otherPlayer.getBody().getPosition().x > leaderX) {
 				leaderX = otherPlayer.getBody().getPosition().x;
 
@@ -840,10 +827,10 @@ public class Play extends AbstractGameScreen {
 
 		}
 		try {
-			if (player instanceof CrawlingCrate) {
-				learningWindow.init((CrawlingCrate) player);
-				physicalWindow.init((CrawlingCrate) player);
-				evolutionWindow.init((CrawlingCrate) player);
+			if (player instanceof StandingCrate) {
+				learningWindow.init((StandingCrate) player);
+				physicalWindow.init((StandingCrate) player);
+				evolutionWindow.init((StandingCrate) player);
 			} else if (player instanceof LeggedCrate) {
 				learningWindow.init((LeggedCrate) player);
 				physicalWindow.init((LeggedCrate) player);
@@ -863,23 +850,24 @@ public class Play extends AbstractGameScreen {
 		LeggedCrate crate = new LeggedCrate(world.world,
 				(250 * (population.allPlayers.size() + 1)), world.groundHeight + 4, // (x,y)
 				8, 4);
-//		population.allPlayers.add(crate);
+		// population.allPlayers.add(crate);
 
 		return crate;
 
 	}
 
-	public void finishLine(CrawlingCrate player) {
+	public void finishLine(StandingCrate player) {
 		System.out.println("finishLine(" + player.name + ")");
 		this.player = player;
 
 		// Rank the population
 		population.rank();
 
+		int populationSize = population.allPlayers.size();
+
 		// If natural selection is on
 		if (isNaturalSelection) {
 			// Save the current population size
-			int populationSize = population.allPlayers.size();
 			System.out.println("populationSize = " + populationSize);
 
 			// Send the top three home
@@ -887,46 +875,62 @@ public class Play extends AbstractGameScreen {
 				population.allPlayers.get(index).sendHome();
 			}
 
-			ArrayList<BasicPlayer> removeQueue = new ArrayList<>();
+			ArrayList<BasicPlayer> removeQueue = new ArrayList<BasicPlayer>();
 			for (int index = 3; index < populationSize; index++) {
 				removeQueue.add(population.allPlayers.get(index));
 			}
 			for (BasicPlayer removePlayer : removeQueue) {
 				population.removePlayer(removePlayer);
 			}
-//			
-//
-			CrawlingCrate first = (CrawlingCrate) population.allPlayers.get(0);
-			CrawlingCrate second = (CrawlingCrate) population.allPlayers.get(1);
-			CrawlingCrate third = (CrawlingCrate) population.allPlayers.get(2);
-			System.out.println("top 3 = " + first.name + ", " + second.name + ", " + third.name);
-//			System.out.println("populationSize = " + populationSize);
-//
+			//
+			//
+			StandingCrate first = (StandingCrate) population.allPlayers.get(0);
+			File firstFile = new File("StandingCrate_Brain_First.zip");
+			first.saveState(firstFile);
+			StandingCrate second = (StandingCrate) population.allPlayers.get(1);
+//			File secondFile = new File("StandingCrate_Brain_Second.zip");
+//			second.saveState(secondFile);
+			StandingCrate third = (StandingCrate) population.allPlayers.get(2);
+//			File thirdFile = new File("StandingCrate_Brain_Third.zip");
+//			third.saveState(thirdFile);
+//			System.out.println("top 3 = " + first.name + ", " + second.name + ", " + third.name);
+			// System.out.println("populationSize = " + populationSize);
+			//
 			System.out.println("Make 30 childrend = " + populationSize);
-			for (int index = 0; index <= 30; index++) {
-				CrawlingCrate child = population.spawnCrawlingCrate(first);
+			// Calculate ratio of bots
+			int firstChildCount = (int) (botCount * 0.5f);
+			int secondsChildCount = (int) (botCount * 0.3f);
+			int thirdChildCount = (int) (botCount * 0.2f);
+			
+			for (int index = 0; index <= firstChildCount; index++) {
+				StandingCrate child = population.spawnStandingCrate(first);
 
 				// Child learn from parent
-				child.learnFromLeader(first, GamePreferences.instance.transferRate);
+				child.learnFrom(first, GamePreferences.instance.transferRate);
 			}
-			for (int index = 0; index <= 18; index++) {
-				CrawlingCrate child = population.spawnCrawlingCrate(second);
+			for (int index = 0; index <= secondsChildCount; index++) {
+				StandingCrate child = population.spawnStandingCrate(second);
 
 				// Child learn from parent
-				child.learnFromLeader(second, GamePreferences.instance.transferRate);
+				child.learnFrom(second, GamePreferences.instance.transferRate);
 			}
-			for (int index = 0; index <= 10; index++) {
-				CrawlingCrate child = population.spawnCrawlingCrate(third);
-				
+			for (int index = 0; index <= thirdChildCount; index++) {
+				StandingCrate child = population.spawnStandingCrate(third);
+
 				// Child learn from parent
-				child.learnFromLeader(third, GamePreferences.instance.transferRate);
+				child.learnFrom(third, GamePreferences.instance.transferRate);
 			}
-			cameraHelper.setPosition(0,0);
-			
-			
+			cameraHelper.setPosition(0, 0);
+
 			first.isPastFinish = false;
+		} else {
+
+			// Send all home
+			for (int index = 0; index < populationSize; index++) {
+				population.allPlayers.get(index).sendHome();
+			}
+			
 		}
-		
 
 	}
 
@@ -975,11 +979,5 @@ public class Play extends AbstractGameScreen {
 
 		return inputMultiplexer;
 	}
-
-
-
-
-
-
 
 }

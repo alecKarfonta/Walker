@@ -6,12 +6,7 @@ import com.alec.walker.Views.AbstractGameScreen;
 import com.alec.walker.Views.Play;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
-import com.badlogic.gdx.scenes.scene2d.ui.Label;
-import com.badlogic.gdx.scenes.scene2d.ui.Skin;
-import com.badlogic.gdx.scenes.scene2d.ui.Slider;
-import com.badlogic.gdx.scenes.scene2d.ui.Table;
-import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
-import com.badlogic.gdx.scenes.scene2d.ui.Window;
+import com.badlogic.gdx.scenes.scene2d.ui.*;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 
@@ -88,7 +83,7 @@ public class CreateWindow extends Window {
 				((Play) play).isRendering = false;
 				int count = (int) sldCount.getValue();
 				for (int index = 0; index < count; index++) {
-					((Play) play).population.makeCrawlingCrate();
+					((Play) play).population.makeStandingCrate();
 				}
 				// Resume rendering
 				((Play) play).isRendering = true;

@@ -1,6 +1,5 @@
 package com.alec.walker.desktop;
 
-import com.alec.walker.GamePreferences;
 import com.alec.walker.Walker;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplication;
 import com.badlogic.gdx.backends.lwjgl.LwjglApplicationConfiguration;

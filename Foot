@@ -1,0 +1,1 @@
+{"rigidBodies":[{"name":"Foot","imagePath":null,"origin":{"x":0,"y":0},"polygons":[[{"x":0,"y":0},{"x":0.9750000238418579,"y":0.25},{"x":0,"y":0.550000011920929}]],"circles":[],"shapes":[{"type":"POLYGON","vertices":[{"x":0,"y":0},{"x":0.9750000238418579,"y":0.25},{"x":0,"y":0.550000011920929}]}]}],"dynamicObjects":[]}

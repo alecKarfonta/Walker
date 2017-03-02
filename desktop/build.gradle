@@ -44,3 +44,8 @@ task afterEclipseImport(description: "Post processing after project generation",
     printer.print(classpath)
   }
 }
+dependencies {
+    compile project(path: ':core')
+    compile project(path: ':core')
+    compile 'com.google.code.gson:gson:1.7.2'
+}

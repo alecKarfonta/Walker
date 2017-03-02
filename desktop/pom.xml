@@ -32,7 +32,9 @@
 		</plugins>
 	</build>
 
+
 	<dependencies>
+
 		<!-- https://mvnrepository.com/artifact/com.badlogicgames.gdx/gdx-tools -->
 		<dependency>
 			<groupId>com.badlogicgames.gdx</groupId>
@@ -51,6 +53,19 @@
 			<groupId>com.google.code.gson</groupId>
 			<artifactId>gson</artifactId>
 			<version>2.7</version>
+		</dependency>
+
+		<!-- https://mvnrepository.com/artifact/org.nd4j/nd4j-native -->
+		<dependency>
+			<groupId>org.nd4j</groupId>
+			<artifactId>nd4j-native</artifactId>
+			<version>0.7.2</version>
+		</dependency>
+		<!-- https://mvnrepository.com/artifact/org.nd4j/nd4j-api -->
+		<dependency>
+			<groupId>org.nd4j</groupId>
+			<artifactId>nd4j-api</artifactId>
+			<version>0.7.2</version>
 		</dependency>
 
 

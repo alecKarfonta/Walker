@@ -1,8 +1,8 @@
 package com.alec.walker;
 
-import java.text.DecimalFormat;
-
 import com.alec.Assets;
+
+import java.text.DecimalFormat;
 
 public class StringHelper {
 	public static final String TAG = Assets.class.getName();

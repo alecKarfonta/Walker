@@ -6,9 +6,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 
-import org.deeplearning4j.nn.multilayer.MultiLayerNetwork;
-import org.deeplearning4j.rl4j.learning.sync.qlearning.QLearning;
-import org.deeplearning4j.rl4j.network.dqn.DQNFactoryStdDense;
 import org.joda.time.Duration;
 
 import com.alec.Assets;
@@ -134,32 +131,6 @@ public class CrawlingCrate_QTable extends BasicAgent {
 	public boolean									holdMotors		= true;
 	public boolean									showName		= false;
 
-	public MultiLayerNetwork						net;
-
-	public static QLearning.QLConfiguration			CARTPOLE_QL		=
-																			new QLearning.QLConfiguration(
-																					123,    // Random seed
-																					200,    // Max step By epoch
-																					150000, // Max step
-																					150000, // Max size of experience replay
-																					32,     // size of batches
-																					500,    // target update (hard)
-																					10,     // num step noop warmup
-																					0.01,   // reward scaling
-																					0.99,   // gamma
-																					1.0,    // td-error clipping
-																					0.1f,   // min epsilon
-																					1000,   // num step for eps greedy anneal
-																					true    // double DQN
-																			);
-
-	public static DQNFactoryStdDense.Configuration	neuralNet		=
-																			new DQNFactoryStdDense.Configuration(
-																					3,         // number of layers
-																					128,        // number of hidden nodes
-																					0.001,     // learning rate
-																					0.00       // l2 regularization
-																			);
 
 	public CrawlingCrate_QTable(Play play) {
 		this.play = play;
@@ -1045,14 +1016,14 @@ public class CrawlingCrate_QTable extends BasicAgent {
 					timeSinceGoodValue = 0;
 					// sendHome();
 					// Spawn a new crate
-					CrawlingCrate child = (CrawlingCrate) play.population.makeCrawlingCrate();
-					child.sendHome();
+//					CrawlingCrate child = (CrawlingCrate) play.population.makeCrawlingCrate();
+//					child.sendHome();
 					// Have the child learn from the leader
 //					child.learnFromLeader(play.findLeader(), GamePreferences.instance.transferRate);
 					// If this is the selected crate
 					if (this == play.population.selectedPlayer) {
 						// Change to child
-						play.changePlayer(child);
+//						play.changePlayer(child);
 					}
 					// Remove this crate
 					play.population.removePlayer(this);
@@ -1184,7 +1155,7 @@ public class CrawlingCrate_QTable extends BasicAgent {
 					CrawlingCrate child = spawn(this.play.world.world);
 					child.sendHome();
 //					child.learnFromLeader(this, 1);
-					play.population.allPlayers.add(child);
+//					play.population.allPlayers.add(child);
 					play.population.removePlayer(this);
 					if (play.player == this) {
 						play.changePlayer(child);

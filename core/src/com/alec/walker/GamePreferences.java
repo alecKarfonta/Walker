@@ -1,10 +1,10 @@
 package com.alec.walker;
 
-import java.lang.reflect.Field;
-
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Preferences;
 import com.badlogic.gdx.math.MathUtils;
+
+import java.lang.reflect.Field;
 
 public class GamePreferences {
 	public static final String		TAG			= GamePreferences.class.getName();
@@ -16,6 +16,8 @@ public class GamePreferences {
 	public boolean					showFpsCounter;
 	public boolean					useAccelerometer;
 
+	public int						botCount;
+	
 	public float					timestep;
 	public int						positionIterations;
 	public int						velocityIterations;
@@ -74,6 +76,9 @@ public class GamePreferences {
 		updateTimer = prefs.getFloat("updateTimer", (0.1f));
 		positionIterations = prefs.getInteger("positionIterations", 8);
 		velocityIterations = prefs.getInteger("velocityIterations", 4);
+		
+		// Population Properties
+		botCount = prefs.getInteger("botCount", 16);
 
 		// Player Properties
 		armRange = prefs.getInteger("armRange", (60));

@@ -1,6 +1,5 @@
 package com.alec.walker.desktop;
 
-import org.joda.time.DateTime;
 import org.joda.time.Duration;
 
 public class ScratchLauncher {

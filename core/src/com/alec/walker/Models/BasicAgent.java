@@ -46,8 +46,9 @@ public class BasicAgent extends BasicPlayer implements AbstractAgent {
 	protected int				memoryCount;
 
 	protected Queue<Integer>	previousActions;
-	protected Queue<Integer>		previousValues;
+	protected Queue<Integer>	previousValues;
 	protected Queue<int[]>		previousStates;
+	public int					rank;
 
 	public BasicAgent() {
 
@@ -75,16 +76,16 @@ public class BasicAgent extends BasicPlayer implements AbstractAgent {
 		updateTime = 0.0f;
 		updateTimer = GamePreferences.instance.updateTimer;
 		impatience = GamePreferences.instance.impatience;
-		mutationRate  = GamePreferences.instance.mutationRate;
+		mutationRate = GamePreferences.instance.mutationRate;
 
 		if (withRandomness) {
 			learningRate = Math.min(0.8f, (float) Math.random());
 			learningRateDecay = learningRateDecay + (float) (0.00001 * Math.random());
 			futureDiscount = 0.5f + (0.5f * (float) Math.random());
-//			explorationBonus = 1 + 10 * (float) Math.random();
+			// explorationBonus = 1 + 10 * (float) Math.random();
 			updateTimer = (float) (updateTimer * Math.random());
 			impatience = (float) (impatience * Math.random());
-			
+
 		}
 
 	}
@@ -249,7 +250,7 @@ public class BasicAgent extends BasicPlayer implements AbstractAgent {
 
 	public void setImpatience(float value) {
 		impatience = value;
-		
+
 	}
 
 	public int getMemoryCount() {
@@ -271,7 +272,5 @@ public class BasicAgent extends BasicPlayer implements AbstractAgent {
 	public void setMutationRate(float mutationRate) {
 		this.mutationRate = mutationRate;
 	}
-	
-	
 
 }

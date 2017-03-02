@@ -1,7 +1,5 @@
 package com.alec.walker;
 
-import java.text.DecimalFormat;
-
 public class Constants {
 	public final static String	GameName			= "Walker";
 
