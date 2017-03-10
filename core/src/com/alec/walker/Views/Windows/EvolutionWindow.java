@@ -2,7 +2,7 @@ package com.alec.walker.Views.Windows;
 
 import com.alec.Assets;
 import com.alec.walker.GamePreferences;
-import com.alec.walker.Models.BasicAgent;
+import com.alec.walker.Models.BasicPlayer;
 import com.alec.walker.Models.BasicPlayer;
 import com.alec.walker.Models.StandingCrate;
 import com.alec.walker.Views.Play;
@@ -24,10 +24,10 @@ public class EvolutionWindow extends Window {
 		this.play = play;
 	}
 
-	public void update(final BasicAgent agent) {
+	public void update(final BasicPlayer agent) {
 	}
 
-	public void init(final BasicAgent agent) {
+	public void init(final BasicPlayer agent) {
 
 		// Clear old
 		this.removeActor(tbl);
@@ -43,7 +43,7 @@ public class EvolutionWindow extends Window {
 		tbl.add(new Label("Bot Count: ", Assets.instance.skin));
 		tbl.add(new Label("1", Assets.instance.skin));
 		Slider sldBotCount = new Slider(1, 64, 1, false, Assets.instance.skin);
-		sldBotCount.setValue(GamePreferences.instance.mutationRate);
+		sldBotCount.setValue(GamePreferences.instance.botCount);
 		sldBotCount.addListener(new ChangeListener() {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
@@ -122,7 +122,7 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					((Play) play).allLearnFrom(((Play) play).findLeader());
+					((Play) play).allLearnFrom((StandingCrate)(play).findLeader());
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();
@@ -153,8 +153,8 @@ public class EvolutionWindow extends Window {
 			@Override
 			public void changed(ChangeEvent event, Actor actor) {
 				try {
-					((StandingCrate) agent).learnFromAll(((Play) play).population.allPlayers,
-							agent.getLearningRate());
+//					((BasicPlayer) agent).learnFromAll(((Play) play).population.allPlayers,
+//							agent.getLearningRate());
 				}
 				catch (Exception ex) {
 					ex.printStackTrace();

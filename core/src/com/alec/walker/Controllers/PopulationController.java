@@ -1,11 +1,5 @@
 package com.alec.walker.Controllers;
 
-import com.alec.walker.Models.BasicPlayer;
-import com.alec.walker.Models.StandingCrate;
-import com.alec.walker.Models.Player;
-import com.alec.walker.Models.StandingCrate;
-import com.alec.walker.Views.Play;
-
 import java.io.BufferedReader;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
@@ -14,6 +8,12 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Random;
+
+import com.alec.walker.Models.BasicPlayer;
+import com.alec.walker.Models.CrawlingCrate;
+import com.alec.walker.Models.Player;
+import com.alec.walker.Models.StandingCrate;
+import com.alec.walker.Views.Play;
 
 public class PopulationController {
 	// private ArrayList<BasicAgent> agents = new ArrayList<BasicAgent>();
@@ -118,9 +118,14 @@ public class PopulationController {
 	}
 
 	public void removePlayer(BasicPlayer player) {
-		world.destroyQueue.addAll(player.bodies);
-		world.destroyJointQueue.addAll(player.getJoints());
-		allPlayers.remove(player);
+		System.out.println("PopulationController.removePlayer("+ player.name + ")");
+		if (player instanceof StandingCrate) {
+			System.out.println("Body count = " +  ((StandingCrate)player).bodies.size());
+			world.destroyQueue.addAll( ((StandingCrate)player).bodies);
+			System.out.println("Joint count = " +  ((StandingCrate)player).joints.size());
+			world.destroyJointQueue.addAll( ((StandingCrate)player).joints);
+			allPlayers.remove(player);
+		}
 	}
 
 //	public String getAge() {
@@ -166,6 +171,10 @@ public class PopulationController {
 		System.out.println("PopulationControler.spawnStandingCrate(" + parent.name + ")");
 		StandingCrate crate = parent.spawn(world.world);
 		
+		// Select a first last name randomly
+		crate.name = first_names.get(new Random().nextInt(first_names.size())) + " " + parent.name.split(" ")[1];
+
+		System.out.println("Spawned " + crate.name + ")");
 		crate.finishLine = parent.finishLine;
 		
 		allPlayers.add(crate);
@@ -205,4 +214,19 @@ public class PopulationController {
 		return selectedPlayer;
 	}
 
+//	public CrawlingCrate makeCrawlingCrate() {
+//		CrawlingCrate crate = new CrawlingCrate(this.play);
+//		crate.init(world.world,
+//				(0 * (allPlayers.size() + 1)), world.groundHeight + 10 +  crate.height * 2, 1, 1);
+//		
+		// Select a first last name randomly
+//		crate.name = first_names.get(new Random().nextInt(first_names.size())) + " " + last_names.get(new Random().nextInt(last_names.size()));
+//
+//		allPlayers.add(crate);
+//
+//		selectedPlayer = crate;
+//
+//		return (CrawlingCrate) selectedPlayer;
+//	}
+	
 }

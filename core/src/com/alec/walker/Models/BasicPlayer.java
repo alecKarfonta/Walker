@@ -1,19 +1,19 @@
 package com.alec.walker.Models;
 
+import java.util.ArrayList;
+
 import com.badlogic.gdx.InputAdapter;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Body;
 import com.badlogic.gdx.physics.box2d.Joint;
 
-import java.util.ArrayList;
-
 public class BasicPlayer extends InputAdapter implements Player {
 
-	public ArrayList<Body>	bodies;
-	public ArrayList<Joint>	joints;
 	public Body				body;
 	public String name;
 	public int	isTouchingGround;
+	
+	public float mutationRate;
 
 	
 
@@ -26,23 +26,39 @@ public class BasicPlayer extends InputAdapter implements Player {
 
 	}
 
+
+
+	public void learnFrom(BasicPlayer basicPlayer, float transferRate) {
+		
+	}
+
+	public void learnFromAll(ArrayList<BasicPlayer> allPlayers, float learningRate) {
+		
+	}
+
+	public void setMutationRate(float value) {
+		System.out.println("BasicPlayer.setMutationRate()");
+	}
+
+
 	@Override
 	public Body getBody() {
-		return body;
-	}
-
-	@Override
-	public ArrayList<Body> getBodies() {
-		return bodies;
-	}
-
-	@Override
-	public ArrayList<String> getStats() {
+		// TODO Auto-generated method stub
 		return null;
 	}
 
-	public ArrayList<Joint> getJoints() {
-		return joints;
+
+	@Override
+	public ArrayList<Body> getBodies() {
+		// TODO Auto-generated method stub
+		return null;
+	}
+
+
+	@Override
+	public ArrayList<String> getStats() {
+		// TODO Auto-generated method stub
+		return null;
 	}
 
 

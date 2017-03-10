@@ -50,7 +50,7 @@ public class LearningWindow extends Window {
 		// Min Randomness Slide
 		tbl.add(new Label("Min Randomness: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		Slider sldMinRandomness = new Slider(0, 0.2f, 0.00001f, false, Assets.instance.skin);
+		Slider sldMinRandomness = new Slider(0, 1.0f, 0.00001f, false, Assets.instance.skin);
 		sldMinRandomness.setValue(agent.getMinRandomness());
 		sldMinRandomness.addListener(new ChangeListener() {
 			@Override
@@ -61,13 +61,13 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMinRandomness).width(slideWidth);
-		tbl.add(new Label("0.2", Assets.instance.skin));
+		tbl.add(new Label("1.0", Assets.instance.skin));
 		tbl.row();
 
 		// sldRandomness Slide
 		tbl.add(new Label("Randomness: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		sldRandomness = new Slider(0, 0.2f, 0.00001f, false, Assets.instance.skin);
+		sldRandomness = new Slider(0, 1.0f, 0.00001f, false, Assets.instance.skin);
 		sldRandomness.setValue(agent.getRandomness());
 		sldRandomness.addListener(new ChangeListener() {
 			@Override
@@ -79,13 +79,13 @@ public class LearningWindow extends Window {
 		});
 
 		tbl.add(sldRandomness).width(slideWidth);
-		tbl.add(new Label("0.2", Assets.instance.skin));
+		tbl.add(new Label("1.0", Assets.instance.skin));
 		tbl.row();
 
 		// Max Randomness Slide
 		tbl.add(new Label("Max Randomness: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		final Slider sldMaxRandomness = new Slider(0, 0.2f, 0.00001f, false, Assets.instance.skin);
+		final Slider sldMaxRandomness = new Slider(0, 1.0f, 0.00001f, false, Assets.instance.skin);
 		sldMaxRandomness.setValue(agent.getMaxRandomness());
 		sldMaxRandomness.addListener(new ChangeListener() {
 			@Override
@@ -96,14 +96,14 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMaxRandomness).width(slideWidth);
-		tbl.add(new Label("0.2", Assets.instance.skin));
+		tbl.add(new Label("1.0", Assets.instance.skin));
 		tbl.row();
 
 		// Min LearningRate Slide
 		tbl.add(new Label("Min Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
 
-		final Slider sldMinLearningRate = new Slider(0, 0.01f, 0.00001f, false,
+		final Slider sldMinLearningRate = new Slider(0, 0.5f, 0.00001f, false,
 				Assets.instance.skin);
 		sldMinLearningRate.setValue(agent.getMinLearningRate());
 		sldMinLearningRate.addListener(new ChangeListener() {
@@ -115,14 +115,14 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMinLearningRate).width(slideWidth);
-		tbl.add(new Label("0.01", Assets.instance.skin));
+		tbl.add(new Label("0.5", Assets.instance.skin));
 		tbl.row();
 
 		// LearningRate Slide
 		tbl.add(new Label("Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
 
-		sldLearningRate = new Slider(0, 0.01f, 0.00001f, false, Assets.instance.skin);
+		sldLearningRate = new Slider(0, 0.5f, 0.00001f, false, Assets.instance.skin);
 		sldLearningRate.setValue(agent.getLearningRate());
 		sldLearningRate.addListener(new ChangeListener() {
 			@Override
@@ -133,13 +133,13 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldLearningRate).width(slideWidth);
-		tbl.add(new Label("0.01", Assets.instance.skin));
+		tbl.add(new Label("0.5", Assets.instance.skin));
 		tbl.row();
 
 		// Max LearningRate Slide
 		tbl.add(new Label("Max Learning Rate: ", Assets.instance.skin));
 		tbl.add(new Label("0", Assets.instance.skin));
-		final Slider sldMaxLearningRate = new Slider(0, 0.01f, 0.00001f, false,
+		final Slider sldMaxLearningRate = new Slider(0, 0.5f, 0.00001f, false,
 				Assets.instance.skin);
 		sldMaxLearningRate.setValue(agent.getMaxLearningRate());
 		sldMaxLearningRate.addListener(new ChangeListener() {
@@ -151,7 +151,7 @@ public class LearningWindow extends Window {
 			}
 		});
 		tbl.add(sldMaxLearningRate).width(slideWidth);
-		tbl.add(new Label("0.01", Assets.instance.skin));
+		tbl.add(new Label("0.5", Assets.instance.skin));
 		tbl.row();
 
 		// Future Discount Slider

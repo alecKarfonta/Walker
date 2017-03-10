@@ -130,11 +130,13 @@ public class Play extends AbstractGameScreen {
 		guiCamera.update();
 
 		// Update Player
-		if (player instanceof StandingCrate) {
-			((StandingCrate) player).update(delta);
-		} else {
-			((LeggedCrate) player).update(delta);
-		}
+		// if (player instanceof StandingCrate) {
+		// ((StandingCrate) player).update(delta);
+		// } else if (player instanceof LeggedCrate){
+		// ((LeggedCrate) player).update(delta);
+		// } else if (player instanceof PoleCrate){
+		// ((PoleCrate) player).update(delta);
+		// }
 		// Render player
 		// ((StandingCrate) player).render(spriteBatch, camera, delta);
 
@@ -186,9 +188,9 @@ public class Play extends AbstractGameScreen {
 		int count = 0;
 		if (isShowStats) {
 
-//			font.draw(spriteBatch, "Population Age: " + population.getAge(),
-//					-(world.width * .5f) + 10,
-//					(world.height * .5f) - 5 - (20 * count));
+			// font.draw(spriteBatch, "Population Age: " + population.getAge(),
+			// -(world.width * .5f) + 10,
+			// (world.height * .5f) - 5 - (20 * count));
 
 			font.draw(spriteBatch, "Bot Count: " + population.allPlayers.size(),
 					-(world.width * .5f) + 10,
@@ -233,8 +235,9 @@ public class Play extends AbstractGameScreen {
 		int otherPlayerCount = population.allPlayers.size();
 
 		for (int index = 0; index < otherPlayerCount; index++) {
+			BasicPlayer otherPlayer = population.allPlayers.get(index);
 			try {
-				BasicPlayer otherPlayer = population.allPlayers.get(index);
+
 				// If is a crawling crate
 				if (otherPlayer instanceof StandingCrate) {
 					// If is not paused
@@ -771,7 +774,7 @@ public class Play extends AbstractGameScreen {
 			return;
 		}
 
-		for (Player player : population.allPlayers) {
+		for (StandingCrate player : population.allPlayers) {
 			if (player instanceof StandingCrate) {
 
 				if (((StandingCrate) player).name == teacher.name) {
@@ -789,7 +792,7 @@ public class Play extends AbstractGameScreen {
 
 	}
 
-	public StandingCrate findLeader() {
+	public BasicPlayer findLeader() {
 		// If only one player
 		if (population.allPlayers.size() == 1) {
 			// Return player
@@ -799,9 +802,9 @@ public class Play extends AbstractGameScreen {
 		// Find the player with the greatest X value
 		float leaderX = -1000;
 
-		StandingCrate leader = null;
+		BasicPlayer leader = null;
 
-		for (StandingCrate otherPlayer : population.allPlayers) {
+		for (BasicPlayer otherPlayer : population.allPlayers) {
 			if (otherPlayer.getBody().getPosition().x > leaderX) {
 				leaderX = otherPlayer.getBody().getPosition().x;
 
@@ -860,18 +863,20 @@ public class Play extends AbstractGameScreen {
 		System.out.println("finishLine(" + player.name + ")");
 		this.player = player;
 
-		// Rank the population
-		population.rank();
 
 		int populationSize = population.allPlayers.size();
+		System.out.println("populationSize = " + populationSize);
 
+		// Rank the population
+		population.rank();
+		
 		// If natural selection is on
 		if (isNaturalSelection) {
 			// Save the current population size
 			System.out.println("populationSize = " + populationSize);
 
 			// Send the top three home
-			for (int index = 0; index < 3; index++) {
+			for (int index = 0; index < populationSize; index++) {
 				population.allPlayers.get(index).sendHome();
 			}
 
@@ -888,20 +893,20 @@ public class Play extends AbstractGameScreen {
 			File firstFile = new File("StandingCrate_Brain_First.zip");
 			first.saveState(firstFile);
 			StandingCrate second = (StandingCrate) population.allPlayers.get(1);
-//			File secondFile = new File("StandingCrate_Brain_Second.zip");
-//			second.saveState(secondFile);
+			// File secondFile = new File("StandingCrate_Brain_Second.zip");
+			// second.saveState(secondFile);
 			StandingCrate third = (StandingCrate) population.allPlayers.get(2);
-//			File thirdFile = new File("StandingCrate_Brain_Third.zip");
-//			third.saveState(thirdFile);
-//			System.out.println("top 3 = " + first.name + ", " + second.name + ", " + third.name);
+			// File thirdFile = new File("StandingCrate_Brain_Third.zip");
+			// third.saveState(thirdFile);
+			// System.out.println("top 3 = " + first.name + ", " + second.name + ", " + third.name);
 			// System.out.println("populationSize = " + populationSize);
 			//
 			System.out.println("Make 30 childrend = " + populationSize);
 			// Calculate ratio of bots
-			int firstChildCount = (int) (botCount * 0.5f);
-			int secondsChildCount = (int) (botCount * 0.3f);
-			int thirdChildCount = (int) (botCount * 0.2f);
-			
+			int firstChildCount = (int) (populationSize * 0.5f);
+			int secondsChildCount = (int) (populationSize * 0.3f);
+			int thirdChildCount = (int) (populationSize * 0.2f);
+
 			for (int index = 0; index <= firstChildCount; index++) {
 				StandingCrate child = population.spawnStandingCrate(first);
 
@@ -923,13 +928,15 @@ public class Play extends AbstractGameScreen {
 			cameraHelper.setPosition(0, 0);
 
 			first.isPastFinish = false;
+			second.isPastFinish = false;
+			third.isPastFinish = false;
 		} else {
 
 			// Send all home
 			for (int index = 0; index < populationSize; index++) {
 				population.allPlayers.get(index).sendHome();
 			}
-			
+
 		}
 
 	}
