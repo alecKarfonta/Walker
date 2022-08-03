@@ -1,5 +1,5 @@
 Description 
-	Here is an application to experiment with Q-Learning to learn a control policy for arbtrary robots in a physics simulation. The main purpose of this program is to be able at runtime to adjust all of the various hyper-parameters around the search policy of Q-Learning, such as randomness and learning rate. Further there is an evolutionary component to speed up the search of Q agents and compare the performance of different combinations of parameters.
+	Here is an application to experiment with Q-Learning control policies for arbitrary robots in a physics simulation. The main purpose of this program is to be able at runtime to adjust all of the various hyper-parameters around the search policy of Q-Learning, such as randomness and learning rate. Further there is an evolutionary component to speed up the search of Q agents and compare the performance of different combinations of parameters.
 
 
 Project Details
