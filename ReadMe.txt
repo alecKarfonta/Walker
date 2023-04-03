@@ -1,16 +1,16 @@
 Description 
-	Here is an application to experiment with Q-Learning control policies for arbitrary robots in a physics simulation. The main purpose of this program is to be able, at runtime, to adjust all of the various hyper-parameters around the search policy of Q-Learning, such as randomness and learning rate. Further there is an evolutionary component to speed up the search of Q agents and compare the performance of different combinations of parameters.
+	Here is an application to experiment with Q-Learning control policies for arbitrary robots in a physics simulation. The main purpose of this program is to be able, at runtime, to adjust all of the various hyper-parameters around the search policy, robot parameters and world physics. Further there is an evolutionary component to speed up the search of Q agents and compare the performance of different combinations of parameters.
 
 
 Project Details
-	The project is written in Java and depends heavily on Libgdx and Box2d. Libgdx is a game development framework meant for building cross-platform games. Box2d is a popular physics engine. Like any Libgdx application there are several different projects. The root project, simply called Walker, contains metadata for the application. Walker-Core contains the logic. Walker-Android is the Android launcher but also holds the resources for all platforms in the assets folder. Walker-Desktop is the launcher for PCs (Mac, Linux), and should have a link to the assets folder in the Android project. This is the project you will want to export for an exutable jar.
+	The project is written in Java and depends heavily on Libgdx and Box2d. Libgdx is a game development framework meant for building cross-platform games. Box2d is a popular physics engine. Like any Libgdx application there are several different projects. The root project, simply called Walker, contains metadata for the application. Walker-Core contains the actual logic. Walker-Android is the Android launcher but also holds the resources for all platforms in the assets folder. Walker-Desktop is the launcher for PCs (Mac, Linux), and should have a link to the assets folder in the Android project. This is the project you will want to export for an exutable jar.
 
 
 Import
 	I would recommend using Eclipse. This is a Gradle project. So import as a Gradle project, go to the root folder with all of the projects and hit 'build'. Then select the projects you want to import, you will need at least the meta project, -Core, -Android, and -Desktop. See the Libgdx getting started guide for more information. 
 
 Documentation (or lack there of)
-	You might notice there is not much documentation. This is mostly experiemtal code that is contiually being replaced so I did not take the time to write proper class and method descriptions. The comments are also sparse and often wrong. I did try to make very verbose variable names. Also I use simple, consise lines that only do one thing at a time. 
+	You might notice there is not much documentation. This is mostly experiemtal code that is contiually being replaced so I did not take the time to write proper class and method descriptions. The comments are also sparse and often wrong.
 
 Thanks for checking this out. I would appreciate any suggestions or contributions. Have fun.
 
