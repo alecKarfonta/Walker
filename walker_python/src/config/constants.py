@@ -1,0 +1,45 @@
+"""
+Physical constants and game settings for the Walker project.
+"""
+
+# Game constants
+GAME_NAME = "Walker"
+TIMESTEP = 1.0 / 60.0
+
+# Viewport settings
+VIEWPORT_WIDTH = 240.0
+VIEWPORT_HEIGHT = 140.0
+VIEWPORT_GUI_WIDTH = 2400.0
+VIEWPORT_GUI_HEIGHT = 1400.0
+
+# Physics constants
+GRAVITY = (0, -9.8)
+DEFAULT_TIMESTEP = 1.0 / 60.0
+DEFAULT_VELOCITY_ITERATIONS = 4
+DEFAULT_POSITION_ITERATIONS = 8
+
+# Collision filter categories (similar to Box2D)
+FILTER_BOUNDARY = 0x0001
+FILTER_CAR = 0x0002
+FILTER_CRATE = 0x0003
+FILTER_RADAR = 0x0020
+
+# Default physics properties
+DEFAULT_FRICTION = 0.33
+DEFAULT_RESTITUTION = 0.2
+DEFAULT_DENSITY = 0.65
+
+# Ground properties
+GROUND_FRICTION = 0.5
+GROUND_RESTITUTION = 0.0
+
+# Robot properties
+ROBOT_DENSITY = 0.22
+ROBOT_FRICTION = 0.33
+ROBOT_LINEAR_DAMPING = 0.05
+
+# Learning parameters
+DEFAULT_LEARNING_RATE = 0.01
+DEFAULT_FUTURE_DISCOUNT = 0.5
+DEFAULT_EXPLORATION_RATE = 0.2
+DEFAULT_MUTATION_RATE = 0.01 
