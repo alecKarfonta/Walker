@@ -57,9 +57,19 @@ class MutationOperator(GeneticOperator):
         Returns:
             A new agent with mutations applied
         """
-        if not isinstance(parent, BasicAgent):
-            raise ValueError("Mutation only supported for BasicAgent")
-        
+        if isinstance(parent, BasicAgent):
+            return self._mutate_basic_agent(parent)
+        else:
+            # For other agent types (like CrawlingCrate), use their own mutate method
+            if hasattr(parent, 'mutate') and hasattr(parent, 'copy'):
+                child = parent.copy()
+                child.mutate(self.mutation_strength)
+                return child
+            else:
+                raise ValueError(f"Agent type {type(parent).__name__} does not support mutation")
+    
+    def _mutate_basic_agent(self, parent: BasicAgent) -> BasicAgent:
+        """Mutate a BasicAgent specifically."""
         # Create a copy of the parent
         child = BasicAgent(
             state_dimensions=parent.state_dimensions,
@@ -125,28 +135,20 @@ class CrossoverOperator(GeneticOperator):
         Returns:
             A new agent created by crossover
         """
-        if not (isinstance(parent1, BasicAgent) and isinstance(parent2, BasicAgent)):
-            raise ValueError("Crossover only supported for BasicAgent")
-        
-        if random.random() > self.crossover_rate:
-            # No crossover, return copy of parent1
-            return self._copy_agent(parent1)
-        
-        # Create child with average parameters
-        child = BasicAgent(
-            state_dimensions=parent1.state_dimensions,
-            action_count=parent1.action_count
-        )
-        
-        # Average learning parameters
-        child.learning_rate = (parent1.learning_rate + parent2.learning_rate) / 2
-        child.future_discount = (parent1.future_discount + parent2.future_discount) / 2
-        child.randomness = (parent1.randomness + parent2.randomness) / 2
-        
-        # Crossover Q-table
-        child.q_table = self._crossover_q_tables(parent1.q_table, parent2.q_table)
-        
-        return child
+        if isinstance(parent1, BasicAgent) and isinstance(parent2, BasicAgent):
+            return self._crossover_basic_agents(parent1, parent2)
+        else:
+            # For other agent types (like CrawlingCrate), use their own crossover method
+            if (hasattr(parent1, 'crossover') and hasattr(parent2, 'crossover') and 
+                hasattr(parent1, 'copy') and hasattr(parent2, 'copy')):
+                if random.random() > self.crossover_rate:
+                    # No crossover, return copy of parent1
+                    return parent1.copy()
+                else:
+                    # Use the agent's own crossover method
+                    return parent1.crossover(parent2)
+            else:
+                raise ValueError(f"Agent type {type(parent1).__name__} does not support crossover")
     
     def _copy_agent(self, agent: BasicAgent) -> BasicAgent:
         """Create a copy of an agent."""
@@ -187,6 +189,28 @@ class CrossoverOperator(GeneticOperator):
                     new_q_table.table[state][action] = value2
         
         return new_q_table
+    
+    def _crossover_basic_agents(self, parent1: BasicAgent, parent2: BasicAgent) -> BasicAgent:
+        """Crossover two BasicAgent instances specifically."""
+        if random.random() > self.crossover_rate:
+            # No crossover, return copy of parent1
+            return self._copy_agent(parent1)
+        
+        # Create child with average parameters
+        child = BasicAgent(
+            state_dimensions=parent1.state_dimensions,
+            action_count=parent1.action_count
+        )
+        
+        # Average learning parameters
+        child.learning_rate = (parent1.learning_rate + parent2.learning_rate) / 2
+        child.future_discount = (parent1.future_discount + parent2.future_discount) / 2
+        child.randomness = (parent1.randomness + parent2.randomness) / 2
+        
+        # Crossover Q-table
+        child.q_table = self._crossover_q_tables(parent1.q_table, parent2.q_table)
+        
+        return child
 
 
 class EvolutionEngine:

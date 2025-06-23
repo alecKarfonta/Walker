@@ -5,6 +5,7 @@ Q-learning table implementation for reinforcement learning agents.
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 import random
+import pickle
 
 
 class QTable:
@@ -58,8 +59,8 @@ class QTable:
             raise ValueError(f"State dimensions {len(state)} don't match table dimensions {len(self.state_dimensions)}")
         
         state_slice = self.q_values[state]
-        best_action = np.argmax(state_slice)
-        best_value = state_slice[best_action]
+        best_action = int(np.argmax(state_slice))
+        best_value = float(state_slice[best_action])
         
         return best_action, best_value
     
@@ -132,7 +133,7 @@ class QTable:
             return random.randint(0, self.action_count - 1)
         
         ucb_values = state_slice + exploration_constant * np.sqrt(np.log(total_visits + 1) / (visit_counts + 1))
-        return np.argmax(ucb_values)
+        return int(np.argmax(ucb_values))
     
     def reset(self):
         """Reset all Q-values to default."""
@@ -188,6 +189,7 @@ class SparseQTable:
         self.default_value = default_value
         self.q_values = {}  # state -> action_values
         self.visit_counts = {}  # state -> action_counts
+        self.update_count = 0
     
     def _get_state_key(self, state: Tuple[int, ...]) -> str:
         """Convert state tuple to string key."""
@@ -219,6 +221,7 @@ class SparseQTable:
         self._ensure_state_exists(state)
         state_key = self._get_state_key(state)
         self.q_values[state_key][action] = value
+        self.update_count += 1
     
     def get_best_action(self, state: Tuple[int, ...]) -> Tuple[int, float]:
         """Get the best action and its Q-value for a given state."""
@@ -227,8 +230,8 @@ class SparseQTable:
             return 0, self.default_value
         
         action_values = self.q_values[state_key]
-        best_action = max(range(self.action_count), key=lambda a: action_values[a])
-        best_value = action_values[best_action]
+        best_action = int(max(range(self.action_count), key=lambda a: action_values[a]))
+        best_value = float(action_values[best_action])
         
         return best_action, best_value
     
@@ -272,31 +275,55 @@ class SparseQTable:
         """Reset all Q-values to default."""
         self.q_values.clear()
         self.visit_counts.clear()
+        self.update_count = 0
     
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about the Q-table."""
-        total_states = len(self.q_values)
-        total_entries = total_states * self.action_count
-        
-        if total_states == 0:
+        if not self.q_values:
             return {
                 'total_states': 0,
-                'total_entries': 0,
-                'non_zero_entries': 0,
-                'min_value': self.default_value,
-                'max_value': self.default_value,
-                'mean_value': self.default_value,
+                'min_value': 0.0,
+                'max_value': 0.0,
+                'mean_value': 0.0,
+                'std_value': 0.0,
+                'total_visits': 0,
+                'max_visits': 0,
+                'mean_visits': 0.0,
+                'update_count': self.update_count,
             }
-        
-        all_values = []
-        for action_values in self.q_values.values():
-            all_values.extend(action_values)
+
+        all_values = [v for action_values in self.q_values.values() for v in action_values]
+        all_visits = [v for visit_counts in self.visit_counts.values() for v in visit_counts]
         
         return {
-            'total_states': total_states,
-            'total_entries': total_entries,
-            'non_zero_entries': sum(1 for v in all_values if v != self.default_value),
-            'min_value': min(all_values),
-            'max_value': max(all_values),
-            'mean_value': sum(all_values) / len(all_values),
-        } 
+            'total_states': len(self.q_values),
+            'min_value': float(min(all_values)),
+            'max_value': float(max(all_values)),
+            'mean_value': float(sum(all_values) / len(all_values)),
+            'std_value': float(np.std(all_values)),
+            'total_visits': int(sum(all_visits)),
+            'max_visits': int(max(all_visits)),
+            'mean_visits': float(sum(all_visits) / len(all_visits)),
+            'update_count': self.update_count,
+        }
+    
+    def save(self, filename: str):
+        """Save Q-table to file."""
+        with open(filename, 'wb') as f:
+            pickle.dump({
+                'q_values': self.q_values,
+                'visit_counts': self.visit_counts,
+                'action_count': self.action_count,
+                'default_value': self.default_value,
+                'update_count': self.update_count,
+            }, f)
+    
+    def load(self, filename: str):
+        """Load Q-table from file."""
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+        self.q_values = data['q_values']
+        self.visit_counts = data['visit_counts']
+        self.action_count = data['action_count']
+        self.default_value = data['default_value']
+        self.update_count = data.get('update_count', 0) 

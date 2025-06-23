@@ -4,6 +4,7 @@ Base agent class for reinforcement learning agents.
 
 import random
 import time
+import uuid
 from typing import List, Dict, Any, Optional, Tuple
 from collections import deque
 from abc import ABC, abstractmethod
@@ -13,6 +14,9 @@ class BaseAgent(ABC):
     """Abstract base class for all reinforcement learning agents."""
     
     def __init__(self):
+        # Unique identifier for this agent
+        self.id = str(uuid.uuid4())[:8]  # Use first 8 characters of UUID
+        
         # Learning parameters
         self.learning_rate = 0.01
         self.min_learning_rate = 0.001

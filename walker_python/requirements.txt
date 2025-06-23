@@ -1,4 +1,7 @@
-pymunk>=6.4.0
-pygame>=2.5.0
-numpy>=1.24.0
-pandas>=2.0.0 
+Flask==3.0.3
+numpy==1.26.4
+pandas==2.2.2
+pygame==2.5.2
+pymunk==6.7.0
+pytest==8.2.0
+box2d==2.3.10 
