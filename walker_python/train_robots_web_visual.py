@@ -340,6 +340,93 @@ HTML_TEMPLATE = """
         .stat-value.updated {
             animation: pulse 0.3s ease-in-out;
         }
+
+        /* New Controls Container */
+        #controls-container {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .control-panel {
+            background: rgba(26, 26, 46, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 15px;
+            border-radius: 15px;
+            border: 1px solid #3498db;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+            width: 350px;
+        }
+
+        .control-panel-title {
+            color: #3498db;
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .control-panel-title::before {
+            content: '▶ ';
+            display: inline-block;
+            transition: transform 0.2s ease-in-out;
+        }
+
+        .control-panel.open .control-panel-title::before {
+            transform: rotate(90deg);
+        }
+
+        .control-panel-content {
+            display: none;
+        }
+
+        .control-panel.open .control-panel-content {
+            display: block;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 12px;
+        }
+
+        .control-label {
+            color: #bdc3c7;
+        }
+
+        .control-value {
+            color: #ecf0f1;
+            font-weight: 600;
+            min-width: 40px;
+            text-align: right;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 150px;
+            height: 5px;
+            background: rgba(52, 152, 219, 0.3);
+            border-radius: 5px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 15px;
+            height: 15px;
+            background: #3498db;
+            cursor: pointer;
+            border-radius: 50%;
+        }
+
     </style>
 </head>
 <body>
@@ -355,6 +442,28 @@ HTML_TEMPLATE = """
 
     <div id="controls">
         <button id="resetView">Reset View</button>
+    </div>
+
+    <div id="controls-container">
+        <div class="control-panel" id="learning-panel">
+            <div class="control-panel-title">Learning Settings</div>
+            <div class="control-panel-content">
+                <!-- Sliders will be added here -->
+            </div>
+        </div>
+        <div class="control-panel" id="physical-panel">
+            <div class="control-panel-title">Physical Settings</div>
+            <div class="control-panel-content">
+                <!-- Sliders will be added here -->
+            </div>
+        </div>
+        <div class="control-panel" id="evolution-panel">
+            <div class="control-panel-title">Evolution Settings</div>
+            <div class="control-panel-content">
+                <!-- Controls will be added here -->
+            </div>
+        </div>
+        <!-- Other panels can be added here -->
     </div>
     
     <div class="stats-container">
@@ -784,6 +893,115 @@ HTML_TEMPLATE = """
         updateLayout(); // Set initial positions
         resizeCanvas();
         fetchData();
+
+        // --- Control Panel Interactivity ---
+        function createSlider(id, label, min, max, step, value) {
+            const container = document.createElement('div');
+            container.className = 'control-row';
+            
+            const labelEl = document.createElement('span');
+            labelEl.className = 'control-label';
+            labelEl.textContent = label;
+            
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.id = id;
+            slider.min = min;
+            slider.max = max;
+            slider.step = step;
+            slider.value = value;
+            
+            const valueEl = document.createElement('span');
+            valueEl.className = 'control-value';
+            valueEl.textContent = parseFloat(value).toFixed(3);
+            
+            slider.addEventListener('input', () => {
+                valueEl.textContent = parseFloat(slider.value).toFixed(3);
+            });
+
+            slider.addEventListener('change', () => {
+                updateAgentParams({ [id]: parseFloat(slider.value) });
+            });
+            
+            container.appendChild(labelEl);
+            container.appendChild(slider);
+            container.appendChild(valueEl);
+            
+            return container;
+        }
+
+        const learningPanelContent = document.querySelector('#learning-panel .control-panel-content');
+        learningPanelContent.appendChild(createSlider('learning_rate', 'Learning Rate', 0.001, 0.1, 0.001, 0.005));
+        learningPanelContent.appendChild(createSlider('epsilon', 'Epsilon (Randomness)', 0.0, 1.0, 0.01, 0.3));
+        learningPanelContent.appendChild(createSlider('discount_factor', 'Discount Factor', 0.8, 0.99, 0.01, 0.9));
+        learningPanelContent.appendChild(createSlider('speed_value_weight', 'Speed Weight', 0.0, 0.2, 0.01, 0.05));
+        learningPanelContent.appendChild(createSlider('acceleration_value_weight', 'Accel Weight', 0.0, 0.2, 0.01, 0.05));
+
+        const physicalPanelContent = document.querySelector('#physical-panel .control-panel-content');
+        physicalPanelContent.appendChild(createSlider('motor_speed', 'Motor Speed', 1, 20, 1, 10));
+        physicalPanelContent.appendChild(createSlider('motor_torque', 'Motor Torque', 50, 2000, 50, 800));
+        physicalPanelContent.appendChild(createSlider('friction', 'Friction', 0.0, 2.0, 0.1, 0.9));
+        physicalPanelContent.appendChild(createSlider('density', 'Density', 0.1, 10.0, 0.1, 1.0));
+        physicalPanelContent.appendChild(createSlider('linear_damping', 'Damping', 0.0, 2.0, 0.1, 0.0));
+
+        const evolutionPanelContent = document.querySelector('#evolution-panel .control-panel-content');
+        evolutionPanelContent.appendChild(createSlider('mutation_rate', 'Mutation Rate', 0.0, 1.0, 0.01, 0.1));
+
+        function createButton(id, text) {
+            const button = document.createElement('button');
+            button.id = id;
+            button.textContent = text;
+            button.style.width = '100%';
+            button.style.marginTop = '5px';
+            button.addEventListener('click', () => {
+                triggerEvolutionEvent(id);
+            });
+            return button;
+        }
+
+        evolutionPanelContent.appendChild(createButton('spawn', 'Spawn New Agent'));
+        evolutionPanelContent.appendChild(createButton('clone', 'Clone Best Agent'));
+        evolutionPanelContent.appendChild(createButton('evolve', 'Evolve Population'));
+
+        document.querySelectorAll('.control-panel-title').forEach(title => {
+            title.addEventListener('click', () => {
+                title.parentElement.classList.toggle('open');
+            });
+        });
+
+        async function updateAgentParams(params) {
+            try {
+                await fetch('/update_agent_params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(params)
+                });
+                console.log('Agent parameters updated:', params);
+            } catch (err) {
+                console.error('Error updating agent parameters:', err);
+            }
+        }
+
+        function triggerEvolutionEvent(eventName) {
+            fetch('/evolution_event', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ event: eventName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log(`✅ Evolution event '${eventName}' completed successfully`);
+                } else {
+                    console.error(`❌ Evolution event '${eventName}' failed:`, data.message);
+                }
+            })
+            .catch(error => {
+                console.error(`❌ Error triggering evolution event '${eventName}':`, error);
+            });
+        }
     </script>
 </body>
 </html>
@@ -857,6 +1075,10 @@ class TrainingEnvironment:
         # Settle the world
         for _ in range(10):
             self.world.Step(self.dt, 8, 3)
+
+        self.population_controller = PopulationController(len(self.agents))
+        self.evolution_engine = EvolutionEngine(self.population_controller)
+        self.mutation_rate = 0.1 # Default mutation rate
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1016,6 +1238,8 @@ class TrainingEnvironment:
             time.sleep(self.dt)
             last_step_time = time.time()
 
+            self._init_robot_stats()
+
     def get_status(self):
         """Returns the current state of the simulation for rendering."""
         if not self.is_running:
@@ -1103,6 +1327,90 @@ class TrainingEnvironment:
             self.thread.join()
             print("✅ Training loop stopped")
 
+    def get_best_agent(self):
+        """Utility to get the best agent based on fitness (distance)."""
+        if not self.agents:
+            return None
+        return max(self.agents, key=lambda agent: agent.get_fitness())
+
+    def spawn_agent(self):
+        """Adds a new, random agent to the simulation."""
+        new_id = len(self.agents)
+        spacing = 8 if self.num_agents > 20 else 15
+        position = (new_id * spacing, 6)
+        
+        new_agent = CrawlingCrateAgent(
+            self.world,
+            agent_id=new_id,
+            position=position,
+            category_bits=self.AGENT_CATEGORY,
+            mask_bits=self.GROUND_CATEGORY
+        )
+        self.agents.append(new_agent)
+        self.population_controller.add_agent(new_agent)
+        self.num_agents = len(self.agents)
+        print(f"🐣 Spawned new agent {new_id}. Total agents: {self.num_agents}")
+
+    def clone_best_agent(self):
+        """Clones the best performing agent."""
+        best_agent = self.get_best_agent()
+        if not best_agent:
+            print("No agents to clone.")
+            return
+
+        new_id = len(self.agents)
+        spacing = 8 if self.num_agents > 20 else 15
+        position = (new_id * spacing, 6)
+
+        # Use the agent's copy method to create a clone
+        cloned_agent = best_agent.copy()
+        cloned_agent.id = new_id
+        cloned_agent.body.position = position
+        
+        self.agents.append(cloned_agent)
+        self.population_controller.add_agent(cloned_agent)
+        self.num_agents = len(self.agents)
+        print(f"👯 Cloned best agent {best_agent.id} to new agent {new_id}. Total agents: {self.num_agents}")
+
+    def evolve_population(self):
+        """Runs the evolution engine to create a new generation."""
+        # Update fitness values before evolution
+        for agent in self.agents:
+            self.population_controller.update_agent_fitness(agent, agent.get_fitness())
+        
+        new_population = self.evolution_engine.evolve_generation(self.mutation_rate)
+        
+        # Simple replacement: clear old agents and add new ones
+        for agent in self.agents:
+            agent.destroy()
+
+        self.agents = new_population
+        self.num_agents = len(self.agents)
+
+        # Re-initialize controller and stats
+        self.population_controller = PopulationController(len(self.agents))
+        self._init_robot_stats() # Helper to re-init stats
+        print(f"🧬 Evolved population. New generation has {self.num_agents} agents.")
+
+    def _init_robot_stats(self):
+        self.robot_stats = {}
+        for i, agent in enumerate(self.agents):
+             self.robot_stats[i] = {
+                'id': agent.id,
+                'initial_position': tuple(agent.initial_position),
+                'current_position': tuple(agent.body.position),
+                'total_distance': 0,
+                'velocity': (0, 0),
+                'arm_angles': {'shoulder': 0, 'elbow': 0},
+                'fitness': 0,
+                'steps_alive': 0,
+                'last_position': tuple(agent.body.position),
+                'steps_tilted': 0,  # Track how long robot has been tilted
+                'episode_reward': 0,
+                'q_updates': 0,
+                'action_history': []  # Track last actions taken
+            }
+            
 # --- Main Execution ---
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading')
@@ -1125,6 +1433,62 @@ def start_training():
 def stop_training():
     env.stop()
     return jsonify({'status': 'Training stopped'})
+
+@app.route('/update_agent_params', methods=['POST'])
+def update_agent_params():
+    params = request.get_json()
+    if not params:
+        return jsonify({'status': 'error', 'message': 'No parameters provided'}), 400
+    
+    # Update parameters for all agents
+    for agent in env.agents:
+        for key, value in params.items():
+            # Handle special physical properties
+            if key == 'friction':
+                for part in [agent.body, agent.upper_arm, agent.lower_arm] + agent.wheels:
+                    for fixture in part.fixtures:
+                        fixture.friction = value
+            elif key == 'density':
+                for part in [agent.body, agent.upper_arm, agent.lower_arm] + agent.wheels:
+                    for fixture in part.fixtures:
+                        fixture.density = value
+                # Important: must call ResetMassData after changing density
+                agent.body.ResetMassData()
+                agent.upper_arm.ResetMassData()
+                agent.lower_arm.ResetMassData()
+                for wheel in agent.wheels:
+                    wheel.ResetMassData()
+            elif key == 'linear_damping':
+                 for part in [agent.body, agent.upper_arm, agent.lower_arm] + agent.wheels:
+                    part.linearDamping = value
+            # Handle generic agent attributes
+            elif hasattr(agent, key):
+                setattr(agent, key, value)
+    
+    print(f"✅ Updated agent parameters: {params}")
+    return jsonify({'status': 'success', 'updated_params': params})
+
+@app.route('/evolution_event', methods=['POST'])
+def evolution_event():
+    data = request.get_json()
+    if not data or 'event' not in data:
+        return jsonify({'status': 'error', 'message': 'No event specified'}), 400
+    
+    event = data['event']
+    
+    try:
+        if event == 'spawn':
+            env.spawn_agent()
+        elif event == 'clone':
+            env.clone_best_agent()
+        elif event == 'evolve':
+            env.evolve_population()
+        else:
+            return jsonify({'status': 'error', 'message': f'Unknown event: {event}'}), 400
+        
+        return jsonify({'status': 'success', 'event': event})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def main():
     # Set a different port for the web server to avoid conflicts
