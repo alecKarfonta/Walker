@@ -731,6 +731,14 @@ HTML_TEMPLATE = """
                             <span class="detail-value">${agent.total_reward.toFixed(2)}</span>
                         </div>
                         <div class="detail-row">
+                            <span class="detail-label">Best Reward:</span>
+                            <span class="detail-value" style="color: #27ae60;">${(agent.best_reward || 0).toFixed(4)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Worst Reward:</span>
+                            <span class="detail-value" style="color: #e74c3c;">${(agent.worst_reward || 0).toFixed(4)}</span>
+                        </div>
+                        <div class="detail-row">
                             <span class="detail-label">Steps:</span>
                             <span class="detail-value">${agent.steps || 0}</span>
                         </div>
@@ -1038,7 +1046,7 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 1200
+        self.episode_length = 4800  # 80 seconds at 60 Hz – gives slow crawlers time to accumulate reward
         self.episode_step = 0
         
         # Statistics update timing
@@ -1170,6 +1178,15 @@ class TrainingEnvironment:
                 # Update all agents
                 for agent in self.agents:
                     agent.step(self.dt)
+
+                    # Reset agent if it falls off the world
+                    if agent.body.position.y < self.world_bounds_y:
+                        agent.reset_position()
+
+                    # Reset at end of episode but keep learned Q-table
+                    if agent.steps >= self.episode_length:
+                        agent.reset()  # preserves Q-table
+                        agent.reset_position()
                 
                 # Decrement accumulator
                 accumulator -= self.dt
@@ -1349,6 +1366,8 @@ class TrainingEnvironment:
                 'state': convert_numpy_types(agent.current_state),
                 'q_table': convert_numpy_types(agent.q_table.q_values if hasattr(agent.q_table, 'q_values') else {}),
                 'action_history': convert_numpy_types(agent.action_history),
+                'best_reward': convert_numpy_types(getattr(agent, 'best_reward_received', 0.0)),
+                'worst_reward': convert_numpy_types(getattr(agent, 'worst_reward_received', 0.0)),
                 'awake': agent.body.awake
             }
             agents_data.append(agent_data)
