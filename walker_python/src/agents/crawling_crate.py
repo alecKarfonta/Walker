@@ -104,8 +104,8 @@ class CrawlingCrate(BaseAgent):
             localAnchorB=(-1.25, 0)
         )
         shoulder_joint_def.enableLimit = True
-        shoulder_joint_def.lowerAngle = 0  # 0 degrees (arm pointing forward)
-        shoulder_joint_def.upperAngle = 360   # +180 degrees (arm pointing backward)
+        shoulder_joint_def.lowerAngle = -np.pi/2  # -90 degrees (arm pointing backward)
+        shoulder_joint_def.upperAngle = np.pi/2   # +90 degrees (arm pointing forward)
         self.shoulder_joint = self.world.CreateJoint(shoulder_joint_def)
         
         elbow_joint_def = b2.b2RevoluteJointDef(

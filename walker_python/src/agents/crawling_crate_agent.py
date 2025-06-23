@@ -714,6 +714,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             enableMotor=True,
             maxMotorTorque=self.motor_torque,
             motorSpeed=0,
+            enableLimit=True,
+            lowerAngle=-np.pi/2,  # -90 degrees
+            upperAngle=np.pi/2,   # +90 degrees
         )
         self.lower_arm_joint = self.world.CreateRevoluteJoint(
             bodyA=self.upper_arm,
@@ -723,6 +726,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             enableMotor=True,
             maxMotorTorque=self.motor_torque,
             motorSpeed=0,
+            enableLimit=True,
+            lowerAngle=0,           # 0 degrees (fully extended)
+            upperAngle=3*np.pi/4,   # +135 degrees
         )
         self.wheel_joints = []
         wheel_anchor_positions = [(-1.0, -0.75), (1.0, -0.75)]
