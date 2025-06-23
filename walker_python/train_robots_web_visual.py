@@ -66,13 +66,13 @@ HTML_TEMPLATE = """
         /* The new RTS-style bottom bar */
         #bottom-bar {
             flex-shrink: 0; /* Prevent the bar from shrinking */
-            height: 220px; /* Adjust height as needed */
+            height: 180px; /* More compact height */
             background: rgba(15, 20, 35, 0.95);
-            border-top: 3px solid #e74c3c;
-            box-shadow: 0 -5px 25px rgba(0,0,0,0.4);
+            border-top: 2px solid #e74c3c;
+            box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
             display: flex;
-            padding: 10px;
-            gap: 15px;
+            padding: 8px; /* Reduced padding */
+            gap: 8px;   /* Reduced gap */
             z-index: 100;
             overflow: hidden;
         }
@@ -80,26 +80,44 @@ HTML_TEMPLATE = """
         /* Sections within the bottom bar */
         .bottom-bar-section {
             background: rgba(26, 26, 46, 0.8);
-            border-radius: 10px;
+            border-radius: 8px;
             border: 1px solid #3498db;
-            padding: 15px;
+            padding: 10px; /* Reduced padding */
             display: flex;
             flex-direction: column;
             overflow-y: auto;
         }
 
         #leaderboard-panel {
-            flex: 1; /* Flexible width */
+            flex: 2; /* More space for leaderboard */
         }
         
+        #robot-details-panel {
+            flex: 1.5;
+            min-width: 200px;
+        }
+
+        #summary-and-controls-panel {
+            flex: 3;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+
         #summary-panel {
-            flex: 1;
+            flex-shrink: 0;
         }
 
         #controls-panel {
-            flex: 2; /* More space for controls */
+            flex-grow: 1; 
             display: flex;
-            gap: 10px;
+            gap: 8px;
+            padding: 0;
+            border: none;
+            background: transparent;
         }
         
         .control-column {
@@ -111,20 +129,20 @@ HTML_TEMPLATE = """
 
         .panel-title {
             color: #3498db;
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 10px;
+            font-size: 14px; /* Smaller font */
+            font-weight: 600;
+            margin-bottom: 8px;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 0.5px; /* Tighter spacing */
         }
 
         .stat-row, .robot-stat-row { 
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(52, 152, 219, 0.2);
-            font-size: 14px;
+            padding: 4px 0; /* Tighter padding */
+            border-bottom: 1px solid rgba(52, 152, 219, 0.15);
+            font-size: 13px; /* Smaller font */
         }
 
         .stat-label, .robot-stat-label { color: #bdc3c7; }
@@ -176,6 +194,50 @@ HTML_TEMPLATE = """
         .bottom-bar-section::-webkit-scrollbar-track { background: transparent; }
         .bottom-bar-section::-webkit-scrollbar-thumb { background: #3498db; border-radius: 3px; }
 
+        .robot-details-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #3498db;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #3498db;
+            padding-bottom: 4px;
+        }
+
+        .robot-details-content {
+            font-size: 10px;
+            line-height: 1.3;
+        }
+
+        .detail-section {
+            margin-bottom: 8px;
+            padding: 6px;
+            background: rgba(52, 152, 219, 0.1);
+            border-radius: 4px;
+            border-left: 2px solid #3498db;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+
+        .detail-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-label {
+            color: #bdc3c7;
+            font-weight: 500;
+        }
+
+        .detail-value {
+            color: #ecf0f1;
+            font-weight: bold;
+        }
+
+        /* Control panel styling */
+
     </style>
 </head>
 <body>
@@ -195,30 +257,39 @@ HTML_TEMPLATE = """
                 <div id="leaderboard-content"></div>
             </div>
 
-            <!-- Section 2: Population Summary -->
-            <div id="summary-panel" class="bottom-bar-section">
-                <div class="panel-title">📊 Population Summary</div>
-                <div id="population-summary-content"></div>
+            <!-- Section 2: Focused Robot Details -->
+            <div id="robot-details-panel" class="bottom-bar-section">
+                <div class="panel-title">🤖 Robot Details</div>
+                <div id="robot-details-content">
+                    <div class="placeholder">Select a robot to see details.</div>
+                </div>
             </div>
 
-            <!-- Section 3: Controls -->
-            <div id="controls-panel" class="bottom-bar-section">
-                <div class="control-column">
-                    <div class="control-panel" id="learning-panel">
-                        <div class="control-panel-title">Learning Settings</div>
-                        <div class="control-panel-content"></div>
-                    </div>
+            <!-- Section 3: Summary and Controls -->
+            <div id="summary-and-controls-panel">
+                <div id="summary-panel" class="bottom-bar-section">
+                    <div class="panel-title">📊 Population Summary</div>
+                    <div id="population-summary-content"></div>
                 </div>
-                <div class="control-column">
-                    <div class="control-panel" id="physical-panel">
-                        <div class="control-panel-title">Physical Settings</div>
-                        <div class="control-panel-content"></div>
+
+                <div id="controls-panel">
+                    <div class="control-column">
+                        <div class="control-panel" id="learning-panel">
+                            <div class="control-panel-title">Learning</div>
+                            <div class="control-panel-content"></div>
+                        </div>
                     </div>
-                </div>
-                <div class="control-column">
-                     <div class="control-panel" id="evolution-panel">
-                        <div class="control-panel-title">Evolution Settings</div>
-                        <div class="control-panel-content"></div>
+                    <div class="control-column">
+                        <div class="control-panel" id="physical-panel">
+                            <div class="control-panel-title">Physical</div>
+                            <div class="control-panel-content"></div>
+                        </div>
+                    </div>
+                    <div class="control-column">
+                         <div class="control-panel" id="evolution-panel">
+                            <div class="control-panel-title">Evolution</div>
+                            <div class="control-panel-content"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -257,8 +328,9 @@ HTML_TEMPLATE = """
         window.addEventListener('resize', resizeCanvas);
 
         document.body.addEventListener('click', (e) => {
-            if (e.target.closest('.robot-stat')) {
-                const agentId = e.target.closest('.robot-stat').dataset.agentId;
+            const robotStatElement = e.target.closest('[data-agent-id]');
+            if (robotStatElement) {
+                const agentId = robotStatElement.dataset.agentId;
                 console.log(`Leaderboard item clicked for agent: ${agentId}`);
                 
                 fetch('/click', {
@@ -300,11 +372,6 @@ HTML_TEMPLATE = """
             console.log(`🎯 Canvas rect: ${rect.left}, ${rect.top}, ${rect.width}, ${rect.height}`);
             console.log(`🎯 Camera: pos(${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}), zoom: ${cameraZoom}`);
             
-            // Visual debug indicator
-            const debugOverlay = document.getElementById('debug-overlay');
-            debugOverlay.innerHTML = `<div style="position: absolute; left: ${e.clientX}px; top: ${e.clientY}px; width: 20px; height: 20px; background: red; border-radius: 50%; pointer-events: none; z-index: 9999;"></div>`;
-            setTimeout(() => debugOverlay.innerHTML = '', 1000);
-            
             // Find robot at click position
             fetch('/get_agent_at_position', {
                 method: 'POST',
@@ -321,8 +388,6 @@ HTML_TEMPLATE = """
                 if (data.status === 'success' && data.agent_id !== null) {
                     mouseDownRobotId = data.agent_id;
                     console.log(`🤖 Mouse down on robot ${data.agent_id}`);
-                    // Visual feedback for robot click
-                    debugOverlay.innerHTML += `<div style="position: absolute; left: ${e.clientX}px; top: ${e.clientY}px; width: 30px; height: 30px; background: green; border-radius: 50%; pointer-events: none; z-index: 9999; border: 3px solid yellow;"></div>`;
                 } else {
                     mouseDownRobotId = null;
                     console.log(`🖱️ Mouse down on empty space`);
@@ -385,20 +450,11 @@ HTML_TEMPLATE = """
             const distance = Math.sqrt((e.clientX - mouseDownX)**2 + (e.clientY - mouseDownY)**2);
 
             if (!isDragging && !isDraggingRobot && timeDiff < CLICK_TIME_THRESHOLD && distance < CLICK_THRESHOLD) {
-                // This is a click, not a drag
-                const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
+                // This is a click, not a drag. We use the robot ID found during mousedown.
                 fetch('/click', {
                      method: 'POST',
                      headers: { 'Content-Type': 'application/json' },
-                     body: JSON.stringify({
-                         screen_x: x,
-                         screen_y: y,
-                         canvas_width: canvas.width,
-                         canvas_height: canvas.height
-                     })
+                     body: JSON.stringify({ agent_id: mouseDownRobotId }) // Send ID directly
                  })
                  .then(response => response.json())
                  .then(data => {
@@ -516,6 +572,91 @@ HTML_TEMPLATE = """
                     </div>
                  `;
             }
+
+            // NEW: Update robot details panel
+            updateRobotDetails(data);
+        }
+
+        function updateRobotDetails(data) {
+            const robotDetailsPanel = document.getElementById('robot-details-panel');
+            const focusedAgentId = data.focused_agent_id;
+            
+            if (focusedAgentId === null) {
+                robotDetailsPanel.innerHTML = '<div class="robot-details-title">🤖 Robot Details</div><div class="robot-details-content">Click on a robot to view details</div>';
+                return;
+            }
+            
+            // Find the focused agent
+            const agent = data.agents.find(a => a.id === focusedAgentId);
+            if (!agent) {
+                robotDetailsPanel.innerHTML = '<div class="robot-details-title">🤖 Robot Details</div><div class="robot-details-content">Robot not found</div>';
+                return;
+            }
+            
+            // Calculate arm angles from positions
+            const shoulderAngle = Math.atan2(agent.upper_arm.y - agent.body.y, agent.upper_arm.x - agent.body.x);
+            const elbowAngle = Math.atan2(agent.lower_arm.y - agent.upper_arm.y, agent.lower_arm.x - agent.upper_arm.x);
+            
+            // Format the details
+            const details = `
+                <div class="robot-details-title">🤖 Robot ${agent.id}</div>
+                <div class="robot-details-content">
+                    <div class="detail-section">
+                        <div class="detail-row">
+                            <span class="detail-label">Position:</span>
+                            <span class="detail-value">(${agent.body.x.toFixed(2)}, ${agent.body.y.toFixed(2)})</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Velocity:</span>
+                            <span class="detail-value">(${agent.body.velocity.x.toFixed(2)}, ${agent.body.velocity.y.toFixed(2)})</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Episode Reward:</span>
+                            <span class="detail-value">${agent.total_reward.toFixed(2)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Steps:</span>
+                            <span class="detail-value">${agent.steps || 0}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <div class="detail-row">
+                            <span class="detail-label">Shoulder Angle:</span>
+                            <span class="detail-value">${(shoulderAngle * 180 / Math.PI).toFixed(1)}°</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Elbow Angle:</span>
+                            <span class="detail-value">${(elbowAngle * 180 / Math.PI).toFixed(1)}°</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Current Action:</span>
+                            <span class="detail-value">(${agent.current_action[0]}, ${agent.current_action[1]})</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">State:</span>
+                            <span class="detail-value">(${agent.state[0]}, ${agent.state[1]})</span>
+                        </div>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <div class="detail-row">
+                            <span class="detail-label">Q-Table Size:</span>
+                            <span class="detail-value">${Object.keys(agent.q_table || {}).length}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Action History:</span>
+                            <span class="detail-value">${(agent.action_history || []).length}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Awake:</span>
+                            <span class="detail-value">${agent.awake ? 'Yes' : 'No'}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            robotDetailsPanel.innerHTML = details;
         }
 
         function drawWorld(data) {
@@ -598,12 +739,15 @@ HTML_TEMPLATE = """
                 });
             }
             ctx.restore();
+
+            updateFocusIndicator();
         }
 
         function fetchData() {
             fetch('/status')
                 .then(response => response.json())
                 .then(data => {
+                    window.lastData = data; // Store latest data globally
                     drawWorld(data);
                     updateStats(data);
                     requestAnimationFrame(fetchData);
@@ -625,6 +769,10 @@ HTML_TEMPLATE = """
                 indicator.style.display = 'block';
             } else {
                 indicator.style.display = 'none';
+            }
+            // Force an update of the details panel whenever focus changes
+            if (window.lastData) {
+                updateRobotDetails(window.lastData);
             }
         }
 
@@ -699,6 +847,22 @@ HTML_TEMPLATE = """
 </html>
 """
 
+def convert_numpy_types(obj):
+    """Convert numpy types to JSON-serializable types."""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(convert_numpy_types(item) for item in obj)
+    else:
+        return obj
 
 class TrainingEnvironment:
     """
@@ -956,7 +1120,7 @@ class TrainingEnvironment:
     def get_status(self):
         """Returns the current state of the simulation for rendering."""
         if not self.is_running:
-            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'statistics': {}, 'camera': self.get_camera_state()}
+            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state()}
 
         # 1. Get agent shapes for drawing
         robot_shapes = []
@@ -1011,10 +1175,42 @@ class TrainingEnvironment:
                 'episode_reward': r_stat.get('episode_reward', 0)
             })
 
+        # 5. Get full agent data for robot details panel
+        agents_data = []
+        for agent in self.agents:
+            agent_data = {
+                'id': agent.id,
+                'body': {
+                    'x': convert_numpy_types(agent.body.position.x),
+                    'y': convert_numpy_types(agent.body.position.y),
+                    'velocity': {
+                        'x': convert_numpy_types(agent.body.linearVelocity.x),
+                        'y': convert_numpy_types(agent.body.linearVelocity.y)
+                    }
+                },
+                'upper_arm': {
+                    'x': convert_numpy_types(agent.upper_arm.position.x),
+                    'y': convert_numpy_types(agent.upper_arm.position.y)
+                },
+                'lower_arm': {
+                    'x': convert_numpy_types(agent.lower_arm.position.x),
+                    'y': convert_numpy_types(agent.lower_arm.position.y)
+                },
+                'total_reward': convert_numpy_types(agent.total_reward),
+                'steps': convert_numpy_types(agent.steps),
+                'current_action': convert_numpy_types(agent.current_action_tuple),
+                'state': convert_numpy_types(agent.current_state),
+                'q_table': convert_numpy_types(agent.q_table.q_values if hasattr(agent.q_table, 'q_values') else {}),
+                'action_history': convert_numpy_types(agent.action_history),
+                'awake': agent.body.awake
+            }
+            agents_data.append(agent_data)
+
         return {
             'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
             'leaderboard': leaderboard_data,
             'robots': robot_details,
+            'agents': agents_data,
             'statistics': self.population_stats,
             'camera': self.get_camera_state()
         }
@@ -1254,24 +1450,20 @@ def handle_click():
     if not data:
         return jsonify({'status': 'error', 'message': 'No data provided'}), 400
 
-    agent_id = None
-    if 'agent_id' in data:
-        # Click from the leaderboard
-        clicked_agent = next((agent for agent in env.agents if agent.id == data['agent_id']), None)
-        env.focus_on_agent(clicked_agent)
-        agent_id = clicked_agent.id if clicked_agent else None
-    elif 'screen_x' in data and 'screen_y' in data:
-        # Click from the canvas
-        agent_id = env.handle_click(
-            data['screen_x'], data['screen_y'],
-            data.get('canvas_width', 800),
-            data.get('canvas_height', 600)
-        )
+    agent_id = data.get('agent_id')
+
+    clicked_agent = None
+    if agent_id is not None:
+        clicked_agent = next((agent for agent in env.agents if agent.id == agent_id), None)
+
+    env.focus_on_agent(clicked_agent)
+    
+    final_agent_id = clicked_agent.id if clicked_agent else None
     
     return jsonify({
         'status': 'success',
-        'agent_id': agent_id,
-        'focused': agent_id is not None
+        'agent_id': final_agent_id,
+        'focused': final_agent_id is not None
     })
 
 @app.route('/get_agent_at_position', methods=['POST'])
