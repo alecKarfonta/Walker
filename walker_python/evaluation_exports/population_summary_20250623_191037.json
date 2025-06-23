@@ -1,0 +1,108 @@
+{
+  "timestamp": 1750720237.6164048,
+  "generation": 0,
+  "step_count": 6869,
+  "population_health": {
+    "population_health": "good",
+    "diversity_status": {
+      "genotypic_diversity": 20.377943630027126,
+      "phenotypic_diversity": 2.091065135162821,
+      "behavioral_diversity": 0.13523219025406683,
+      "diversity_trend": "stable"
+    },
+    "evolutionary_dynamics": {
+      "selection_pressure": {
+        "selection_intensity": 6.685590181079398,
+        "elite_advantage": 25.114367382828,
+        "selection_differential": 27.850008544921742,
+        "effective_population_size": 0.022372808090091355
+      },
+      "mutation_effectiveness": {
+        "average_mutation_impact": 0.0,
+        "mutation_benefit_ratio": 0.0,
+        "total_mutations": 0,
+        "mutation_diversity": 0.0
+      },
+      "speciation_quality": {
+        "species_count": 0,
+        "species_size_distribution": [
+          29,
+          1
+        ],
+        "species_fitness_variance": [
+          35.498345751299745,
+          0.0
+        ],
+        "niche_formation_quality": 0.5140856568745455
+      },
+      "extinction_risk": 0.4
+    },
+    "fitness_landscape": {
+      "distribution": {
+        "mean": 0.9710521321458121,
+        "std": 5.870245494494602,
+        "min": -1.7579223632812644,
+        "max": 26.09208618164048,
+        "median": -0.8812817382812506,
+        "q25": -0.8822920608520514,
+        "q75": -0.6883256530761767,
+        "skewness": 3.4941798901399923,
+        "kurtosis": 10.92063860864106,
+        "coefficient_variation": 6.045242371820603
+      },
+      "pareto_front": {
+        "pareto_front_size": 4,
+        "pareto_front_ratio": 0.13333333333333333,
+        "hypervolume": 54.41301075835713,
+        "diversity_on_front": 16.93122231213138
+      },
+      "multi_objective": {
+        "weighted_fitness": 0.7277887322437772,
+        "balanced_performance": 0.6278353545313099,
+        "trade_off_quality": 0.6278353545313099
+      }
+    }
+  },
+  "training_summary": {
+    "training_health": "good",
+    "performance_trends": {
+      "fitness_trend": 0.6224846783262196,
+      "convergence_speed": 0.02385722145760145,
+      "improvement_rate": 0.0,
+      "plateau_detected": "False"
+    },
+    "stability_metrics": {
+      "training_variance": 0.5012631211617617,
+      "elite_preservation": 0.3333333333333333,
+      "diversity_maintenance": 1.0000000000000002,
+      "forgetting_rate": 0.10526315789473684
+    },
+    "efficiency_metrics": {
+      "computational_efficiency": 0.14392564908196215,
+      "memory_efficiency": 0.40981496180747057,
+      "time_per_improvement": 7.026012988979162
+    },
+    "system_health": {
+      "cpu_usage": 91.2,
+      "memory_usage": 245.15234375,
+      "training_fps": 0.17616901991544495
+    }
+  },
+  "fitness_distribution": {
+    "mean": 0.9710521321458121,
+    "std": 5.870245494494602,
+    "min": -1.7579223632812644,
+    "max": 26.09208618164048,
+    "median": -0.8812817382812506,
+    "q25": -0.8822920608520514,
+    "q75": -0.6883256530761767,
+    "skewness": 3.4941798901399923,
+    "kurtosis": 10.92063860864106,
+    "coefficient_variation": 6.045242371820603
+  },
+  "diversity_metrics": {
+    "genotypic": 20.377943630027126,
+    "phenotypic": 2.091065135162821,
+    "behavioral": 0.13523219025406683
+  }
+}
