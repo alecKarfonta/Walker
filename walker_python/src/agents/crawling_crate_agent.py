@@ -68,7 +68,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         # Physical properties
         self.motor_torque = 150.0
-        self.motor_speed = 0.5
+        self.motor_speed = 3.0  # INCREASED: Much faster motor speeds for visible movement
         self.category_bits = category_bits
         self.mask_bits = mask_bits
 
@@ -115,9 +115,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.max_epsilon = 0.6
         self.impatience = 0.002  # Increased for faster adaptation
 
-        # Reward clipping to stabilize learning
-        self.reward_clip_min = -1.0
-        self.reward_clip_max = 1.0
+        # Reward clipping to stabilize learning (REDUCED: to match new reward scale)
+        self.reward_clip_min = -0.1
+        self.reward_clip_max = 0.1
 
         # For state calculation
         self.last_x_position = self.body.position.x
@@ -127,6 +127,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Q-value bounds to prevent explosion
         self.min_q_value = -5.0  # Increased range for better learning
         self.max_q_value = 5.0   # Increased range for better learning
+        
+        # Track extreme rewards seen in current episode
+        self.best_reward_received = -np.inf  # Start at -inf so first reward sets it
+        self.worst_reward_received = np.inf   # Start at +inf so first reward sets it
         
         # Experience replay buffer
         self.replay_buffer = ReplayBuffer(capacity=8000)  # Increased capacity
@@ -154,7 +158,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.learning_interval = 30  # More frequent learning updates
         self.steps_since_last_action = 0
         self.steps_since_last_learning = 0
-        self.current_action_tuple = (0, 0)  # Store the actual action tuple
+        self.current_action_tuple = (1, 0)  # FIXED: Start with a real action from the action list
         self.prev_x = position[0]  # Track previous position for reward calculation
         
         # Speed and acceleration tracking (inspired by Java implementation)
@@ -185,7 +189,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # ENHANCED: Performance-based adaptation parameters
         self.performance_window = 200  # Track performance over 200 steps
         self.recent_rewards = deque(maxlen=self.performance_window)
-        self.performance_threshold = 0.1  # Threshold for "good" performance
+        self.performance_threshold = 0.02  # REDUCED: Threshold for "good" performance (adjusted for new reward scale)
         
         # ENHANCED: Enhanced state discretization
         self.use_enhanced_state = True
@@ -195,9 +199,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.action_history = []
         self.max_action_history = 15  # Longer history
         
-        # Reset action history
-        self.action_history = []
-        self.max_action_history = 10
+        # Initialize crawling-specific tracking variables
+        self.recent_displacements = []
+        self.action_sequence = []
 
     def get_enhanced_discretized_state(self) -> Tuple:
         """
@@ -266,38 +270,191 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         return (shoulder_bin, elbow_bin)
         
-    def get_acceleration_reward(self, prev_x: float) -> float:
+    def get_crawling_reward(self, prev_x: float) -> float:
         """
-        Simple reward system focused on rightward acceleration only.
-        Rewards come from accelerating to the right, penalties for moving left.
+        Comprehensive reward function designed specifically for crawling behavior.
+        Rewards proper crawling technique, not just forward movement.
         """
-        # Get current position and calculate actual displacement this step
         current_x = self.body.position.x
-        displacement = current_x - prev_x  # How far we moved this step
+        total_reward = 0.0
         
-        # Calculate instantaneous velocity (displacement per step)
-        current_velocity = displacement
+        # 1. FORWARD PROGRESS REWARD (Primary - 40% of total reward)
+        # Reward consistent forward movement, not just acceleration spikes
+        displacement = current_x - prev_x
+        if displacement > 0.003:  # Slightly lower threshold so small but real moves count
+            progress_reward = displacement * 4.0  # Boost base movement reward
+            # Bonus for sustained movement (not just single-step acceleration)
+            if hasattr(self, 'recent_displacements'):
+                self.recent_displacements.append(displacement)
+                if len(self.recent_displacements) > 10:
+                    self.recent_displacements.pop(0)
+                # Bonus for consistent forward movement
+                if len(self.recent_displacements) >= 5:
+                    avg_displacement = sum(self.recent_displacements) / len(self.recent_displacements)
+                    if avg_displacement > 0.005:  # INCREASED: Consistent forward movement
+                        progress_reward *= 1.2  # REDUCED: Smaller bonus
+            else:
+                self.recent_displacements = [displacement]
+        elif displacement < -0.0005:
+            progress_reward = displacement * 1.0  # REDUCED: Moderate penalty for backward movement
+        else:
+            progress_reward = 0.0  # FIXED: NO reward for tiny movements or standing still
         
-        # Calculate acceleration (change in velocity)
-        acceleration = current_velocity - getattr(self, 'prev_velocity', 0.0)
-        self.prev_velocity = current_velocity
+        total_reward += progress_reward * 0.4
         
-        # Reward rightward acceleration, penalize leftward
-        reward = 0.0
-        if acceleration > 0.001:  # Accelerating right
-            reward = acceleration * 10.0  # Strong reward for rightward acceleration
-        elif acceleration < -0.001:  # Accelerating left
-            reward = acceleration * 5.0   # Moderate penalty for leftward acceleration
-        # No reward for maintaining speed (acceleration = 0)
+        # 2. ARM GROUND CONTACT REWARD (25% of total reward)
+        # Reward arms being in contact with ground for pushing
+        arm_contact_reward = 0.0
         
-        # Additional small penalty for moving backwards
-        if current_velocity < -0.01:
-            reward -= 0.01  # Small penalty for backward movement
+        # Check if arms are low enough to be "touching" ground (simplified)
+        upper_arm_height = self.upper_arm.position.y
+        lower_arm_height = self.lower_arm.position.y
+        ground_level = 0.0  # World ground level is at y = 0 for our simulation
         
-        # Bound reward to reasonable range
-        reward = np.clip(reward, -0.1, 0.1)
+        # Contact reward independent of displacement; proxies how well arms are braced
+        if upper_arm_height < ground_level + 0.4:
+            arm_contact_reward += 0.003
+        if lower_arm_height < ground_level + 0.25:
+            arm_contact_reward += 0.005
+
+        # Extra reward if both arms are working together (both near ground)
+        if (upper_arm_height < ground_level + 0.2 and 
+            lower_arm_height < ground_level + 0.1):
+            arm_contact_reward += 0.002  # Coordination bonus
+
+        # If we aren't really moving, damp the bonus by 50%
+        if abs(displacement) < 0.0005:
+            arm_contact_reward *= 0.5
         
-        return reward
+        total_reward += arm_contact_reward * 0.25
+        
+        # 3. ARM COORDINATION REWARD (20% of total reward)
+        # Reward alternating or coordinated arm movements
+        coordination_reward = 0.0
+        
+        # Track arm velocities to detect coordinated movement
+        upper_arm_vel = abs(self.upper_arm.angularVelocity)
+        lower_arm_vel = abs(self.lower_arm.angularVelocity)
+        
+        # Reward active arm movement (not static)
+        if upper_arm_vel > 0.1 or lower_arm_vel > 0.1:
+            coordination_reward += 0.002  # REDUCED
+            
+        # Reward coordinated movement (both arms moving in useful directions)
+        if upper_arm_vel > 0.05 and lower_arm_vel > 0.05:
+            # Check if arms are moving in complementary ways
+            upper_angle = self.upper_arm.angle
+            lower_angle = self.lower_arm.angle
+            
+            # Reward if arm configuration suggests pushing motion
+            if -np.pi/3 < upper_angle < np.pi/3 and 0 < lower_angle < 2*np.pi/3:
+                coordination_reward += 0.003  # REDUCED
+                
+        #total_reward += coordination_reward * 0.20
+        
+        # 4. STABILITY REWARD (10% of total reward)
+        # Reward maintaining body stability while crawling
+        body_angle = abs(self.body.angle)
+        if body_angle < np.pi/6:  # Within 30 degrees
+            stability_reward = 0.003 * (1.0 - (body_angle / (np.pi/6)))  # REDUCED
+        else:
+            stability_reward = -0.003 * (body_angle - np.pi/6)  # REDUCED: Penalty for excessive tilt
+            
+        #total_reward += stability_reward * 0.10
+        
+        # 5. ENERGY EFFICIENCY REWARD (5% of total reward)
+        # Reward achieving progress with reasonable energy expenditure
+        energy_used = abs(self.current_action_tuple[0]) + abs(self.current_action_tuple[1])
+        efficiency_reward = 0.0
+        
+        if displacement > 0.001 and energy_used > 0:  # Only if making progress
+            # Efficiency = progress per unit energy
+            efficiency = displacement / (energy_used + 0.1)
+            efficiency_reward = min(0.002, efficiency * 0.02)  # REDUCED
+        elif energy_used > 1.5:  # Penalty for high energy use without progress
+            efficiency_reward = -0.001  # REDUCED
+            
+        #total_reward += efficiency_reward * 0.05
+        
+        # 6. BEHAVIORAL PATTERN REWARDS (Bonus)
+        # Reward sequences that resemble crawling patterns
+        pattern_bonus = 0.0
+        
+        # Track recent actions to detect crawling-like patterns
+        if not hasattr(self, 'action_sequence'):
+            self.action_sequence = []
+        
+        self.action_sequence.append(self.current_action)
+        if len(self.action_sequence) > 8:  # Keep last 8 actions
+            self.action_sequence.pop(0)
+            
+        # Look for alternating patterns in actions (simplified)
+        if len(self.action_sequence) >= 4:
+            # Check for variation in actions (not stuck in one action)
+            unique_actions = len(set(self.action_sequence[-4:]))
+            if unique_actions >= 2:  # At least 2 different actions
+                pattern_bonus += 0.001  # REDUCED
+                
+        #total_reward += pattern_bonus
+        
+        # 7. GROUND INTERACTION BONUS
+        # Bonus for maintaining contact with ground while moving
+        body_height = self.body.position.y
+        if (body_height < ground_level + 0.5 and
+            displacement > 0.0005):
+            ground_interaction_bonus = 0.001  # REDUCED
+        else:
+            ground_interaction_bonus = 0.0
+            
+        total_reward += ground_interaction_bonus
+        
+        # 8. PENALTIES
+        # Penalty for getting stuck or falling
+        if body_height < ground_level - 0.5:  # Fallen through ground
+            total_reward -= 0.01  # REDUCED
+        if abs(body_angle) > np.pi/2:  # Flipped over
+            total_reward -= 0.02  # REDUCED
+            
+        # IMPATIENCE PENALTY: Apply negative reward when stuck (inspired by Java implementation)
+        impatience_penalty = 0.0
+        if self.time_since_good_value > 50.0:  # After ~1s without improvement
+            if self.time_since_good_value < 100.0:  # Cap the time range to prevent explosion
+                # Quadratic punishment like Java: timeSinceGoodValue^2 * impatience
+                impatience_penalty = -(self.time_since_good_value ** 2) * self.impatience
+                # Cap the penalty to prevent reward explosion
+                impatience_penalty = max(impatience_penalty, -0.02)  # Max penalty of -0.02
+                
+                if self.id == 0 and self.steps % 100 == 0 and impatience_penalty < -0.001:  # Debug
+                    print(f"⏰ Agent {self.id}: Impatience penalty {impatience_penalty:.4f} (stuck for {self.time_since_good_value:.1f} steps)")
+        
+        total_reward += impatience_penalty
+        
+        # SANITY CHECK: If no significant forward progress, cap positive rewards
+        if displacement <= 0.0005 and total_reward > 0.005:
+            total_reward = min(total_reward, 0.005)  # Cap positive reward when not progressing
+        
+        # Clip final reward to reasonable range (CRITICAL: Much smaller range)
+        total_reward = np.clip(total_reward, -0.1, 0.2)
+        
+        # Debug logging for first agent (MORE FREQUENT TO CATCH THE ISSUE)
+        if self.id == 0 and self.steps % 50 == 0:  # Every 50 steps instead of 300
+            print(f"🐛 DETAILED Reward Debug Agent {self.id} Step {self.steps}:")
+            print(f"  Position: prev_x={prev_x:.4f}, current_x={current_x:.4f}")
+            print(f"  Displacement: {displacement:.6f}")
+            print(f"  Progress reward: {progress_reward:.6f} (weighted: {progress_reward * 0.4:.6f})")
+            print(f"  Upper arm height: {upper_arm_height:.4f}, Lower arm height: {lower_arm_height:.4f}")
+            print(f"  Ground level: {ground_level}")
+            print(f"  Arm contact raw: {arm_contact_reward:.6f} (weighted: {arm_contact_reward * 0.25:.6f})")
+            print(f"  Body height: {body_height:.4f}")
+            print(f"  Ground interaction: {ground_interaction_bonus:.6f}")
+            print(f"  Body angle: {np.degrees(abs(self.body.angle)):.2f}°")
+            print(f"  Impatience penalty: {impatience_penalty:.6f} (stuck for {self.time_since_good_value:.1f} steps)")
+            print(f"  TOTAL BEFORE CLIP: {total_reward:.6f}")
+            print(f"  TOTAL AFTER CLIP: {np.clip(total_reward, -0.1, 0.2):.6f}")
+            print(f"  Episode total so far: {getattr(self, 'total_reward', 'N/A')}")
+            print("---")
+            
+        return total_reward
         
     def enhanced_choose_action(self) -> int:
         """
@@ -306,21 +463,29 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         if self.current_state is None:
             return np.random.randint(len(self.actions))
         
+        # FORCED EXPLORATION: If stuck on same action for too long, force random selection
+        if (hasattr(self, 'action_history') and 
+            len(self.action_history) >= 10 and 
+            len(set(self.action_history[-10:])) <= 2):  # Only 2 or fewer unique actions in last 10
+            if self.id == 0:  # Debug for first agent
+                print(f"🔄 Agent {self.id}: FORCED EXPLORATION - stuck on {self.action_history[-5:]}") 
+            return np.random.randint(len(self.actions))
+        
         # Check if we have enough confidence for exploitation
         action, q_value, is_confident = self.q_table.confidence_based_action(
             self.current_state, 
             min_confidence=self.q_table.confidence_threshold
         )
         
-        # Adaptive exploration strategy
-        if is_confident and np.random.random() > self.epsilon:
+        # Adaptive exploration strategy with HIGHER exploration rate
+        if is_confident and np.random.random() > max(0.2, self.epsilon):  # Minimum 20% exploration
             # Use confident exploitation with exploration bonus
             return self.q_table._get_best_action_with_bonus(self.current_state)
         else:
             # Use enhanced epsilon-greedy with bias towards under-explored actions
             return self.q_table.enhanced_epsilon_greedy(
                 self.current_state, 
-                self.epsilon, 
+                max(0.2, self.epsilon),  # Minimum 20% exploration
                 use_exploration_bonus=True
             )
     
@@ -331,28 +496,29 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
     def update_adaptive_exploration(self):
         """
         Update exploration rate based on recent performance (Java-inspired).
-        Adapts epsilon and learning rate based on Q-value improvements.
+        Adapts epsilon and learning rate based on Q-value improvements and time since good value.
         """
-        # Track recent rewards for performance assessment
-        if len(self.recent_rewards) > 50:  # Need some history
-            recent_avg = np.mean(list(self.recent_rewards)[-50:])
-            
-            if recent_avg > self.performance_threshold:
-                # Doing well - reduce exploration, focus on exploitation
-                self.time_since_good_value = 0.0
-                self.epsilon = max(self.min_epsilon, self.epsilon - self.impatience)
-                self.learning_rate = max(self.min_learning_rate, 
-                                       self.learning_rate - self.impatience * 0.5)
-            else:
-                # Not doing well - increase exploration for better solutions
-                self.time_since_good_value += 1.0
-                if self.time_since_good_value > 150:  # After 150 steps of poor performance
-                    self.epsilon = min(self.max_epsilon, self.epsilon + self.impatience)
-                    self.learning_rate = min(self.max_learning_rate, 
-                                           self.learning_rate + self.impatience * 0.5)
+        # ENHANCED: Java-inspired adaptive exploration based on time_since_good_value
+        if self.time_since_good_value > 5.0:
+            # Been a while since good performance - increase randomness (like Java)
+            self.epsilon = min(self.max_epsilon, self.epsilon * 1.001)  # Slight increase
+            if self.time_since_good_value > 150:  # After long poor performance
+                self.learning_rate = min(self.max_learning_rate, 
+                                       self.learning_rate + self.impatience * 0.5)
+                                       
+            # Debug output for first agent when stuck
+            if self.id == 0 and int(self.time_since_good_value) % 20 == 0:  # Every 20 steps when stuck
+                print(f"🔄 Agent {self.id}: Stuck for {self.time_since_good_value:.0f} steps, increasing exploration")
+                print(f"   Epsilon: {self.epsilon:.3f}, Learning rate: {self.learning_rate:.3f}")
+        else:
+            # Doing well - reduce exploration, focus on exploitation (like Java)
+            self.epsilon = max(self.min_epsilon, self.epsilon * 0.999)  # Slight decrease
+            self.learning_rate = max(self.min_learning_rate, 
+                                   self.learning_rate * 0.9995)  # Very slight decrease
         
-        # Also apply traditional epsilon decay but at slower rate
-        self.epsilon = max(self.min_epsilon, self.epsilon * 0.9998)  # Slower decay
+        # Also apply traditional epsilon decay but at much slower rate when not stuck
+        if self.time_since_good_value <= 5.0:
+            self.epsilon = max(self.min_epsilon, self.epsilon * 0.9998)  # Slower decay only when doing well
         
     def cycle_goal(self):
         """Cycle to the next goal (like Java implementation)."""
@@ -367,8 +533,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         return self.q_table.get_adaptive_learning_rate(state, action, self.learning_rate)
             
     def get_reward(self, prev_x: float) -> float:
-        """Use acceleration-based reward system focused on rightward movement."""
-        reward = self.get_acceleration_reward(prev_x)
+        """Use comprehensive crawling-specific reward system."""
+        reward = self.get_crawling_reward(prev_x)
         
         # Track immediate reward for debugging
         self.immediate_reward = reward
@@ -376,14 +542,25 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Add to recent rewards for performance tracking
         self.recent_rewards.append(reward)
         
-        # DEBUG LOGGING - enabled temporarily to monitor acceleration-based rewards
-        if self.id == 0 and self.steps % 100 == 0:  # Only for first agent, every 100 steps
+        # Update best / worst rewards seen so far this episode
+        if reward > self.best_reward_received:
+            self.best_reward_received = reward
+        if reward < self.worst_reward_received:
+            self.worst_reward_received = reward
+        
+        # UPDATE TIME SINCE GOOD VALUE (Java-inspired pattern)
+        # If this reward is good enough, reset the timer; otherwise increment it
+        if reward > self.performance_threshold:  # Good reward threshold
+            self.time_since_good_value = 0.0  # Reset timer on good performance
+        else:
+            self.time_since_good_value += 1.0  # Increment timer when performance is poor
+        
+        # DEBUG LOGGING - monitor crawling reward components (less frequent to avoid spam)
+        if self.id == 0 and self.steps % 200 == 0:  # Only for first agent, every 200 steps
             current_x = self.body.position.x
             displacement = current_x - prev_x
-            acceleration = displacement - getattr(self, 'prev_velocity', 0.0)
-            print(f"💰 Acceleration Reward Debug Agent {self.id}:")
+            print(f"🐛 Crawling Reward Summary Agent {self.id}:")
             print(f"  Position: {current_x:.4f}, Displacement: {displacement:.4f}")
-            print(f"  Velocity: {displacement:.4f}, Acceleration: {acceleration:.4f}")
             print(f"  Reward: {reward:.4f}")
             print(f"  Total reward: {getattr(self, 'total_reward', 'N/A'):.2f}")
             print(f"  Recent avg: {np.mean(list(self.recent_rewards)[-50:]):.4f}")
@@ -445,10 +622,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
     def step(self, dt: float):
         """Enhanced step method with adaptive exploration and improved Q-learning."""
-        # No goal cycling needed - using simple acceleration-based rewards
+        # Using comprehensive crawling-specific reward system
         
-        # Initialize action if not set
-        if self.current_action_tuple == (0, 0) and self.current_action is None:
+        # Initialize action if not set (but we start with a real action now)
+        if self.current_action is None:
             self.current_state = self.get_discretized_state()
             action_idx = self.choose_action()
             self.current_action = action_idx
@@ -460,6 +637,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Always apply the current action (cheap operation)
         self.apply_action(self.current_action_tuple)
         
+        # DEBUG: Show what action is being applied for first agent
+        if self.id == 0 and self.steps % 100 == 0:
+            print(f"🎮 Agent {self.id} Step {self.steps}: Applying action {self.current_action_tuple}")
+            print(f"  Motor speeds: shoulder={self.current_action_tuple[0] * self.motor_speed:.2f}, elbow={self.current_action_tuple[1] * self.motor_speed:.2f}")
+            print(f"  Arm angles: shoulder={np.degrees(self.upper_arm.angle):.1f}°, elbow={np.degrees(self.lower_arm.angle):.1f}°")
+        
         # Track reward over time using multi-goal system
         current_x = self.body.position.x
         reward = self.get_reward(self.prev_x)
@@ -468,14 +651,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # CRITICAL: Update prev_x for next step
         self.prev_x = current_x
         
-        # Prevent total reward from exploding negatively (with higher threshold for enhanced system)
-        if self.total_reward < -20.0:  # Higher threshold for multi-goal system
-            self.total_reward = max(self.total_reward, -20.0)
-            if self.id == 0:  # Debug for first agent
-                print(f"⚠️  Agent {self.id}: Total reward capped at -20.0 to prevent explosion")
+        # Prevent total reward from exploding negatively (REDUCED: adjusted for new reward scale)
+        if self.total_reward < -5.0:  # REDUCED threshold for scaled-down reward system  
+            self.total_reward = max(self.total_reward, -5.0)
         
-        # Debug for first agent every 120 steps (less frequent) - Add performance monitoring
-        if self.id == 0 and self.steps % 120 == 0:
+        # Combined debug logging for agent 0, on a longer interval
+        if self.id == 0 and self.steps % 600 == 0:
             convergence = self.q_table.get_convergence_estimate()
             q_table_size = len(self.q_table.q_values)
             total_state_actions = sum(len(actions) for actions in self.q_table.q_values.values())
@@ -485,8 +666,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             print(f"    Action: {self.current_action_tuple}, Reward: {reward:.3f}")
             print(f"    Total reward: {self.total_reward:.2f}, Epsilon: {self.epsilon:.3f}")
             print(f"    🧠 Q-table: {q_table_size} states, {total_state_actions} state-actions, Convergence: {convergence:.3f}")
-            
-            # Performance warning - updated threshold for new state space (18×18×4 = 1,296 max states)
+
+            # Performance warning
             if q_table_size > 1000:
                 print(f"    ⚠️  Q-table getting large! {q_table_size} states may slow performance")
         
@@ -518,12 +699,14 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             self.current_action_tuple = self.actions[action_idx]
             self.add_action_to_history(action_idx)
             
-            # Debug for first agent - log state transitions and actions
-            if self.id == 0 and (self.current_action_tuple != previous_action_tuple or self.steps % 100 == 0):
+            # ENHANCED DEBUG: Show action changes for first agent
+            if self.id == 0 and (self.current_action_tuple != previous_action_tuple or self.steps % 300 == 0):
                 confidence_info = self.q_table.confidence_based_action(self.current_state)
-                print(f"🤖 Agent {self.id}: State {prev_state} -> {self.current_state}")
-                print(f"  Action {action_idx} = {self.current_action_tuple} (confident: {confidence_info[2]})")
+                print(f"🎯 Agent {self.id} Step {self.steps}: ACTION CHANGE")
+                print(f"  {previous_action_tuple} -> {self.current_action_tuple} (action {action_idx})")
+                print(f"  State: {self.current_state}, Confident: {confidence_info[2]}")
                 print(f"  Reward: {reward:.4f}, Epsilon: {self.epsilon:.3f}")
+                print(f"  Recent actions: {self.action_history[-5:] if len(self.action_history) >= 5 else self.action_history}")
         
         # Adaptive exploration and parameter updates
         if self.steps % 50 == 0:  # Update adaptation every 50 steps
@@ -591,21 +774,6 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             # CRITICAL: BOUND the new Q-value to prevent explosion
             self.new_value = np.clip(self.new_value, self.min_q_value, self.max_q_value)
             
-            # DEBUG LOGGING - temporarily enabled to diagnose Q-learning issues
-            if self.id == 0 and self.steps % 50 == 0:  # Debug first agent every 50 steps
-                print(f"📊 Q-Update Debug Agent {self.id}:")
-                print(f"  State: {self.current_state}")
-                print(f"  Action: {self.current_action} = {self.actions[self.current_action] if self.current_action is not None else 'None'}")
-                print(f"  Old Q-value: {self.old_value:.4f}")
-                print(f"  Reward: {reward:.4f}")
-                print(f"  Max next Q-value (clipped): {max_next_q_value:.4f}")
-                print(f"  Learning rate: {self.learning_rate:.4f}")
-                print(f"  New Q-value (clipped): {self.new_value:.4f}")
-                print(f"  Q-value change: {self.new_value - self.old_value:.4f}")
-                print(f"  Epsilon: {self.epsilon:.4f}")
-                print(f"  Total Q-states: {len(self.q_table.q_values)}")
-                print("---")
-            
             # Update the Q-table with bounded value
             self.q_table.set_q_value(self.current_state, self.current_action, self.new_value)
             
@@ -649,7 +817,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Reset action interval variables
         self.steps_since_last_action = 0
         self.steps_since_last_learning = 0
-        self.current_action_tuple = (0, 0)
+        self.current_action_tuple = (1, 0)  # FIXED: Start with a real action from the action list
         self.prev_x = self.initial_position[0]  # Use initial_position from parent class
         
         # Reset action history
@@ -666,6 +834,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Initialize velocity tracking for acceleration-based rewards
         self.prev_velocity = 0.0
         
+        # Reset crawling-specific tracking variables
+        self.recent_displacements = []
+        self.action_sequence = []
+        
         # Reset Q-value tracking
         self.best_value = 0.0
         self.worst_value = 0.0
@@ -677,6 +849,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.reward_mean = 0.0
         self.reward_std = 1.0
         self.reward_count = 0
+        
+        # Reset reward tracking
+        self.best_reward_received = -np.inf  # Start at -inf so first reward sets it
+        self.worst_reward_received = np.inf   # Start at +inf so first reward sets it
         
         # Reset velocity to prevent physics issues
         for part in [self.body, self.upper_arm, self.lower_arm] + self.wheels:
@@ -693,24 +869,23 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.body.linearVelocity = (0, 0)
         self.body.angularVelocity = 0
 
-        # Also reset arms and wheels relative to the body
-        # Get the anchor points from the joints
-        upper_arm_anchor = self.upper_arm_joint.localAnchorA
-        lower_arm_anchor = self.lower_arm_joint.localAnchorA
+        # Reset arms and wheels relative to the body using the original offsets
+        # These offsets match those used when creating joints in _create_joints()
+        base_x, base_y = float(self.body.position.x), float(self.body.position.y)
 
-        self.upper_arm.position = self.body.GetWorldPoint(upper_arm_anchor)
+        self.upper_arm.position = (base_x - 1.0, base_y + 1.0)
         self.upper_arm.angle = 0
         self.upper_arm.linearVelocity = (0, 0)
         self.upper_arm.angularVelocity = 0
-        
-        self.lower_arm.position = self.upper_arm.GetWorldPoint(lower_arm_anchor)
+
+        self.lower_arm.position = (self.upper_arm.position[0] + 1.0, self.upper_arm.position[1])
         self.lower_arm.angle = 0
         self.lower_arm.linearVelocity = (0, 0)
         self.lower_arm.angularVelocity = 0
 
-        for i, wheel in enumerate(self.wheels):
-            wheel_anchor = self.wheel_joints[i].localAnchorA
-            wheel.position = self.body.GetWorldPoint(wheel_anchor)
+        wheel_offsets = [(-1.0, -0.75), (1.0, -0.75)]
+        for wheel, offset in zip(self.wheels, wheel_offsets):
+            wheel.position = (base_x + offset[0], base_y + offset[1])
             wheel.linearVelocity = (0, 0)
             wheel.angularVelocity = 0
         
@@ -1023,10 +1198,5 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Wake up the bodies to ensure they respond
         self.upper_arm.awake = True
         self.lower_arm.awake = True
-        
-        # Debug: Print motor speeds occasionally for first agent
-        if self.id == 0 and self.steps % 200 == 0:  # Every 200 steps
-            print(f"🔧 Agent {self.id}: Motor speeds - shoulder: {shoulder_speed:.1f}, elbow: {elbow_speed:.1f}")
-            print(f"    Joint angles: shoulder: {np.degrees(self.upper_arm.angle):.1f}°, elbow: {np.degrees(self.lower_arm.angle):.1f}°")
         
         # Removed debug print to eliminate overhead - was running 1% of the time 
