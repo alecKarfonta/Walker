@@ -247,18 +247,16 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             # Stationary - neutral reward
             base_reward = 0.0
         
-        # MUCH GENTLER speed penalties with bounds
+        # EXTREMELY GENTLE speed penalties - prevent negative accumulation
         speed_penalty = 0.0
-        if abs(self.speed) < 0.5:  # If moving slowly
-            # Much smaller penalty for being slow
-            if abs(self.acceleration) < 0.1:  # Very little acceleration
-                speed_penalty = -0.05  # Reduced from -0.2
-            elif abs(self.acceleration) < 0.2:  # Some acceleration but not much
-                speed_penalty = -0.02  # Reduced from -0.1
+        if abs(self.speed) < 0.2:  # Only penalize if barely moving
+            # Very tiny penalty to avoid negative accumulation
+            if abs(self.acceleration) < 0.05:  # Almost no acceleration
+                speed_penalty = -0.001  # Extremely small penalty
         
-        # Much gentler penalty for negative acceleration when moving slowly
-        if abs(self.speed) < 0.5 and self.acceleration < -0.1:
-            speed_penalty -= 0.03  # Reduced from -0.15
+        # Remove negative acceleration penalty entirely - it was causing accumulation
+        # if abs(self.speed) < 0.5 and self.acceleration < -0.1:
+        #     speed_penalty -= 0.03
         
         # Add small positive reward for any forward progress to encourage exploration
         progress_reward = 0.0
@@ -267,22 +265,21 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         final_reward = base_reward + speed_penalty + progress_reward
         
-        # BOUND THE FINAL REWARD to prevent extreme values
-        final_reward = np.clip(final_reward, -0.5, 1.0)  # Limit negative rewards to -0.5, positive to 1.0
+        # BOUND THE FINAL REWARD to prevent extreme values - much tighter bounds
+        final_reward = np.clip(final_reward, -0.01, 0.5)  # Very small negative, moderate positive
         
-        # DEBUG LOGGING
-        #print(f"Reward Debug:")
-        #print(f"  Raw x_velocity: {self.body.linearVelocity.x:.4f}")
-        #print(f"  Thresholded x_velocity: {x_velocity:.4f}")
-        #print(f"  Speed (moving avg): {self.speed:.4f}")
-        #print(f"  Acceleration: {self.acceleration:.4f}")
-        #print(f"  Speed weight: {self.speed_value_weight:.4f}")
-        #print(f"  Acceleration weight: {self.acceleration_value_weight:.4f}")
-        #print(f"  Base reward: {base_reward:.4f}")
-        #print(f"  Speed penalty: {speed_penalty:.4f}")
-        #print(f"  Progress reward: {progress_reward:.4f}")
-        #print(f"  Final reward: {final_reward:.4f}")
-        #print("---")
+        # DEBUG LOGGING - enabled temporarily to monitor rewards
+        if self.id == 0 and self.steps % 50 == 0:  # Only for first agent, every 50 steps
+            print(f"💰 Reward Debug Agent {self.id}:")
+            print(f"  Raw x_velocity: {self.body.linearVelocity.x:.4f}")
+            print(f"  Speed (moving avg): {self.speed:.4f}")
+            print(f"  Acceleration: {self.acceleration:.4f}")
+            print(f"  Base reward: {base_reward:.4f}")
+            print(f"  Speed penalty: {speed_penalty:.4f}")
+            print(f"  Progress reward: {progress_reward:.4f}")
+            print(f"  Final reward: {final_reward:.4f}")
+            print(f"  Total reward: {getattr(self, 'total_reward', 'N/A'):.2f}")
+            print("---")
         
         return final_reward
         
@@ -338,6 +335,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         current_x = self.body.position.x
         reward = self.get_reward(self.prev_x)
         self.total_reward += reward
+        
+        # Prevent total reward from exploding negatively
+        if self.total_reward < -10.0:  # If accumulated reward is too negative
+            self.total_reward = max(self.total_reward, -10.0)  # Cap at -10
+            if self.id == 0:  # Debug for first agent
+                print(f"⚠️  Agent {self.id}: Total reward capped at -10.0 to prevent explosion")
         
         # Debug for first agent every 100 steps
         if self.id == 0 and self.steps % 100 == 0:
