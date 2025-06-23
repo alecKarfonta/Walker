@@ -2451,7 +2451,7 @@ def get_evaluation_diagnostics():
 
 def main():
     # Set a different port for the web server to avoid conflicts
-    web_port = 7777
+    web_port = 8080
     
     # Start the training loop
     env.start()
