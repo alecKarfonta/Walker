@@ -96,6 +96,9 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         self.fitness_history = []
         self.diversity_score = 0.0
         
+        # Destruction tracking to prevent core dumps
+        self._destroyed = False
+        
     def _create_evolutionary_body(self):
         """Create body using evolved physical parameters."""
         body_def = b2.b2BodyDef(
@@ -548,15 +551,50 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         self.reset_position()
         
     def destroy(self):
-        """Clean up physics bodies."""
-        if hasattr(self, 'body') and self.body:
-            self.world.DestroyBody(self.body)
-        if hasattr(self, 'upper_arm') and self.upper_arm:
-            self.world.DestroyBody(self.upper_arm)
-        if hasattr(self, 'lower_arm') and self.lower_arm:
-            self.world.DestroyBody(self.lower_arm)
-        if hasattr(self, 'wheels'):
-            for wheel in self.wheels:
-                if wheel:
-                    self.world.DestroyBody(wheel)
-        # Joints are automatically destroyed when bodies are destroyed 
+        """Clean up physics bodies safely."""
+        try:
+            # Mark as destroyed to prevent further use
+            self._destroyed = True
+            
+            # Disable motors first to prevent issues during destruction
+            if hasattr(self, 'upper_arm_joint') and self.upper_arm_joint:
+                try:
+                    self.upper_arm_joint.enableMotor = False
+                except:
+                    pass
+            if hasattr(self, 'lower_arm_joint') and self.lower_arm_joint:
+                try:
+                    self.lower_arm_joint.enableMotor = False
+                except:
+                    pass
+            
+            # Destroy bodies in order (Box2D will handle joints automatically)
+            if hasattr(self, 'wheels'):
+                for wheel in self.wheels:
+                    if wheel:
+                        try:
+                            self.world.DestroyBody(wheel)
+                        except:
+                            pass
+            
+            if hasattr(self, 'lower_arm') and self.lower_arm:
+                try:
+                    self.world.DestroyBody(self.lower_arm)
+                except:
+                    pass
+            
+            if hasattr(self, 'upper_arm') and self.upper_arm:
+                try:
+                    self.world.DestroyBody(self.upper_arm)
+                except:
+                    pass
+            
+            if hasattr(self, 'body') and self.body:
+                try:
+                    self.world.DestroyBody(self.body)
+                except:
+                    pass
+                
+        except Exception as e:
+            print(f"⚠️  Error in destroy() for agent {getattr(self, 'id', 'unknown')}: {e}")
+            self._destroyed = True 
