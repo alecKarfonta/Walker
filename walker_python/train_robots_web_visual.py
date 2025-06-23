@@ -66,13 +66,13 @@ HTML_TEMPLATE = """
         /* The new RTS-style bottom bar */
         #bottom-bar {
             flex-shrink: 0; /* Prevent the bar from shrinking */
-            height: 180px; /* More compact height */
+            height: 280px; /* Increased height for better visibility */
             background: rgba(15, 20, 35, 0.95);
             border-top: 2px solid #e74c3c;
             box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
             display: flex;
-            padding: 8px; /* Reduced padding */
-            gap: 8px;   /* Reduced gap */
+            padding: 12px; /* Increased padding */
+            gap: 12px;   /* Increased gap */
             z-index: 100;
             overflow: hidden;
         }
@@ -136,13 +136,54 @@ HTML_TEMPLATE = """
             letter-spacing: 0.5px; /* Tighter spacing */
         }
 
-        .stat-row, .robot-stat-row { 
+        .stat-row { 
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 4px 0; /* Tighter padding */
             border-bottom: 1px solid rgba(52, 152, 219, 0.15);
             font-size: 13px; /* Smaller font */
+        }
+
+        .robot-stat-row { 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px; /* More padding for button-like feel */
+            border-bottom: 1px solid rgba(52, 152, 219, 0.15);
+            font-size: 13px;
+            cursor: pointer; /* Show it's clickable */
+            transition: all 0.2s ease;
+            border-radius: 6px;
+            margin: 2px 0;
+            background: rgba(52, 152, 219, 0.1);
+            border-left: 3px solid transparent;
+            user-select: none; /* Prevent text selection */
+            position: relative;
+        }
+
+        .robot-stat-row:hover {
+            background: rgba(52, 152, 219, 0.3);
+            transform: translateX(3px);
+            border-left: 3px solid #3498db;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+        }
+
+        .robot-stat-row:active {
+            background: rgba(52, 152, 219, 0.4);
+            transform: translateX(1px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+
+        .robot-stat-row.focused {
+            background: rgba(231, 76, 60, 0.8);
+            border-left: 3px solid #c0392b;
+            color: white;
+        }
+
+        .robot-stat-row.focused:hover {
+            background: rgba(192, 57, 43, 0.9);
+            border-left: 3px solid #a93226;
         }
 
         .stat-label, .robot-stat-label { color: #bdc3c7; }
@@ -152,6 +193,15 @@ HTML_TEMPLATE = """
             background: #34495e;
             padding: 3px 8px;
             border-radius: 4px;
+        }
+
+        .robot-stat-row.focused .robot-stat-label,
+        .robot-stat-row.focused .robot-stat-value {
+            color: #fff;
+        }
+
+        .robot-stat-row.focused .robot-stat-value {
+            background: rgba(255, 255, 255, 0.2);
         }
 
         /* Collapsible control panels */
@@ -327,23 +377,35 @@ HTML_TEMPLATE = """
         resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
 
-        document.body.addEventListener('click', (e) => {
-            const robotStatElement = e.target.closest('[data-agent-id]');
-            if (robotStatElement) {
-                const agentId = robotStatElement.dataset.agentId;
-                console.log(`Leaderboard item clicked for agent: ${agentId}`);
-                
+        const bottomBar = document.getElementById('bottom-bar');
+        bottomBar.addEventListener('click', function(e) {
+            const robotRow = e.target.closest('.robot-stat-row');
+            if (robotRow && robotRow.dataset.agentId) {
+                // This is a click on a leaderboard button. Stop it from doing anything else.
+                e.preventDefault();
+                e.stopPropagation();
+
+                const agentId = parseInt(robotRow.dataset.agentId);
+                console.log(`🎯 Leaderboard button clicked for agent: ${agentId}`);
+
+                // Send the click to the server to select the agent
                 fetch('/click', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ agent_id: parseInt(agentId) })
+                    body: JSON.stringify({ agent_id: agentId })
                 })
                 .then(response => response.json())
                 .then(data => {
+                    console.log(`✅ Server response to click:`, data);
                     if (data.status === 'success') {
+                        // The server now knows who is focused.
+                        // The next update from fetchData will update the visuals.
                         focusedAgentId = data.agent_id;
-                        console.log(`✅ Agent ${data.agent_id} selected via leaderboard!`);
+                        console.log(`✅ Client focus set to agent ${data.agent_id}.`);
                     }
+                })
+                .catch(error => {
+                    console.error('❌ Error during leaderboard click fetch:', error);
                 });
             }
         });
@@ -553,12 +615,21 @@ HTML_TEMPLATE = """
             // Update leaderboard
             const leaderboardContent = document.getElementById('leaderboard-content');
             if (leaderboardContent && data.leaderboard) {
-                leaderboardContent.innerHTML = data.leaderboard.map(robot => `
-                    <div class="robot-stat-row" data-agent-id="${robot.id}">
-                        <span class="robot-stat-label">${robot.name}</span>
-                        <span class="robot-stat-value">${robot.distance.toFixed(2)}m</span>
-                    </div>
-                `).join('');
+                console.log(`📊 Updating leaderboard with ${data.leaderboard.length} robots, focused: ${data.focused_agent_id}`);
+                leaderboardContent.innerHTML = data.leaderboard.map((robot, index) => {
+                    const isFocused = robot.id === data.focused_agent_id;
+                    const focusedClass = isFocused ? ' focused' : '';
+                    console.log(`   Robot ${robot.id}: focused=${isFocused}, class="${focusedClass}"`);
+                    return `
+                        <div class="robot-stat-row${focusedClass}" data-agent-id="${robot.id}" title="Click to focus on Robot ${robot.id}">
+                            <span class="robot-stat-label">${robot.name}${isFocused ? ' 🎯' : ''}</span>
+                            <span class="robot-stat-value">${robot.distance.toFixed(2)}m</span>
+                        </div>
+                    `;
+                }).join('');
+                
+                // After updating leaderboard HTML, make sure visual focus is correct
+                updateLeaderboardVisualFocus();
             }
 
             // Update population summary
@@ -744,6 +815,8 @@ HTML_TEMPLATE = """
                     setTimeout(fetchData, 1000); // Try again after a second
                 });
         }
+        
+        // Start the main loop
         fetchData();
 
         function updateFocusIndicator() {
@@ -757,6 +830,19 @@ HTML_TEMPLATE = """
             } else {
                 indicator.style.display = 'none';
             }
+        }
+
+        function updateLeaderboardVisualFocus() {
+            // Update the visual state of leaderboard items
+            const leaderboardItems = document.querySelectorAll('.robot-stat-row[data-agent-id]');
+            leaderboardItems.forEach(item => {
+                const itemAgentId = parseInt(item.dataset.agentId);
+                if (itemAgentId === focusedAgentId) {
+                    item.classList.add('focused');
+                } else {
+                    item.classList.remove('focused');
+                }
+            });
         }
 
         // --- Control Panel Interactivity ---
@@ -917,8 +1003,8 @@ class TrainingEnvironment:
         self.episode_step = 0
         
         # Statistics update timing
-        self.stats_update_interval = 0.1  # Update stats every 0.1 seconds
-        self.steps_per_stats_update = int(self.stats_update_interval / self.dt)  # 6 steps at 60fps
+        self.stats_update_interval = 1.0  # Update stats every 1.0 seconds
+        self.steps_per_stats_update = int(self.stats_update_interval / self.dt)
         self.last_stats_update = 0
         
         # Settle the world
@@ -1049,7 +1135,7 @@ class TrainingEnvironment:
             # Update camera and statistics (can be done once per frame)
             self.update_camera(frame_time)
             
-            if current_time - last_stats_time > 0.1:
+            if current_time - last_stats_time > self.stats_update_interval:
                 self._update_statistics()
                 last_stats_time = current_time
             
@@ -1176,7 +1262,7 @@ class TrainingEnvironment:
         # 3. Get leaderboard data (top 10 robots)
         sorted_robots = sorted(self.robot_stats.values(), key=lambda r: r.get('total_distance', 0), reverse=True)
         leaderboard_data = [
-            {'name': f"Robot {r['id']}", 'distance': r.get('total_distance', 0)}
+            {'id': r['id'], 'name': f"Robot {r['id']}", 'distance': r.get('total_distance', 0)}
             for r in sorted_robots[:10]
         ]
         
