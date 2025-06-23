@@ -839,7 +839,14 @@ def convert_numpy_types(obj):
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, dict):
-        return {key: convert_numpy_types(value) for key, value in obj.items()}
+        # Create a copy of the dictionary to avoid "dictionary changed size during iteration" error
+        # This happens when Q-learning agents are actively updating the Q-table while we read it
+        try:
+            dict_copy = dict(obj)  # Make a shallow copy
+            return {key: convert_numpy_types(value) for key, value in dict_copy.items()}
+        except RuntimeError:
+            # If we still get a RuntimeError, return an empty dict as fallback
+            return {}
     elif isinstance(obj, list):
         return [convert_numpy_types(item) for item in obj]
     elif isinstance(obj, tuple):
@@ -1052,6 +1059,25 @@ class TrainingEnvironment:
                     print(f"   Agent 0: action={first_agent.current_action_tuple}, "
                           f"state={first_agent.current_state}, "
                           f"steps={first_agent.steps}")
+                    
+                    # Add arm angle debugging
+                    shoulder_angle_deg = np.degrees(first_agent.upper_arm.angle)
+                    elbow_angle_deg = np.degrees(first_agent.lower_arm.angle)
+                    print(f"   Agent 0 Arms: shoulder={shoulder_angle_deg:.1f}°, elbow={elbow_angle_deg:.1f}°")
+                    print(f"   Agent 0 Arm positions: upper=({first_agent.upper_arm.position.x:.2f}, {first_agent.upper_arm.position.y:.2f}), "
+                          f"lower=({first_agent.lower_arm.position.x:.2f}, {first_agent.lower_arm.position.y:.2f})")
+                    
+                    # Check if we're hitting joint limits
+                    shoulder_at_limit = abs(first_agent.upper_arm.angle) >= np.pi/2 * 0.9  # Within 10% of ±90° limit
+                    elbow_at_limit = (first_agent.lower_arm.angle <= 0.1 or first_agent.lower_arm.angle >= 3*np.pi/4 * 0.9)
+                    if shoulder_at_limit or elbow_at_limit:
+                        limits = []
+                        if shoulder_at_limit:
+                            limits.append(f"shoulder (±90°)")
+                        if elbow_at_limit:
+                            limits.append(f"elbow (0-135°)")
+                        print(f"   ⚠️  Agent 0: Joint limits reached: {', '.join(limits)}")
+                        
                 last_debug_time = current_time
             
             # Sleep to maintain target FPS
