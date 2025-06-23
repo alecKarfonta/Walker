@@ -1,0 +1,2068 @@
+{
+  "67e89e1e": {
+    "individual": {
+      "robot_id": "67e89e1e",
+      "convergence_score": 0.9900255197369443,
+      "exploration_efficiency": 0.008234265160688876,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.2574361170853171,
+      "stability_trend": 0.9996301976498216,
+      "recent_performance": 0.007598876953125
+    },
+    "behavior": {
+      "robot_id": "67e89e1e",
+      "movement_efficiency": 0.026492048353872037,
+      "learning_velocity": 29.637798703499058,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.8493103215963003,
+      "speed_consistency": 0.9853816172469548,
+      "knowledge_retention": 0.9872170924400744,
+      "generalization_ability": 1.3791220558141988
+    },
+    "exploration": {
+      "robot_id": "67e89e1e",
+      "state_coverage": 9.0,
+      "coverage_efficiency": 0.0008916187834357044,
+      "exploration_breadth": 0.9732265278682558,
+      "exploration_depth": 0.23076923076923078,
+      "exploration_redundancy": 0.3076923076923077,
+      "targeted_success": 1.0,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "67e89e1e",
+      "action_entropy": 2.199687794731328,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.004801864624023437
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          -0.004133707682291667
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "67e89e1e",
+      "convergence_rate": 0.9900255197369443,
+      "convergence_stability": 0.9999850653276121,
+      "sample_efficiency": 0.002395506530164026,
+      "policy_stability": 0.0,
+      "q_table_size": 40,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "1ca69166": {
+    "individual": {
+      "robot_id": "1ca69166",
+      "convergence_score": 0.9930397180063886,
+      "exploration_efficiency": 0.00015506187355709757,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.004847855377197258,
+      "stability_trend": 0.9999683912828914,
+      "recent_performance": 0.00792236328125
+    },
+    "behavior": {
+      "robot_id": "1ca69166",
+      "movement_efficiency": 0.0010814746110680694,
+      "learning_velocity": 1.6994839096069332,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.18705910520879676,
+      "speed_consistency": 0.9423009241300464,
+      "knowledge_retention": 0.9920237728643732,
+      "generalization_ability": 0.024239276885986292
+    },
+    "exploration": {
+      "robot_id": "1ca69166",
+      "state_coverage": 4.0,
+      "coverage_efficiency": 0.00039627501486031304,
+      "exploration_breadth": 0.6760150508789764,
+      "exploration_depth": 0.07692307692307693,
+      "exploration_redundancy": 0.6923076923076923,
+      "targeted_success": 1.0,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "1ca69166",
+      "action_entropy": 0.7793498372920851,
+      "sequence_complexity": 0.36363636363636365,
+      "unique_combinations": 2,
+      "best_actions": [
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.00402587890625
+        ]
+      ],
+      "action_diversity_score": 2
+    },
+    "q_learning": {
+      "robot_id": "1ca69166",
+      "convergence_rate": 0.9930397180063886,
+      "convergence_stability": 0.9999956399233221,
+      "sample_efficiency": 0.00010281209374512602,
+      "policy_stability": 0.0,
+      "q_table_size": 39,
+      "learning_plateau": false,
+      "exploration_balance": 0.07271783065795887,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "10d1d32f": {
+    "individual": {
+      "robot_id": "10d1d32f",
+      "convergence_score": 0.999037121850821,
+      "exploration_efficiency": 0.0005319925675402927,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.01663221893310559,
+      "stability_trend": 0.9980935916537419,
+      "recent_performance": 0.000551910400390625
+    },
+    "behavior": {
+      "robot_id": "10d1d32f",
+      "movement_efficiency": -0.005288955502541249,
+      "learning_velocity": 1.4924790954589917,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.0,
+      "speed_consistency": 0.9789725891262383,
+      "knowledge_retention": 0.9993722593639842,
+      "generalization_ability": 0.06742791459367131
+    },
+    "exploration": {
+      "robot_id": "10d1d32f",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.9577135598377112,
+      "exploration_depth": 0.3076923076923077,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 1.0,
+      "novel_discoveries": 3
+    },
+    "action_space": {
+      "robot_id": "10d1d32f",
+      "action_entropy": 2.133937566094917,
+      "sequence_complexity": 0.9090909090909091,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(-1, -1)",
+          0.0004901123046875001
+        ],
+        [
+          "(0, -1)",
+          0.0004166666666666667
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          -0.009375
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "10d1d32f",
+      "convergence_rate": 0.999037121850821,
+      "convergence_stability": 0.9999996075056761,
+      "sample_efficiency": 0.00021036674928751812,
+      "policy_stability": 0.0,
+      "q_table_size": 43,
+      "learning_plateau": false,
+      "exploration_balance": 0.24948328399658384,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "a5e18dc6": {
+    "individual": {
+      "robot_id": "a5e18dc6",
+      "convergence_score": 0.9995977092162665,
+      "exploration_efficiency": 0.001062300831389366,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.033211779785156166,
+      "stability_trend": 0.999943015507597,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "a5e18dc6",
+      "movement_efficiency": 0.012918687324984983,
+      "learning_velocity": 4.503953704833977,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.7333468241347331,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.9995859713710181,
+      "generalization_ability": 0.17178506785425604
+    },
+    "exploration": {
+      "robot_id": "a5e18dc6",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.8904104442028662,
+      "exploration_depth": 0.07692307692307693,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 1.0,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "a5e18dc6",
+      "action_entropy": 2.4116022179746714,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 6,
+      "best_actions": [
+        [
+          "(1, 1)",
+          0.0017445882161458333
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(-1, 0)",
+          0.0
+        ]
+      ],
+      "action_diversity_score": 6
+    },
+    "q_learning": {
+      "robot_id": "a5e18dc6",
+      "convergence_rate": 0.9995977092162665,
+      "convergence_stability": 0.9999971497430231,
+      "sample_efficiency": 0.00036080298449729116,
+      "policy_stability": 0.0,
+      "q_table_size": 40,
+      "learning_plateau": false,
+      "exploration_balance": 0.49817669677734255,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "193ce6e3": {
+    "individual": {
+      "robot_id": "193ce6e3",
+      "convergence_score": 0.9993402574266648,
+      "exploration_efficiency": 0.009506596904060196,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.297214304606121,
+      "stability_trend": 0.997699431842193,
+      "recent_performance": 0.00050689697265625
+    },
+    "behavior": {
+      "robot_id": "193ce6e3",
+      "movement_efficiency": 0.02646096087645275,
+      "learning_velocity": 1.5193769836426156,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.849209923226331,
+      "speed_consistency": 0.8093085122801493,
+      "knowledge_retention": 0.999286079857565,
+      "generalization_ability": 1.4381337319651017
+    },
+    "exploration": {
+      "robot_id": "193ce6e3",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.9770696496367743,
+      "exploration_depth": 0.7692307692307693,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 0.7,
+      "novel_discoveries": 6
+    },
+    "action_space": {
+      "robot_id": "193ce6e3",
+      "action_entropy": 1.95006375643621,
+      "sequence_complexity": 0.9090909090909091,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(0, 1)",
+          0.008369140625
+        ],
+        [
+          "(0, -1)",
+          0.001575469970703125
+        ],
+        [
+          "(-1, -1)",
+          0.000645751953125
+        ],
+        [
+          "(1, 0)",
+          -0.006666666666666667
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "193ce6e3",
+      "convergence_rate": 0.9993402574266648,
+      "convergence_stability": 0.9999804668834642,
+      "sample_efficiency": 0.002755423959500139,
+      "policy_stability": 0.0,
+      "q_table_size": 42,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "1d3b4a0f": {
+    "individual": {
+      "robot_id": "1d3b4a0f",
+      "convergence_score": 0.9897385651915271,
+      "exploration_efficiency": 0.015581410400217856,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.7730060449906353,
+      "stability_trend": 0.998711887281388,
+      "recent_performance": 0.013271484375000002
+    },
+    "behavior": {
+      "robot_id": "1d3b4a0f",
+      "movement_efficiency": 0.048556137916379,
+      "learning_velocity": 50.724873046875594,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.9125077990651822,
+      "speed_consistency": 0.9957775485933424,
+      "knowledge_retention": 0.9863001558469076,
+      "generalization_ability": 3.1195507158552105
+    },
+    "exploration": {
+      "robot_id": "1d3b4a0f",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9479479190038742,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 1.0,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "1d3b4a0f",
+      "action_entropy": 1.8339272176418302,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.008273111979166668
+        ],
+        [
+          "(-1, -1)",
+          0.005389404296875
+        ],
+        [
+          "(1, 0)",
+          0.0015348307291666665
+        ],
+        [
+          "(0, 1)",
+          -0.002947998046875
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "1d3b4a0f",
+      "convergence_rate": 0.9897385651915271,
+      "convergence_stability": 0.9999774754064551,
+      "sample_efficiency": 0.005343671499853521,
+      "policy_stability": 0.0,
+      "q_table_size": 41,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "2db74f05": {
+    "individual": {
+      "robot_id": "2db74f05",
+      "convergence_score": 0.9881249858992883,
+      "exploration_efficiency": 0.00955983153634351,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.28190150689816695,
+      "stability_trend": 0.9978977779392153,
+      "recent_performance": 0.00714111328125
+    },
+    "behavior": {
+      "robot_id": "2db74f05",
+      "movement_efficiency": 0.031810357638200906,
+      "learning_velocity": 37.307354125976445,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.8739941912975842,
+      "speed_consistency": 0.9951304019317819,
+      "knowledge_retention": 0.9893507287522109,
+      "generalization_ability": 1.1700412750244096
+    },
+    "exploration": {
+      "robot_id": "2db74f05",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9686322539060781,
+      "exploration_depth": 0.3076923076923077,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 0.5,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "2db74f05",
+      "action_entropy": 2.1619781796795534,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.003338623046875
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          -0.02
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "2db74f05",
+      "convergence_rate": 0.9881249858992883,
+      "convergence_stability": 0.9999778902650973,
+      "sample_efficiency": 0.0023244638137217286,
+      "policy_stability": 0.0,
+      "q_table_size": 41,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "8b69090b": {
+    "individual": {
+      "robot_id": "8b69090b",
+      "convergence_score": 0.9958726592332506,
+      "exploration_efficiency": 0.003658401571723397,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.15287732993380154,
+      "stability_trend": 0.9990780042135157,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "8b69090b",
+      "movement_efficiency": 0.013715178276350739,
+      "learning_velocity": 13.372152709960607,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.7422645763749532,
+      "speed_consistency": 0.5004995004995005,
+      "knowledge_retention": 0.9963034881203042,
+      "generalization_ability": 0.5988234842234721
+    },
+    "exploration": {
+      "robot_id": "8b69090b",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9138311481971516,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 0.5,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "8b69090b",
+      "action_entropy": 2.5073801024236357,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 6,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.000625
+        ],
+        [
+          "(1, 0)",
+          0.0004166666666666667
+        ],
+        [
+          "(-1, -1)",
+          0.00018402099609374998
+        ],
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ]
+      ],
+      "action_diversity_score": 6
+    },
+    "q_learning": {
+      "robot_id": "8b69090b",
+      "convergence_rate": 0.9958726592332506,
+      "convergence_stability": 0.9999914445566113,
+      "sample_efficiency": 0.0011099428337268077,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "3c2e0f7d": {
+    "individual": {
+      "robot_id": "3c2e0f7d",
+      "convergence_score": 0.9965597825987104,
+      "exploration_efficiency": 0.006849351911243375,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.20863539162990663,
+      "stability_trend": 0.9999929439668449,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "3c2e0f7d",
+      "movement_efficiency": 0.025415717197310127,
+      "learning_velocity": 12.37581817626831,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.8407838007521573,
+      "speed_consistency": -0.22230027084988935,
+      "knowledge_retention": 0.9976731929671818,
+      "generalization_ability": 0.9116171819513151
+    },
+    "exploration": {
+      "robot_id": "3c2e0f7d",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.8845147656768563,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 0.5,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "3c2e0f7d",
+      "action_entropy": 2.161978179679554,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(0, 1)",
+          0.0014739990234375001
+        ],
+        [
+          "(1, 0)",
+          0.0013031005859375
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(-1, 0)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          -0.0065148925781250006
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "3c2e0f7d",
+      "convergence_rate": 0.9965597825987104,
+      "convergence_stability": 0.9999903113580433,
+      "sample_efficiency": 0.0018787293662031889,
+      "policy_stability": 0.0,
+      "q_table_size": 44,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "d530fc22": {
+    "individual": {
+      "robot_id": "d530fc22",
+      "convergence_score": 0.9999682934844117,
+      "exploration_efficiency": -0.00028965763659667156,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.013619381618550358,
+      "stability_trend": 0.9987845935393125,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "d530fc22",
+      "movement_efficiency": -0.003743505203915228,
+      "learning_velocity": -3.0131317138671734,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.0,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.9999728692305992,
+      "generalization_ability": -0.03860632919683671
+    },
+    "exploration": {
+      "robot_id": "d530fc22",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.9383574700386479,
+      "exploration_depth": 0.07692307692307693,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 1.0,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "d530fc22",
+      "action_entropy": 2.2577560641285177,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(0, 1)",
+          0.0011415100097656248
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          -0.00219635009765625
+        ],
+        [
+          "(-1, 0)",
+          -0.01
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "d530fc22",
+      "convergence_rate": 0.9999682934844117,
+      "convergence_stability": 0.9999882340787608,
+      "sample_efficiency": -0.00034048164676913104,
+      "policy_stability": 0.0,
+      "q_table_size": 48,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "cbae40eb": {
+    "individual": {
+      "robot_id": "cbae40eb",
+      "convergence_score": 0.9999881865060821,
+      "exploration_efficiency": -0.00030747026517710267,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.011809905630203689,
+      "stability_trend": 0.9987427169689909,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "cbae40eb",
+      "movement_efficiency": -0.0011982246037636837,
+      "learning_velocity": -1.6981072998046984,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.0,
+      "speed_consistency": 4.061546475402446,
+      "knowledge_retention": 0.9999704737743823,
+      "generalization_ability": -0.04806376139322924
+    },
+    "exploration": {
+      "robot_id": "cbae40eb",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.8904104442028663,
+      "exploration_depth": 0.15384615384615385,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 1.0,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "cbae40eb",
+      "action_entropy": 1.5465935642949382,
+      "sequence_complexity": 0.5454545454545454,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, 0)",
+          -0.00013946533203125
+        ],
+        [
+          "(1, 1)",
+          -0.00038452148437500004
+        ],
+        [
+          "(0, 1)",
+          -0.009375
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "cbae40eb",
+      "convergence_rate": 0.9999881865060821,
+      "convergence_stability": 0.9999965066503309,
+      "sample_efficiency": -0.00014069615229648735,
+      "policy_stability": 0.0,
+      "q_table_size": 40,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "3f088354": {
+    "individual": {
+      "robot_id": "3f088354",
+      "convergence_score": 0.9808081704709326,
+      "exploration_efficiency": 0.021431946557703075,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.5021018920898438,
+      "stability_trend": 0.9989423130173236,
+      "recent_performance": 0.011689453124999999
+    },
+    "behavior": {
+      "robot_id": "3f088354",
+      "movement_efficiency": 0.041765349440842016,
+      "learning_velocity": 43.2748229980469,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.8995348004115553,
+      "speed_consistency": 0.9972343334207173,
+      "knowledge_retention": 0.9814754156232123,
+      "generalization_ability": 2.597078752188847
+    },
+    "exploration": {
+      "robot_id": "3f088354",
+      "state_coverage": 6.0,
+      "coverage_efficiency": 0.0005944125222904696,
+      "exploration_breadth": 0.8850355544046856,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.5384615384615384,
+      "targeted_success": 0.6666666666666666,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "3f088354",
+      "action_entropy": 1.669180336866731,
+      "sequence_complexity": 0.7272727272727273,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(1, 1)",
+          0.009774169921875001
+        ],
+        [
+          "(0, -1)",
+          0.004384765624999999
+        ],
+        [
+          "(1, 0)",
+          0.0016699218749999997
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "3f088354",
+      "convergence_rate": 0.9808081704709326,
+      "convergence_stability": 0.999938993323854,
+      "sample_efficiency": 0.004603817588404605,
+      "policy_stability": 0.0,
+      "q_table_size": 40,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "48c3b5bc": {
+    "individual": {
+      "robot_id": "48c3b5bc",
+      "convergence_score": 0.992818869298072,
+      "exploration_efficiency": 0.012134702124471593,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.6654646379140159,
+      "stability_trend": 0.9996469702746253,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "48c3b5bc",
+      "movement_efficiency": 0.0413026879607084,
+      "learning_velocity": 41.68413452148358,
+      "adaptation_speed": 0.07710100231303006,
+      "trajectory_optimization": 0.9028255625122079,
+      "speed_consistency": -1.9761904761904763,
+      "knowledge_retention": 0.9917675398846373,
+      "generalization_ability": 1.7107503109886353
+    },
+    "exploration": {
+      "robot_id": "48c3b5bc",
+      "state_coverage": 10.0,
+      "coverage_efficiency": 0.0009906875371507827,
+      "exploration_breadth": 0.9575261403463023,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.23076923076923078,
+      "targeted_success": 0.8333333333333334,
+      "novel_discoveries": 5
+    },
+    "action_space": {
+      "robot_id": "48c3b5bc",
+      "action_entropy": 2.5654483718208256,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 6,
+      "best_actions": [
+        [
+          "(1, 1)",
+          0.02267333984375
+        ],
+        [
+          "(-1, 0)",
+          0.007506103515624999
+        ],
+        [
+          "(-1, -1)",
+          0.004903564453125
+        ],
+        [
+          "(1, 0)",
+          -0.00036163330078125004
+        ],
+        [
+          "(0, -1)",
+          -0.007318725585937501
+        ]
+      ],
+      "action_diversity_score": 6
+    },
+    "q_learning": {
+      "robot_id": "48c3b5bc",
+      "convergence_rate": 0.992818869298072,
+      "convergence_stability": 0.9999547698344271,
+      "sample_efficiency": 0.004143675317781545,
+      "policy_stability": 0.0,
+      "q_table_size": 49,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "0dd7df57": {
+    "individual": {
+      "robot_id": "0dd7df57",
+      "convergence_score": 0.9941163448930384,
+      "exploration_efficiency": -0.0001559521133527687,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.003397986392870773,
+      "stability_trend": 0.9983169632032514,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "0dd7df57",
+      "movement_efficiency": 0.004796503746133996,
+      "learning_velocity": 0.4490429687499976,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.509650565640339,
+      "speed_consistency": -0.99849196721399,
+      "knowledge_retention": 0.9955282236685891,
+      "generalization_ability": -0.02074244572566116
+    },
+    "exploration": {
+      "robot_id": "0dd7df57",
+      "state_coverage": 6.0,
+      "coverage_efficiency": 0.0005944125222904696,
+      "exploration_breadth": 0.9699870314266159,
+      "exploration_depth": 0.0,
+      "exploration_redundancy": 0.5384615384615384,
+      "targeted_success": 0.0,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "0dd7df57",
+      "action_entropy": 1.8542858719872461,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 6,
+      "best_actions": [
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, 0)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ]
+      ],
+      "action_diversity_score": 6
+    },
+    "q_learning": {
+      "robot_id": "0dd7df57",
+      "convergence_rate": 0.9941163448930384,
+      "convergence_stability": 0.9999968959012276,
+      "sample_efficiency": 2.7128409993194053e-05,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "18a679fd": {
+    "individual": {
+      "robot_id": "18a679fd",
+      "convergence_score": 0.9800199936554604,
+      "exploration_efficiency": 0.01503834879057431,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.6352337302583233,
+      "stability_trend": 0.9981292543234304,
+      "recent_performance": 0.014785156249999999
+    },
+    "behavior": {
+      "robot_id": "18a679fd",
+      "movement_efficiency": 0.04990788008733529,
+      "learning_velocity": 49.888118286132794,
+      "adaptation_speed": 0.02395783421178725,
+      "trajectory_optimization": 0.9117107043869775,
+      "speed_consistency": 0.9849899981671999,
+      "knowledge_retention": 0.9789940196581248,
+      "generalization_ability": 2.461574476087412
+    },
+    "exploration": {
+      "robot_id": "18a679fd",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9138311481971516,
+      "exploration_depth": 0.7692307692307693,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 1.0,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "18a679fd",
+      "action_entropy": 2.5073801024236357,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 6,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.008739013671875
+        ],
+        [
+          "(0, 1)",
+          0.008277994791666667
+        ],
+        [
+          "(-1, 0)",
+          0.007392578124999999
+        ],
+        [
+          "(1, 1)",
+          0.002643025716145834
+        ],
+        [
+          "(-1, -1)",
+          0.00076812744140625
+        ]
+      ],
+      "action_diversity_score": 6
+    },
+    "q_learning": {
+      "robot_id": "18a679fd",
+      "convergence_rate": 0.9800199936554604,
+      "convergence_stability": 0.999941978229027,
+      "sample_efficiency": 0.005420914462459347,
+      "policy_stability": 0.0,
+      "q_table_size": 42,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "628acf63": {
+    "individual": {
+      "robot_id": "628acf63",
+      "convergence_score": 0.9999983566422829,
+      "exploration_efficiency": -0.0002093445835110128,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.006544950358072921,
+      "stability_trend": 0.9996570762014017,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "628acf63",
+      "movement_efficiency": 2.184362016575441e-06,
+      "learning_velocity": -2.763846435546885,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.0004642157683725952,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.9999998398502151,
+      "generalization_ability": -0.03506223406110493
+    },
+    "exploration": {
+      "robot_id": "628acf63",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9345154830993555,
+      "exploration_depth": 0.0,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 0.0,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "628acf63",
+      "action_entropy": 2.2577560641285177,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          -0.00019989013671875002
+        ],
+        [
+          "(0, 1)",
+          -0.006666666666666667
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "628acf63",
+      "convergence_rate": 0.9999983566422829,
+      "convergence_stability": 0.9999999999767959,
+      "sample_efficiency": -0.00016602286207841865,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "7158e1e1": {
+    "individual": {
+      "robot_id": "7158e1e1",
+      "convergence_score": 0.9990591078394377,
+      "exploration_efficiency": 0.0058067216021486555,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.1590321575558993,
+      "stability_trend": 0.9987729355925694,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "7158e1e1",
+      "movement_efficiency": 0.02637209740161234,
+      "learning_velocity": 17.758677368164044,
+      "adaptation_speed": 0.009867771857114663,
+      "trajectory_optimization": 0.8496192547472674,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.9985103117354307,
+      "generalization_ability": 1.0922341482979918
+    },
+    "exploration": {
+      "robot_id": "7158e1e1",
+      "state_coverage": 6.0,
+      "coverage_efficiency": 0.0005944125222904696,
+      "exploration_breadth": 0.8479836109346183,
+      "exploration_depth": 0.3076923076923077,
+      "exploration_redundancy": 0.5384615384615384,
+      "targeted_success": 0.25,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "7158e1e1",
+      "action_entropy": 1.8339272176418302,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(-1, 0)",
+          0.003525390625
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.01
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "7158e1e1",
+      "convergence_rate": 0.9990591078394377,
+      "convergence_stability": 0.999988060926103,
+      "sample_efficiency": 0.0017152771254560848,
+      "policy_stability": 0.0,
+      "q_table_size": 39,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "d80a4c39": {
+    "individual": {
+      "robot_id": "d80a4c39",
+      "convergence_score": 0.991651935647657,
+      "exploration_efficiency": 0.001983280246871742,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.05989082031250033,
+      "stability_trend": 0.9987985382322222,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "d80a4c39",
+      "movement_efficiency": 0.018532943650002475,
+      "learning_velocity": 7.155184326171922,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.7976117439092938,
+      "speed_consistency": 0.0015974440894569453,
+      "knowledge_retention": 0.9881066643467171,
+      "generalization_ability": 0.34552396334134805
+    },
+    "exploration": {
+      "robot_id": "d80a4c39",
+      "state_coverage": 6.0,
+      "coverage_efficiency": 0.0005944125222904696,
+      "exploration_breadth": 0.8850355544046856,
+      "exploration_depth": 0.0,
+      "exploration_redundancy": 0.5384615384615384,
+      "targeted_success": 0.0,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "d80a4c39",
+      "action_entropy": 2.199687794731328,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, 0)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.005
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "d80a4c39",
+      "convergence_rate": 0.991651935647657,
+      "convergence_stability": 0.9999890142795184,
+      "sample_efficiency": 0.0006029265415863234,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 0.8983623046875049,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "f9ef2a53": {
+    "individual": {
+      "robot_id": "f9ef2a53",
+      "convergence_score": 0.9999944877262211,
+      "exploration_efficiency": -0.0005923636137074516,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.017243027998028213,
+      "stability_trend": 0.9979844028130174,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "f9ef2a53",
+      "movement_efficiency": -0.003508629599537782,
+      "learning_velocity": -0.9967663574218699,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.0,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.999998957070093,
+      "generalization_ability": -0.06498991935483885
+    },
+    "exploration": {
+      "robot_id": "f9ef2a53",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9138311481971516,
+      "exploration_depth": 0.0,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 0.0,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "f9ef2a53",
+      "action_entropy": 1.6691803368667308,
+      "sequence_complexity": 0.9090909090909091,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.000152587890625
+        ],
+        [
+          "(1, 0)",
+          -0.0028894042968749998
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "f9ef2a53",
+      "convergence_rate": 0.9999944877262211,
+      "convergence_stability": 0.9999999781572175,
+      "sample_efficiency": -6.282049918708433e-05,
+      "policy_stability": 0.0,
+      "q_table_size": 40,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "dd997658": {
+    "individual": {
+      "robot_id": "dd997658",
+      "convergence_score": 0.9906450108868273,
+      "exploration_efficiency": 0.003065068748857156,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.08963966089052124,
+      "stability_trend": 0.9990629529347643,
+      "recent_performance": 0.0069335937500000005
+    },
+    "behavior": {
+      "robot_id": "dd997658",
+      "movement_efficiency": 0.010590467307504767,
+      "learning_velocity": 2.021956787109442,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.6876844927476516,
+      "speed_consistency": 0.9167455036804283,
+      "knowledge_retention": 0.9847099139922769,
+      "generalization_ability": 0.48705136718750697
+    },
+    "exploration": {
+      "robot_id": "dd997658",
+      "state_coverage": 6.0,
+      "coverage_efficiency": 0.0005944125222904696,
+      "exploration_breadth": 0.717335694993616,
+      "exploration_depth": 0.8461538461538461,
+      "exploration_redundancy": 0.5384615384615384,
+      "targeted_success": 0.5454545454545454,
+      "novel_discoveries": 3
+    },
+    "action_space": {
+      "robot_id": "dd997658",
+      "action_entropy": 1.4885252948977485,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.00142913818359375
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          -0.004345703125
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "dd997658",
+      "convergence_rate": 0.9906450108868273,
+      "convergence_stability": 0.9999906481331522,
+      "sample_efficiency": 0.0007959452569665108,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "cf591a10": {
+    "individual": {
+      "robot_id": "cf591a10",
+      "convergence_score": 0.9599359792070981,
+      "exploration_efficiency": 0.0204328211310858,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.5270478330018254,
+      "stability_trend": 0.9986441221553832,
+      "recent_performance": 0.018427734375
+    },
+    "behavior": {
+      "robot_id": "cf591a10",
+      "movement_efficiency": 0.05434478040211078,
+      "learning_velocity": 13.695554199218535,
+      "adaptation_speed": 0.31545741324921134,
+      "trajectory_optimization": 0.9183048479120889,
+      "speed_consistency": 0.9987705480889689,
+      "knowledge_retention": 0.9661413870288158,
+      "generalization_ability": 2.193744049072263
+    },
+    "exploration": {
+      "robot_id": "cf591a10",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.9257875983547231,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 0.8333333333333334,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "cf591a10",
+      "action_entropy": 1.760495029766198,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(1, 0)",
+          0.006005859375
+        ],
+        [
+          "(0, -1)",
+          0.005107421874999999
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          -0.00537109375
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "cf591a10",
+      "convergence_rate": 0.9599359792070981,
+      "convergence_stability": 0.9998132393566063,
+      "sample_efficiency": 0.005368022127145713,
+      "policy_stability": 0.0,
+      "q_table_size": 44,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "e0df6917": {
+    "individual": {
+      "robot_id": "e0df6917",
+      "convergence_score": 0.991110411172688,
+      "exploration_efficiency": 0.016442095787369475,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.3514865428404093,
+      "stability_trend": 0.999823054895387,
+      "recent_performance": 0.014677734375
+    },
+    "behavior": {
+      "robot_id": "e0df6917",
+      "movement_efficiency": 0.04185830198091069,
+      "learning_velocity": 27.0062683105467,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.9012990477710227,
+      "speed_consistency": 0.9999999999999999,
+      "knowledge_retention": 0.992103030960354,
+      "generalization_ability": 1.9039663157743518
+    },
+    "exploration": {
+      "robot_id": "e0df6917",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.9257875983547231,
+      "exploration_depth": 0.6153846153846154,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 0.75,
+      "novel_discoveries": 3
+    },
+    "action_space": {
+      "robot_id": "e0df6917",
+      "action_entropy": 1.9877733714879842,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(-1, -1)",
+          0.014794921875
+        ],
+        [
+          "(0, 1)",
+          0.00591796875
+        ],
+        [
+          "(0, -1)",
+          0.004378255208333333
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          -0.001774088541666667
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "e0df6917",
+      "convergence_rate": 0.991110411172688,
+      "convergence_stability": 0.9999872259098197,
+      "sample_efficiency": 0.003975628769188587,
+      "policy_stability": 0.0,
+      "q_table_size": 42,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "b8ad37a1": {
+    "individual": {
+      "robot_id": "b8ad37a1",
+      "convergence_score": 0.9941503520844371,
+      "exploration_efficiency": 0.004008820058978912,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.11268192665167356,
+      "stability_trend": 0.9998760105663678,
+      "recent_performance": 0.006591796875
+    },
+    "behavior": {
+      "robot_id": "b8ad37a1",
+      "movement_efficiency": 0.004294349907742223,
+      "learning_velocity": -7.501280517577818,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.47728814755338805,
+      "speed_consistency": 0.8993519793171268,
+      "knowledge_retention": 0.9948366302966551,
+      "generalization_ability": 0.8294003530649119
+    },
+    "exploration": {
+      "robot_id": "b8ad37a1",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.8845147656768563,
+      "exploration_depth": 0.6153846153846154,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 0.5,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "b8ad37a1",
+      "action_entropy": 2.0458416408851736,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.0030706787109375
+        ],
+        [
+          "(0, 1)",
+          0.00125
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(-1, 0)",
+          -0.011092529296875
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "b8ad37a1",
+      "convergence_rate": 0.9941503520844371,
+      "convergence_stability": 0.9999945207647112,
+      "sample_efficiency": 0.0005491319345980913,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "cb984b7d": {
+    "individual": {
+      "robot_id": "cb984b7d",
+      "convergence_score": 0.9896586139356659,
+      "exploration_efficiency": 0.007235844330094082,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.20305631840880436,
+      "stability_trend": 0.997946561081335,
+      "recent_performance": 0.012802734375
+    },
+    "behavior": {
+      "robot_id": "cb984b7d",
+      "movement_efficiency": 0.02448361440061082,
+      "learning_velocity": 27.72498168945312,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.8405590551248145,
+      "speed_consistency": 0.998484293368484,
+      "knowledge_retention": 0.9911785532223821,
+      "generalization_ability": 0.9071386311848955
+    },
+    "exploration": {
+      "robot_id": "cb984b7d",
+      "state_coverage": 8.0,
+      "coverage_efficiency": 0.0007925500297206261,
+      "exploration_breadth": 0.9383574700386479,
+      "exploration_depth": 0.3076923076923077,
+      "exploration_redundancy": 0.38461538461538464,
+      "targeted_success": 0.5,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "cb984b7d",
+      "action_entropy": 2.075869296697727,
+      "sequence_complexity": 0.9090909090909091,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(-1, -1)",
+          0.005908203125000001
+        ],
+        [
+          "(0, 1)",
+          0.004267578125
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          -0.02
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "cb984b7d",
+      "convergence_rate": 0.9896586139356659,
+      "convergence_stability": 0.9999863412424298,
+      "sample_efficiency": 0.0017057369206792568,
+      "policy_stability": 0.0,
+      "q_table_size": 41,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "cb4d2fb2": {
+    "individual": {
+      "robot_id": "cb4d2fb2",
+      "convergence_score": 0.9948848186489352,
+      "exploration_efficiency": 0.0059768532795005805,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.11354114561614854,
+      "stability_trend": 0.9975667234975845,
+      "recent_performance": 0.00125
+    },
+    "behavior": {
+      "robot_id": "cb4d2fb2",
+      "movement_efficiency": 0.015728993772019577,
+      "learning_velocity": 14.919705810546837,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.7700027998495615,
+      "speed_consistency": -0.22230027084988935,
+      "knowledge_retention": 0.9971165829376177,
+      "generalization_ability": 0.5622303771972645
+    },
+    "exploration": {
+      "robot_id": "cb4d2fb2",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.8904104442028663,
+      "exploration_depth": 0.38461538461538464,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 0.2,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "cb4d2fb2",
+      "action_entropy": 1.9877733714879842,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 5,
+      "best_actions": [
+        [
+          "(-1, 0)",
+          0.000625
+        ],
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(1, 0)",
+          -0.0033333333333333335
+        ]
+      ],
+      "action_diversity_score": 5
+    },
+    "q_learning": {
+      "robot_id": "cb4d2fb2",
+      "convergence_rate": 0.9948848186489352,
+      "convergence_stability": 0.9999931133723531,
+      "sample_efficiency": 0.0011477550730442736,
+      "policy_stability": 0.0,
+      "q_table_size": 41,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "653e727c": {
+    "individual": {
+      "robot_id": "653e727c",
+      "convergence_score": 0.9903403067493111,
+      "exploration_efficiency": 0.006730481408420126,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.17437073073019896,
+      "stability_trend": 0.9995167988818139,
+      "recent_performance": 0.00556640625
+    },
+    "behavior": {
+      "robot_id": "653e727c",
+      "movement_efficiency": 0.02329769478426231,
+      "learning_velocity": 24.93979614257809,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.8327657728655555,
+      "speed_consistency": 0.8899983880528194,
+      "knowledge_retention": 0.9905242996958614,
+      "generalization_ability": 1.0764681691136844
+    },
+    "exploration": {
+      "robot_id": "653e727c",
+      "state_coverage": 6.0,
+      "coverage_efficiency": 0.0005944125222904696,
+      "exploration_breadth": 0.955398960984103,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.5384615384615384,
+      "targeted_success": 0.5,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "653e727c",
+      "action_entropy": 1.6143308351592656,
+      "sequence_complexity": 0.7272727272727273,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(1, 1)",
+          0.005175781250000001
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.00263671875
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "653e727c",
+      "convergence_rate": 0.9903403067493111,
+      "convergence_stability": 0.999982403685764,
+      "sample_efficiency": 0.001948038736979165,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "f35a60aa": {
+    "individual": {
+      "robot_id": "f35a60aa",
+      "convergence_score": 0.9940607927809334,
+      "exploration_efficiency": 0.020791714367256454,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.6457561604817723,
+      "stability_trend": 0.9988064643694088,
+      "recent_performance": 0.006396484375000001
+    },
+    "behavior": {
+      "robot_id": "f35a60aa",
+      "movement_efficiency": 0.054132209477009856,
+      "learning_velocity": 57.21719482421889,
+      "adaptation_speed": 0.056085249579360626,
+      "trajectory_optimization": 0.9196948279074789,
+      "speed_consistency": 0.9806403211138164,
+      "knowledge_retention": 0.9964134203083207,
+      "generalization_ability": 3.1246265829763176
+    },
+    "exploration": {
+      "robot_id": "f35a60aa",
+      "state_coverage": 7.0,
+      "coverage_efficiency": 0.0006934812760055479,
+      "exploration_breadth": 0.9138311481971516,
+      "exploration_depth": 0.46153846153846156,
+      "exploration_redundancy": 0.46153846153846156,
+      "targeted_success": 1.0,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "f35a60aa",
+      "action_entropy": 1.3143204867061788,
+      "sequence_complexity": 0.5454545454545454,
+      "unique_combinations": 3,
+      "best_actions": [
+        [
+          "(0, -1)",
+          0.0113623046875
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(1, 0)",
+          -0.0033333333333333335
+        ]
+      ],
+      "action_diversity_score": 3
+    },
+    "q_learning": {
+      "robot_id": "f35a60aa",
+      "convergence_rate": 0.9940607927809334,
+      "convergence_stability": 0.999984150081004,
+      "sample_efficiency": 0.005913136006267028,
+      "policy_stability": 0.0,
+      "q_table_size": 38,
+      "learning_plateau": false,
+      "exploration_balance": 1.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "566d0d92": {
+    "individual": {
+      "robot_id": "566d0d92",
+      "convergence_score": 0.9949273124577006,
+      "exploration_efficiency": -0.0001598340266211158,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.008976441341188472,
+      "stability_trend": 0.9994788194308057,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "566d0d92",
+      "movement_efficiency": 0.0024353746898296636,
+      "learning_velocity": 0.013287353515625044,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.3542851629412398,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.9964900599307951,
+      "generalization_ability": -0.023610214605564037
+    },
+    "exploration": {
+      "robot_id": "566d0d92",
+      "state_coverage": 10.0,
+      "coverage_efficiency": 0.0009906875371507827,
+      "exploration_breadth": 0.9750064312311533,
+      "exploration_depth": 0.0,
+      "exploration_redundancy": 0.23076923076923078,
+      "targeted_success": 0.0,
+      "novel_discoveries": 0
+    },
+    "action_space": {
+      "robot_id": "566d0d92",
+      "action_entropy": 1.760495029766198,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(-1, -1)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.004
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "566d0d92",
+      "convergence_rate": 0.9949273124577006,
+      "convergence_stability": 0.999995630731085,
+      "sample_efficiency": 8.038326385738079e-07,
+      "policy_stability": 0.0,
+      "q_table_size": 43,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "437842cb": {
+    "individual": {
+      "robot_id": "437842cb",
+      "convergence_score": 0.9992915068124876,
+      "exploration_efficiency": 0.0009231276555683299,
+      "action_diversity": 0.0,
+      "motor_efficiency": 0.03457963768816958,
+      "stability_trend": 0.999889856990194,
+      "recent_performance": -0.00043457031250000006
+    },
+    "behavior": {
+      "robot_id": "437842cb",
+      "movement_efficiency": 0.0075830316364068374,
+      "learning_velocity": -0.6241430664063099,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.6245966251658815,
+      "speed_consistency": 1.0602482012672252,
+      "knowledge_retention": 0.9995028779037933,
+      "generalization_ability": 0.13917750308387833
+    },
+    "exploration": {
+      "robot_id": "437842cb",
+      "state_coverage": 9.0,
+      "coverage_efficiency": 0.0008916187834357044,
+      "exploration_breadth": 0.9246934699012206,
+      "exploration_depth": 0.23076923076923078,
+      "exploration_redundancy": 0.3076923076923077,
+      "targeted_success": 0.6666666666666666,
+      "novel_discoveries": 2
+    },
+    "action_space": {
+      "robot_id": "437842cb",
+      "action_entropy": 1.7381493331928661,
+      "sequence_complexity": 0.8181818181818182,
+      "unique_combinations": 4,
+      "best_actions": [
+        [
+          "(-1, -1)",
+          0.006591796875
+        ],
+        [
+          "(0, 1)",
+          0.0
+        ],
+        [
+          "(1, 0)",
+          0.0
+        ],
+        [
+          "(0, -1)",
+          -0.003308308919270833
+        ]
+      ],
+      "action_diversity_score": 4
+    },
+    "q_learning": {
+      "robot_id": "437842cb",
+      "convergence_rate": 0.9992915068124876,
+      "convergence_stability": 0.9999979199220346,
+      "sample_efficiency": 0.0003742631472606551,
+      "policy_stability": 0.0,
+      "q_table_size": 46,
+      "learning_plateau": false,
+      "exploration_balance": 0.5288745117187377,
+      "replay_effectiveness": 0.0
+    }
+  },
+  "05ec03fc": {
+    "individual": {
+      "robot_id": "05ec03fc",
+      "convergence_score": 0.999999993995583,
+      "exploration_efficiency": -0.0002161603656085823,
+      "action_diversity": 0.0,
+      "motor_efficiency": -0.006537158203125004,
+      "stability_trend": 0.9985651458846405,
+      "recent_performance": 0.0
+    },
+    "behavior": {
+      "robot_id": "05ec03fc",
+      "movement_efficiency": 4.5954744154943525e-06,
+      "learning_velocity": 0.45304809570309235,
+      "adaptation_speed": 0.009809691975671964,
+      "trajectory_optimization": 0.0009886628733538154,
+      "speed_consistency": 1.0,
+      "knowledge_retention": 0.999999999630043,
+      "generalization_ability": -0.025804571854440805
+    },
+    "exploration": {
+      "robot_id": "05ec03fc",
+      "state_coverage": 9.0,
+      "coverage_efficiency": 0.0008916187834357044,
+      "exploration_breadth": 0.9549080284177106,
+      "exploration_depth": 0.15384615384615385,
+      "exploration_redundancy": 0.3076923076923077,
+      "targeted_success": 1.0,
+      "novel_discoveries": 1
+    },
+    "action_space": {
+      "robot_id": "05ec03fc",
+      "action_entropy": 2.4116022179746714,
+      "sequence_complexity": 1.0,
+      "unique_combinations": 6,
+      "best_actions": [
+        [
+          "(1, 0)",
+          0.00021026611328125002
+        ],
+        [
+          "(0, -1)",
+          0.0
+        ],
+        [
+          "(1, 1)",
+          0.0
+        ],
+        [
+          "(0, 1)",
+          -6.754557291666667e-05
+        ],
+        [
+          "(-1, 0)",
+          -0.000848388671875
+        ]
+      ],
+      "action_diversity_score": 6
+    },
+    "q_learning": {
+      "robot_id": "05ec03fc",
+      "convergence_rate": 0.999999993995583,
+      "convergence_stability": 0.9999997686930635,
+      "sample_efficiency": 5.1396253970054426e-05,
+      "policy_stability": 0.0,
+      "q_table_size": 45,
+      "learning_plateau": false,
+      "exploration_balance": 0.0,
+      "replay_effectiveness": 0.0
+    }
+  }
+}

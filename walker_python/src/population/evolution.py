@@ -283,10 +283,8 @@ class EvolutionEngine:
             
             new_population.append(child)
         
-        # After creating the new population, re-assign unique IDs
-        for i, agent in enumerate(new_population):
-            if hasattr(agent, 'id'):
-                agent.id = i
+        # No need to reassign IDs - agents already have unique IDs from cloning/crossover
+        # Reassigning breaks leaderboard button references after evolution
 
         return new_population
     

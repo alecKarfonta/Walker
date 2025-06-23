@@ -565,9 +565,8 @@ class EnhancedEvolutionEngine:
         # Trim if too many
         new_population = new_population[:self.config.population_size]
         
-        # Reassign IDs
-        for i, agent in enumerate(new_population):
-            agent.id = i
+        # No need to reassign IDs - agents already have unique IDs from cloning/crossover
+        # Reassigning breaks leaderboard button references after evolution
         
         return new_population
     

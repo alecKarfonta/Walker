@@ -496,13 +496,16 @@ class MetricsCollector:
         """Background worker for processing metrics collection queue."""
         while self.is_collecting:
             try:
+                data = None
                 with self.metrics_lock:
                     if not self.collection_queue:
-                        time.sleep(1.0)
-                        continue
-                    
-                    # Process one item from queue
-                    data = self.collection_queue.pop(0)
+                        pass
+                    else:
+                        data = self.collection_queue.pop(0)
+                
+                if data is None:
+                    time.sleep(1.0)
+                    continue
                 
                 # Process metrics collection in background
                 print(f"🔬 Background: Processing metrics for generation {data['generation']}")

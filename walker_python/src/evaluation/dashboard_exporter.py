@@ -21,7 +21,7 @@ class DashboardExporter:
     """
     
     def __init__(self, 
-                 port: int = 8888,
+                 port: int = 2322,
                  db_path: str = "metrics.db",
                  enable_api: bool = True):
         """
