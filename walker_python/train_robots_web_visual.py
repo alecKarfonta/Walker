@@ -549,6 +549,16 @@ HTML_TEMPLATE = """
             const zoomFactor = 1.1;
             const newScale = e.deltaY < 0 ? cameraZoom * zoomFactor : cameraZoom / zoomFactor;
             cameraZoom = Math.max(0.01, Math.min(20, newScale));
+            
+            // Send zoom update to backend (backend will track that user manually zoomed)
+            fetch('/update_zoom', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ zoom: cameraZoom })
+            })
+            .catch(error => {
+                console.error('Error updating zoom:', error);
+            });
         });
 
         document.getElementById('resetView').addEventListener('click', () => {
@@ -556,6 +566,15 @@ HTML_TEMPLATE = """
             // Reset camera to default view
             cameraPosition = { x: 0, y: 0 };
             cameraZoom = 1.0;
+
+            // Tell backend to reset zoom preferences and focus
+            fetch('/reset_view', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .catch(error => {
+                console.error('Error resetting view:', error);
+            });
 
             // Also reset legacy offset and scale if they are used elsewhere
             scale = 15;
@@ -606,6 +625,29 @@ HTML_TEMPLATE = """
             // Update global focused agent ID from backend
             if (data.focused_agent_id !== undefined) {
                 focusedAgentId = data.focused_agent_id;
+            }
+
+            // Update camera from backend if available and user isn't manually controlling camera
+            if (data.camera && !isDragging) {
+                // Always update camera position when not dragging
+                if (data.camera.position && Array.isArray(data.camera.position) && data.camera.position.length === 2) {
+                    cameraPosition.x = data.camera.position[0];
+                    cameraPosition.y = data.camera.position[1];
+                }
+                
+                // Only apply zoom from backend when there's an explicit override
+                if (data.camera.zoom_override !== undefined && data.camera.zoom_override !== null) {
+                    cameraZoom = data.camera.zoom_override;
+                    
+                    // Tell backend we've applied the zoom override
+                    fetch('/clear_zoom_override', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    })
+                    .catch(error => {
+                        console.error('Error clearing zoom override:', error);
+                    });
+                }
             }
 
             // Update leaderboard only if it has changed to prevent re-rendering
@@ -1020,6 +1062,10 @@ class TrainingEnvironment:
         self.target_zoom = 1.0
         self.follow_speed = 0.05
         self.zoom_speed = 0.05
+        
+        # User zoom tracking
+        self.user_zoom_level = 1.0  # Track user's preferred zoom level
+        self.user_has_manually_zoomed = False  # Track if user has manually adjusted zoom
         
         # Periodic learning system - robots learn from best performers every minute
         self.last_learning_time = time.time()
@@ -1517,11 +1563,15 @@ class TrainingEnvironment:
         if agent and agent in self.agents:
             self.focused_agent = agent
             print(f"🎯 SERVER: Focusing on agent {agent.id}")
-            # Target zoom can also be adjusted based on agent type or state
-            self.target_zoom = 1.5 
+            # Only set zoom if user hasn't manually adjusted it
+            if not self.user_has_manually_zoomed:
+                self.user_zoom_level = 1.5
+                self._zoom_override = 1.5  # Send zoom override to frontend
+            # If user has manually zoomed, don't override their preference
         else:
             self.focused_agent = None
             print("🎯 SERVER: Camera focus cleared.")
+            # Don't change zoom when just clearing focus
 
     def get_agent_at_position(self, world_x, world_y):
         """Finds an agent at a given world coordinate."""
@@ -1575,8 +1625,28 @@ class TrainingEnvironment:
         return {
             'position': self.camera_position,
             'zoom': self.camera_zoom,
-            'focused_agent_id': self.focused_agent.id if self.focused_agent else None
+            'focused_agent_id': self.focused_agent.id if self.focused_agent else None,
+            'zoom_override': getattr(self, '_zoom_override', None)  # Only send zoom when we want to override
         }
+    
+    def update_user_zoom(self, zoom_level):
+        """Update the user's preferred zoom level."""
+        self.user_zoom_level = max(0.01, min(20, zoom_level))  # Clamp to reasonable bounds
+        self.user_has_manually_zoomed = True
+        # Don't update target_zoom - let frontend handle zoom locally
+        print(f"🔍 SERVER: User zoom updated to {self.user_zoom_level:.2f}")
+    
+    def reset_user_zoom(self):
+        """Reset user zoom preferences (called by Reset View)."""
+        self.user_zoom_level = 1.0
+        self.user_has_manually_zoomed = False
+        self._zoom_override = 1.0  # Send reset zoom to frontend
+        print("🔍 SERVER: User zoom preferences reset")
+    
+    def clear_zoom_override(self):
+        """Clear the zoom override flag after it's been sent."""
+        if hasattr(self, '_zoom_override'):
+            delattr(self, '_zoom_override')
 
 # --- Main Execution ---
 app = Flask(__name__)
@@ -1676,6 +1746,30 @@ def update_agent_params():
         return jsonify({'status': 'success', 'updated_params': params})
     else:
         return jsonify({'status': 'error', 'message': 'Failed to update parameters'}), 500
+
+@app.route('/update_zoom', methods=['POST'])
+def update_zoom():
+    data = request.get_json()
+    if not data or 'zoom' not in data:
+        return jsonify({'status': 'error', 'message': 'No zoom level provided'}), 400
+    
+    zoom_level = data['zoom']
+    env.update_user_zoom(zoom_level)
+    
+    return jsonify({'status': 'success', 'zoom': env.user_zoom_level})
+
+@app.route('/reset_view', methods=['POST'])
+def reset_view():
+    # Clear focus and reset zoom preferences
+    env.focus_on_agent(None)
+    env.reset_user_zoom()
+    
+    return jsonify({'status': 'success', 'message': 'View reset'})
+
+@app.route('/clear_zoom_override', methods=['POST'])
+def clear_zoom_override():
+    env.clear_zoom_override()
+    return jsonify({'status': 'success'})
 
 @app.route('/evolution_event', methods=['POST'])
 def evolution_event():
