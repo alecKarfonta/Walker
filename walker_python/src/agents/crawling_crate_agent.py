@@ -8,6 +8,9 @@ from collections import deque
 import random
 from .crawling_crate import CrawlingCrate
 from .q_table import QTable, SparseQTable
+import Box2D as b2
+
+from .base_agent import BaseAgent
 
 
 class Experience(NamedTuple):
@@ -44,33 +47,70 @@ class ReplayBuffer:
         self.buffer.clear()
 
 
-class CrawlingCrateAgent(CrawlingCrate):
+class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
     """
     CrawlingCrate with Q-learning capabilities for learning crawling strategies.
     """
     
     def __init__(self, world, agent_id: int, position: Tuple[float, float] = (10, 20), category_bits=0x0001, mask_bits=0xFFFF):
-        super().__init__(world, agent_id, position, category_bits=category_bits, mask_bits=mask_bits)
+        # Call parent's __init__ but don't let it create body parts yet
+        BaseAgent.__init__(self)
+        self.world = world
+        self.initial_position = position
+        self.id = agent_id
         
+        # Physics properties for collision filtering
+        self.filter = b2.b2Filter(
+            categoryBits=category_bits,
+            maskBits=mask_bits
+        )
+        
+        # Physical properties
+        self.motor_torque = 800.0
+        self.motor_speed = 10.0
+        self.category_bits = category_bits
+        self.mask_bits = mask_bits
+
+        # Create body parts using our own methods
+        self._create_body()
+        self._create_arms()
+        self._create_wheels()
+        self._create_joints()
+
         # Q-learning parameters
         self.learning_rate = 0.005
-        self.discount_factor = 0.9  # Reduced from 0.95 to prevent value explosion
-        self.epsilon = 0.3  # Start with higher exploration
+        self.discount_factor = 0.9
+        self.epsilon = 0.3
         self.min_epsilon = 0.01
-        self.epsilon_decay = 0.9999  # Slower decay since we learn less frequently
-                
-        # Action space: (shoulder_motor, elbow_motor) combinations - match Java's 6 actions
+        self.epsilon_decay = 0.9999
+        
         self.actions = [
-            (0, 0),      # No movement
-            (1, 0),      # Shoulder forward only
-            (0, 1),      # Elbow forward only
-            (1, 1),      # Both forward
-            (-1, 0),     # Shoulder back only
-            (0, -1),     # Elbow back only
+            (0, 0), (1, 0), (0, 1), (1, 1),
+            (-1, 0), (0, -1), (-1, -1), (1, -1)
         ]
         
-        # Initialize Q-table - use sparse version for much better performance
-        self.q_table = SparseQTable(len(self.actions))
+        self.state_size = 6
+        self.action_size = len(self.actions)
+        self.q_table = SparseQTable(self.state_size, self.action_size)
+        
+        self.total_reward = 0.0
+        self.steps = 0
+        self.action_history = []
+        
+        # Adaptive learning rate and epsilon
+        self.min_learning_rate = 0.05
+        self.max_learning_rate = 0.3
+        self.max_epsilon = 0.5
+        self.impatience = 0.001
+
+        # Reward clipping to stabilize learning
+        self.reward_clip_min = -1.0
+        self.reward_clip_max = 1.0
+
+        # For state calculation
+        self.last_x_position = self.body.position.x
+        self.last_update_step = 0
+        self.reward_count = 0
         
         # Q-value bounds to prevent explosion
         self.min_q_value = -2.0  # Minimum Q-value
@@ -84,8 +124,6 @@ class CrawlingCrateAgent(CrawlingCrate):
         # Training state
         self.current_state = None
         self.current_action = None
-        self.total_reward = 0.0
-        self.episode_steps = 0
         self.immediate_reward = 0.0  # Track immediate reward for Q-learning
         
         # Performance tracking (inspired by Java implementation)
@@ -99,24 +137,13 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.new_value = 0.0
         self.time_since_good_value = 0.0
         
-        # Adaptive parameters (inspired by Java implementation)
-        self.min_learning_rate = 0.05
-        self.max_learning_rate = 0.3
-        self.min_epsilon = 0.01
-        self.max_epsilon = 0.5
-        self.impatience = 0.001  # How quickly to adapt parameters
-        
         # Action interval optimization - only choose new actions every N steps
-        self.action_interval = 30  # Choose new action every 2 seconds (120 steps at 60fps)
-        self.learning_interval = 120  # Update Q-values every 1 second (60 steps at 60fps)
+        self.action_interval = 10  # Choose new action every 0.67 seconds (10 steps at 60fps)
+        self.learning_interval = 60  # Update Q-values every 1 second (60 steps at 60fps)
         self.steps_since_last_action = 0
         self.steps_since_last_learning = 0
         self.current_action_tuple = (0, 0)  # Store the actual action tuple
         self.prev_x = position[0]  # Track previous position for reward calculation
-        
-        # Action history for reporting
-        self.action_history = []  # Store last 10 actions
-        self.max_action_history = 10
         
         # Speed and acceleration tracking (inspired by Java implementation)
         self.speed = 0.0
@@ -126,9 +153,13 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.max_speed = 0.0
         
         # Reward weights (inspired by Java implementation)
-        self.speed_value_weight = 0.05  # Reduced from 0.1 to prevent gradient explosions
+        self.speed_value_weight = 0.05
         self.acceleration_value_weight = 0.05  # Reduced from 0.1 to prevent gradient explosions
-        
+
+        # Reset action history
+        self.action_history = []
+        self.max_action_history = 10
+
     def get_discretized_state(self) -> Tuple:
         """Simplified state discretization matching Java implementation's focused approach."""
         # Cache the state to avoid multiple calls
@@ -288,86 +319,51 @@ class CrawlingCrateAgent(CrawlingCrate):
             
     def step(self, dt: float):
         """Step the agent with Q-learning and experience replay."""
+        # Initialize action if not set
+        if self.current_action_tuple == (0, 0) and self.current_action is None:
+            self.current_state = self.get_discretized_state()
+            action_idx = self.choose_action()
+            self.current_action = action_idx
+            self.current_action_tuple = self.actions[action_idx]
+            self.add_action_to_history(action_idx)
+            if self.id == 0:  # Debug for first agent only
+                print(f"🤖 Agent {self.id}: Initialized with action {action_idx} = {self.current_action_tuple}")
+        
         # Always apply the current action (cheap operation)
         self.apply_action(self.current_action_tuple)
         
         # Track reward over time
         current_x = self.body.position.x
         reward = self.get_reward(self.prev_x)
+        self.total_reward += reward
         
-        # NORMALIZE reward to prevent extreme values
-        # Use exponential moving average to track reward statistics
-        if not hasattr(self, 'reward_mean'):
-            self.reward_mean = 0.0
-            self.reward_std = 1.0
-            self.reward_count = 0
+        # Debug for first agent every 100 steps
+        if self.id == 0 and self.steps % 100 == 0:
+            print(f"🤖 Agent {self.id}: Step {self.steps}, pos=({self.body.position.x:.2f}, {self.body.position.y:.2f}), "
+                  f"vel=({self.body.linearVelocity.x:.2f}, {self.body.linearVelocity.y:.2f}), "
+                  f"action={self.current_action_tuple}, reward={reward:.3f}")
         
-        # Update reward statistics
-        self.reward_count += 1
-        alpha = 0.01  # Learning rate for reward normalization
-        self.reward_mean = (1 - alpha) * self.reward_mean + alpha * reward
-        self.reward_std = (1 - alpha) * self.reward_std + alpha * abs(reward - self.reward_mean)
-        self.reward_std = max(0.1, self.reward_std)  # Prevent division by zero
+        # Action interval optimization - only choose new actions every N steps
+        self.action_interval = 10  # Choose new action every 0.67 seconds (10 steps at 60fps)
+        self.learning_interval = 60  # Update Q-values every 1 second (60 steps at 60fps)
         
-        # Normalize reward to prevent extreme values
-        normalized_reward = (reward - self.reward_mean) / self.reward_std
-        normalized_reward = np.clip(normalized_reward, -2.0, 2.0)  # Clip normalized reward
-        
-        self.immediate_reward = normalized_reward
-        self.total_reward += normalized_reward
-        self.prev_x = current_x
-        
-        # Learning interval - update Q-values periodically
-        if self.steps_since_last_learning >= self.learning_interval:
-            if self.current_state is not None and self.current_action is not None:
-                # Get next state for Q-learning update
-                next_state = self.get_discretized_state()
-                
-                # Add experience to replay buffer
-                self.add_experience(self.current_state, self.current_action, self.immediate_reward, next_state)
-                
-                # Learn from replay buffer
-                if self.steps_since_last_learning % self.replay_frequency == 0:
-                    self.learn_from_replay()
-                
-                #print(f"Q-Learning Update Triggered:")
-                #print(f"  Steps since last learning: {self.steps_since_last_learning}")
-                #print(f"  Learning interval: {self.learning_interval}")
-                #print(f"  Current state: {self.current_state}")
-                #print(f"  Next state: {next_state}")
-                #print(f"  Current action: {self.current_action}")
-                #print(f"  Immediate reward: {self.immediate_reward:.4f}")
-                #print(f"  Replay buffer size: {len(self.replay_buffer)}")
-                #print("---")
-                self.update_q_value(next_state, self.immediate_reward)
-            self.steps_since_last_learning = 0
-        else:
-            self.steps_since_last_learning += 1
-            # Track time since good value (like Java implementation)
-            if self.best_value > 0 and self.new_value <= self.best_value * 0.5:
-                self.time_since_good_value += 1.0
-        
-        # Action interval - choose new actions less frequently
-        if self.steps_since_last_action >= self.action_interval:
-            # Get current state (expensive)
+        if self.steps % self.action_interval == 0:
+            # Choose new action
             self.current_state = self.get_discretized_state()
-            
-            # Choose new action (expensive)
             action_idx = self.choose_action()
             self.current_action = action_idx
             self.current_action_tuple = self.actions[action_idx]
-            
-            # Add to action history
             self.add_action_to_history(action_idx)
             
-            # Reset interval counter
-            self.steps_since_last_action = 0
-        else:
-            # Just increment the counter
-            self.steps_since_last_action += 1
+            # Debug for first agent
+            if self.id == 0:
+                print(f"🤖 Agent {self.id}: New action {action_idx} = {self.current_action_tuple}")
         
-        # Update episode step count
-        self.episode_steps += 1
+        # Q-learning update every N steps
+        if self.steps % self.learning_interval == 0 and len(self.replay_buffer) > 0:
+            self.learn_from_replay()
+        
+        self.steps += 1
         
     def update_q_value(self, next_state: Tuple, reward: float):
         """Update Q-value for the current state-action pair using Java-inspired approach with bounds."""
@@ -475,6 +471,47 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.reward_std = 1.0
         self.reward_count = 0
         
+        # Reset velocity to prevent physics issues
+        for part in [self.body, self.upper_arm, self.lower_arm] + self.wheels:
+            part.linearVelocity = (0, 0)
+            part.angularVelocity = 0
+
+    def reset_position(self):
+        """
+        Resets the agent's position and physics state to its starting point,
+        but preserves the learned Q-table and other learning parameters.
+        """
+        self.body.position = self.initial_position
+        self.body.angle = 0
+        self.body.linearVelocity = (0, 0)
+        self.body.angularVelocity = 0
+
+        # Also reset arms and wheels relative to the body
+        # Get the anchor points from the joints
+        upper_arm_anchor = self.upper_arm_joint.localAnchorA
+        lower_arm_anchor = self.lower_arm_joint.localAnchorA
+
+        self.upper_arm.position = self.body.GetWorldPoint(upper_arm_anchor)
+        self.upper_arm.angle = 0
+        self.upper_arm.linearVelocity = (0, 0)
+        self.upper_arm.angularVelocity = 0
+        
+        self.lower_arm.position = self.upper_arm.GetWorldPoint(lower_arm_anchor)
+        self.lower_arm.angle = 0
+        self.lower_arm.linearVelocity = (0, 0)
+        self.lower_arm.angularVelocity = 0
+
+        for i, wheel in enumerate(self.wheels):
+            wheel_anchor = self.wheel_joints[i].localAnchorA
+            wheel.position = self.body.GetWorldPoint(wheel_anchor)
+            wheel.linearVelocity = (0, 0)
+            wheel.angularVelocity = 0
+        
+        # Reset reward and internal state, but not the Q-table itself
+        self.total_reward = 0
+        self.steps = 0
+        print(f"Agent {self.id} was reset due to falling off the world.")
+
     def get_fitness(self) -> float:
         """Get fitness score for evolution."""
         return self.total_reward
@@ -605,3 +642,107 @@ class CrawlingCrateAgent(CrawlingCrate):
             'replay_frequency': self.replay_frequency,
         })
         return debug 
+
+    def _create_body(self):
+        body_def = b2.b2BodyDef(
+            type=b2.b2_dynamicBody,
+            position=self.initial_position,
+            fixtures=[
+                b2.b2FixtureDef(
+                    shape=b2.b2PolygonShape(box=(1.5, 0.75)),
+                    density=1.0,
+                    friction=0.9,
+                    filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
+                )
+            ]
+        )
+        self.body = self.world.CreateBody(body_def)
+
+    def _create_arms(self):
+        # Upper Arm
+        upper_arm = self.world.CreateDynamicBody(
+            position=self.body.position + (-1.0, 1.0),
+            fixtures=[
+                b2.b2FixtureDef(
+                    shape=b2.b2PolygonShape(box=(1.0, 0.2)),
+                    density=1.0,
+                    filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
+                )
+            ]
+        )
+        # Lower Arm
+        lower_arm = self.world.CreateDynamicBody(
+            position=upper_arm.position + (1.0, 0),
+            fixtures=[
+                b2.b2FixtureDef(
+                    shape=b2.b2PolygonShape(box=(1.0, 0.2)),
+                    density=1.0,
+                    filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
+                )
+            ]
+        )
+        self.upper_arm, self.lower_arm = upper_arm, lower_arm
+
+    def _create_wheels(self):
+        self.wheels = []
+        wheel_anchor_positions = [(-1.0, -0.75), (1.0, -0.75)]
+        for anchor_pos in wheel_anchor_positions:
+            wheel = self.world.CreateDynamicBody(
+                position=self.body.GetWorldPoint(anchor_pos),
+                fixtures=[
+                    b2.b2FixtureDef(
+                        shape=b2.b2CircleShape(radius=0.5),
+                        density=1.0,
+                        friction=0.9,
+                        filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
+                    )
+                ]
+            )
+            self.wheels.append(wheel)
+
+    def _create_joints(self):
+        self.upper_arm_joint = self.world.CreateRevoluteJoint(
+            bodyA=self.body,
+            bodyB=self.upper_arm,
+            localAnchorA=(-1.0, 1.0),
+            localAnchorB=(0, 0),
+            enableMotor=True,
+            maxMotorTorque=self.motor_torque,
+            motorSpeed=0,
+        )
+        self.lower_arm_joint = self.world.CreateRevoluteJoint(
+            bodyA=self.upper_arm,
+            bodyB=self.lower_arm,
+            localAnchorA=(1.0, 0),
+            localAnchorB=(0, 0),
+            enableMotor=True,
+            maxMotorTorque=self.motor_torque,
+            motorSpeed=0,
+        )
+        self.wheel_joints = []
+        wheel_anchor_positions = [(-1.0, -0.75), (1.0, -0.75)]
+        for i, anchor_pos in enumerate(wheel_anchor_positions):
+            joint = self.world.CreateRevoluteJoint(
+                bodyA=self.body,
+                bodyB=self.wheels[i],
+                localAnchorA=anchor_pos,
+                localAnchorB=(0,0),
+                enableMotor=False,
+            )
+            self.wheel_joints.append(joint) 
+
+    def apply_action(self, action: Tuple[float, float]):
+        """Apply action to the agent's arms."""
+        # Reduced motor strength for more controlled movement
+        shoulder_torque = float(np.clip(action[0], -15.0, 15.0)) * 50.0
+        elbow_torque = float(np.clip(action[1], -15.0, 15.0)) * 50.0
+
+        # Apply torque and ensure bodies are awake
+        self.upper_arm.ApplyTorque(shoulder_torque, wake=True)
+        self.lower_arm.ApplyTorque(elbow_torque, wake=True)
+        
+        # Debug: Print torques occasionally for first agent
+        if self.id == 0 and self.steps % 200 == 0:  # Every 200 steps
+            print(f"🔧 Agent {self.id}: Applied torques - shoulder: {shoulder_torque:.1f}, elbow: {elbow_torque:.1f}")
+        
+        # Removed debug print to eliminate overhead - was running 1% of the time 
