@@ -2,6 +2,7 @@
 """
 Web-based training visualization with actual physics world rendering.
 Shows the real robots, arms, and physics simulation in the browser.
+Enhanced with comprehensive evaluation framework.
 """
 
 import sys
@@ -12,6 +13,7 @@ import threading
 import time
 import json
 import logging
+from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
@@ -20,6 +22,11 @@ from src.agents.physical_parameters import PhysicalParameters
 from src.population.enhanced_evolution import EnhancedEvolutionEngine, EvolutionConfig, TournamentSelection
 from src.population.population_controller import PopulationController
 from flask_socketio import SocketIO
+from typing import List
+
+# Import evaluation framework
+from src.evaluation.metrics_collector import MetricsCollector
+from src.evaluation.dashboard_exporter import DashboardExporter
 
 # Suppress Flask logging for status endpoint
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -1005,8 +1012,9 @@ class TrainingEnvironment:
     """
     Enhanced training environment with evolutionary physical parameters.
     Manages physics simulation and evolution of diverse crawling robots.
+    Enhanced with comprehensive evaluation framework.
     """
-    def __init__(self, num_agents=30):  # Reduced from 50 to 30 to save memory
+    def __init__(self, num_agents=30, enable_evaluation=True):  # Reduced from 50 to 30 to save memory
         self.num_agents = num_agents
         self.world = b2.b2World(gravity=(0, -10), doSleep=True)
         self.dt = 1.0 / 60.0
@@ -1020,6 +1028,29 @@ class TrainingEnvironment:
 
         # Create the ground
         self._create_ground()
+        
+        # Initialize evaluation framework
+        self.enable_evaluation = enable_evaluation
+        self.metrics_collector = None
+        self.dashboard_exporter = None
+        
+        if enable_evaluation:
+            try:
+                self.metrics_collector = MetricsCollector(
+                    enable_mlflow=True,
+                    enable_file_export=True,
+                    export_directory="evaluation_exports"
+                )
+                
+                self.dashboard_exporter = DashboardExporter(
+                    port=8888,
+                    enable_api=True
+                )
+                
+                print("✅ Evaluation framework initialized")
+            except Exception as e:
+                print(f"⚠️  Evaluation framework initialization failed: {e}")
+                self.enable_evaluation = False
 
         # Enhanced evolution configuration
         self.evolution_config = EvolutionConfig(
@@ -1424,6 +1455,26 @@ class TrainingEnvironment:
             
             if current_time - last_stats_time > self.stats_update_interval:
                 self._update_statistics()
+                
+                # Collect evaluation metrics
+                if self.enable_evaluation and self.metrics_collector:
+                    try:
+                        evolution_summary = self.evolution_engine.get_evolution_summary()
+                        comprehensive_metrics = self.metrics_collector.collect_metrics(
+                            agents=self.agents,
+                            population_stats=self.population_stats,
+                            evolution_summary=evolution_summary,
+                            generation=evolution_summary.get('generation', 1),
+                            step_count=self.step_count
+                        )
+                        
+                        # Export metrics to dashboard
+                        if comprehensive_metrics and self.dashboard_exporter:
+                            self.dashboard_exporter.export_metrics(comprehensive_metrics)
+                            
+                    except Exception as e:
+                        print(f"⚠️  Error collecting evaluation metrics: {e}")
+                
                 last_stats_time = current_time
             
             # Check for periodic learning
@@ -1720,6 +1771,31 @@ class TrainingEnvironment:
         """Starts the training loop in a separate thread."""
         if not self.is_running:
             print("🔄 Starting training loop thread...")
+            
+            # Start evaluation services
+            if self.enable_evaluation:
+                try:
+                    if self.metrics_collector:
+                        session_name = f"training_session_{int(time.time())}"
+                        evolution_config = {
+                            'population_size': self.num_agents,
+                            'elite_size': self.evolution_config.elite_size,
+                            'mutation_rate': self.evolution_config.mutation_rate,
+                            'crossover_rate': self.evolution_config.crossover_rate
+                        }
+                        self.metrics_collector.start_training_session(
+                            session_name=session_name,
+                            population_size=self.num_agents,
+                            evolution_config=evolution_config
+                        )
+                    
+                    if self.dashboard_exporter:
+                        self.dashboard_exporter.start()
+                        
+                    print("📊 Evaluation services started")
+                except Exception as e:
+                    print(f"⚠️  Error starting evaluation services: {e}")
+            
             self.thread = threading.Thread(target=self.training_loop)
             self.thread.daemon = True
             self.thread.start()
@@ -1731,9 +1807,41 @@ class TrainingEnvironment:
         """Stops the training loop."""
         print("🛑 Stopping training loop...")
         self.is_running = False
+        
+        # Stop evaluation services
+        if self.enable_evaluation:
+            try:
+                if self.metrics_collector:
+                    final_summary = self.get_training_summary()
+                    self.metrics_collector.end_training_session(final_summary)
+                
+                if self.dashboard_exporter:
+                    self.dashboard_exporter.stop()
+                    
+                print("📊 Evaluation services stopped")
+            except Exception as e:
+                print(f"⚠️  Error stopping evaluation services: {e}")
+        
         if self.thread:
             self.thread.join()
             print("✅ Training loop stopped")
+    
+    def get_training_summary(self) -> Dict[str, Any]:
+        """Get final training summary for evaluation."""
+        try:
+            if self.agents:
+                best_agent = max(self.agents, key=lambda a: getattr(a, 'total_reward', 0))
+                return {
+                    'final_generation': self.evolution_engine.generation,
+                    'final_population_size': len(self.agents),
+                    'best_final_fitness': getattr(best_agent, 'total_reward', 0),
+                    'average_final_fitness': sum(getattr(a, 'total_reward', 0) for a in self.agents) / len(self.agents),
+                    'total_training_time': time.time() - getattr(self, 'training_start_time', time.time()),
+                    'evolution_summary': self.evolution_engine.get_evolution_summary()
+                }
+            return {}
+        except:
+            return {}
 
     def get_best_agent(self):
         """Utility to get the best agent based on evolutionary fitness."""
@@ -1850,7 +1958,7 @@ class TrainingEnvironment:
                     new_population, agents_to_destroy = self.evolution_engine.evolve_generation()
                     
                     # Update agents list FIRST, before any cleanup
-                    self.agents = new_population
+                    self.agents:List[EvolutionaryCrawlingAgent] = new_population
                     
                     # Add agents to destruction queue instead of immediate destruction
                     self._agents_pending_destruction.extend(agents_to_destroy)
@@ -2319,6 +2427,30 @@ def get_diverse_agents():
             agent_info.append(info)
         
         return jsonify({'status': 'success', 'diverse_agents': agent_info})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/evaluation_metrics', methods=['GET'])
+def get_evaluation_metrics():
+    """Get comprehensive evaluation metrics."""
+    try:
+        if not env.enable_evaluation or not env.metrics_collector:
+            return jsonify({'status': 'error', 'message': 'Evaluation framework not enabled'}), 400
+        
+        metrics_summary = env.metrics_collector.get_current_metrics_summary()
+        return jsonify({'status': 'success', 'metrics': metrics_summary})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/evaluation_diagnostics', methods=['GET'])
+def get_evaluation_diagnostics():
+    """Get training diagnostics and recommendations."""
+    try:
+        if not env.enable_evaluation or not env.metrics_collector:
+            return jsonify({'status': 'error', 'message': 'Evaluation framework not enabled'}), 400
+        
+        diagnostics = env.metrics_collector.get_training_diagnostics()
+        return jsonify({'status': 'success', 'diagnostics': diagnostics})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
