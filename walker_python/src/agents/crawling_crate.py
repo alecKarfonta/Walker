@@ -1,4 +1,5 @@
 """
+DEPRECATED: use crawling_crate_agent.py instead
 CrawlingCrate agent: articulated robot with a crate body and two arms for crawling locomotion.
 """
 

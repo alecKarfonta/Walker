@@ -381,4 +381,25 @@ class EvolutionEngine:
     
     def get_population_diversity(self) -> float:
         """Get the current population diversity."""
-        return self.population_controller.get_population_diversity() 
+        return self.population_controller.get_population_diversity()
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive statistics about the evolution process.
+        
+        Returns:
+            Dictionary with evolution statistics
+        """
+        population_stats = self.population_controller.get_stats()
+        evolution_progress = self.population_controller.get_evolution_progress()
+        
+        return {
+            'population_stats': population_stats,
+            'evolution_progress': evolution_progress,
+            'elite_size': self.elite_size,
+            'tournament_size': self.tournament_size,
+            'mutation_rate': self.mutation_operator.learning_rate_mutation,
+            'crossover_rate': self.crossover_operator.crossover_rate,
+            'generations_completed': len(self.generation_stats),
+            'best_agent_id': self.get_best_agent().id if self.get_best_agent() else None
+        } 

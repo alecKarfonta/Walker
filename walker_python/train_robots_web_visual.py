@@ -12,1090 +12,55 @@ import threading
 import time
 import json
 import logging
-from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
 from src.agents.crawling_crate_agent import CrawlingCrateAgent
 from src.population.population_controller import PopulationController
 from src.population.evolution import EvolutionEngine
-from flask_socketio import SocketIO
+import pygame
+import io
+import base64
 
-# Suppress Flask logging for status endpoint
+# New Dash App Integration
+from src.ui.main_window import create_app
+from typing import List
+
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
-
-# HTML template with Canvas rendering
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Walker Training Visualizer (Box2D)</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body { 
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            color: #e8e8e8; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            overflow: hidden;
-            display: flex;
-        }
-
-        #main-container {
-            display: flex;
-            width: 100vw;
-            height: 100vh;
-        }
-        
-        #canvas-wrapper {
-            flex-grow: 1;
-            position: relative;
-            overflow: hidden;
-        }
-
-        canvas { 
-            display: block; 
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
-            box-shadow: inset 0 0 50px rgba(0,0,0,0.3);
-        }
-        
-        /* Side Panel for Robot Stats */
-        #robot-stats { 
-            flex: 0 0 380px; /* Initial width */
-            min-width: 250px;
-            max-width: 800px;
-            height: 100vh;
-            background: rgba(15, 20, 35, 0.9);
-            backdrop-filter: blur(12px);
-            padding: 20px;
-            border-right: 2px solid #e74c3c;
-            box-shadow: 5px 0 25px rgba(0,0,0,0.3);
-            overflow-y: auto;
-            z-index: 100;
-            transition: flex-basis 0.3s ease, transform 0.3s ease, padding 0.3s ease;
-        }
-        
-        /* Debug overlay to help visualize click areas */
-        #debug-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-            pointer-events: none; /* Don't interfere with canvas */
-            background: transparent;
-        }
-        
-        #controls { 
-            position: absolute; 
-            top: 20px; 
-            left: 400px; /* Initial position, will be updated by JS */
-            z-index: 100;
-            transition: left 0.3s ease;
-            pointer-events: auto; /* Ensure controls are clickable */
-        }
-        
-        button { 
-            background: linear-gradient(145deg, #2c3e50, #34495e);
-            color: #ecf0f1; 
-            border: 2px solid #3498db; 
-            padding: 12px 20px; 
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        
-        button:hover {
-            background: linear-gradient(145deg, #3498db, #2980b9);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3);
-        }
-        
-        .stats-container {
-            background: rgba(26, 26, 46, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #3498db;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            width: 350px;
-            text-align: center;
-        }
-        
-        .stats-title {
-            color: #3498db;
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 15px;
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .stat-row { 
-            margin: 8px 0; 
-            font-size: 14px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(52, 152, 219, 0.2);
-        }
-        
-        .stat-row:last-child {
-            border-bottom: none;
-        }
-        
-        .stat-label { 
-            color: #bdc3c7; 
-            font-weight: 500;
-        }
-        
-        .stat-value { 
-            color: #ecf0f1; 
-            font-weight: 700;
-            background: linear-gradient(45deg, #3498db, #2980b9);
-            padding: 4px 8px;
-            border-radius: 6px;
-            min-width: 60px;
-            text-align: center;
-        }
-        
-        .q-learning-section {
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 2px solid #e74c3c;
-        }
-        
-        .q-learning-title {
-            color: #e74c3c;
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .q-stat-row {
-            margin: 6px 0;
-            font-size: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 6px 0;
-            border-bottom: 1px solid rgba(231, 76, 60, 0.2);
-        }
-        
-        .q-stat-row:last-child {
-            border-bottom: none;
-        }
-        
-        .q-stat-label {
-            color: #bdc3c7;
-            font-weight: 500;
-        }
-        
-        .q-stat-value {
-            color: #ecf0f1;
-            font-weight: 600;
-            background: rgba(231, 76, 60, 0.3);
-            padding: 3px 6px;
-            border-radius: 4px;
-            min-width: 50px;
-            text-align: center;
-        }
-        
-        #robot-stats.collapsed {
-            flex-basis: 0 !important;
-            min-width: 0 !important;
-            transform: translateX(-100%);
-            padding-left: 0;
-            padding-right: 0;
-        }
-        
-        #robot-stats.collapsed > * {
-            display: none;
-        }
-        
-        #resizer {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 8px;
-            height: 100%;
-            cursor: col-resize;
-            z-index: 102;
-        }
-
-        #collapse-toggle {
-            position: absolute;
-            top: 50%;
-            left: 380px; /* Initial position, will be updated by JS */
-            transform: translateY(-50%);
-            width: 25px;
-            height: 50px;
-            background: #e74c3c;
-            border: none;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            border-radius: 0 5px 5px 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 99;
-            transition: left 0.3s ease;
-        }
-        
-        #collapse-toggle .arrow {
-            display: inline-block;
-            transition: transform 0.3s ease;
-        }
-
-        #robot-stats.collapsed + #collapse-toggle .arrow {
-            transform: rotate(180deg);
-        }
-        
-        .robot-stats-title {
-            color: #e74c3c;
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 15px;
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .robot-stat { 
-            margin: 12px 0; 
-            padding: 15px; 
-            border-left: 4px solid #e74c3c;
-            background: rgba(231, 76, 60, 0.1);
-            border-radius: 8px;
-            transition: all 0.3s ease;
-        }
-        
-        .robot-stat:hover {
-            background: rgba(231, 76, 60, 0.25);
-            transform: none; /* Removed jarring hover movement */
-        }
-        
-        .robot-name {
-            color: #e74c3c;
-            font-weight: 700;
-            font-size: 14px;
-            margin-bottom: 8px;
-        }
-        
-        /* Leaderboard specific styling */
-        .robot-stat:nth-child(1) .robot-name {
-            color: #f39c12; /* Gold for 1st place */
-            font-size: 16px;
-        }
-        
-        .robot-stat:nth-child(2) .robot-name {
-            color: #95a5a6; /* Silver for 2nd place */
-            font-size: 15px;
-        }
-        
-        .robot-stat:nth-child(3) .robot-name {
-            color: #d35400; /* Bronze for 3rd place */
-            font-size: 15px;
-        }
-        
-        .robot-stat-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 4px 0;
-            font-size: 12px;
-        }
-        
-        .robot-stat-label {
-            color: #bdc3c7;
-            font-weight: 500;
-        }
-        
-        .robot-stat-value {
-            color: #ecf0f1;
-            font-weight: 600;
-            background: rgba(231, 76, 60, 0.3);
-            padding: 2px 6px;
-            border-radius: 4px;
-            min-width: 50px;
-            text-align: center;
-        }
-        
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(52, 152, 219, 0.1);
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(45deg, #3498db, #2980b9);
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(45deg, #2980b9, #1f5f8b);
-        }
-        
-        /* Animation for stats updates */
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        
-        .stat-value.updated {
-            animation: pulse 0.3s ease-in-out;
-        }
-
-        /* New Controls Container */
-        #controls-container {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            pointer-events: auto; /* Ensure controls are clickable */
-        }
-        
-        .control-panel {
-            background: rgba(26, 26, 46, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 15px;
-            border-radius: 15px;
-            border: 1px solid #3498db;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            width: 350px;
-        }
-
-        .control-panel-title {
-            color: #3498db;
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 10px;
-            cursor: pointer;
-            user-select: none;
-        }
-
-        .control-panel-title::before {
-            content: '▶ ';
-            display: inline-block;
-            transition: transform 0.2s ease-in-out;
-        }
-
-        .control-panel.open .control-panel-title::before {
-            transform: rotate(90deg);
-        }
-
-        .control-panel-content {
-            padding: 10px;
-            display: none;
-        }
-        
-        .control-panel.open .control-panel-content {
-            display: block;
-        }
-        
-        .focus-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: rgba(231, 76, 60, 0.9);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 5px;
-            font-weight: bold;
-            z-index: 1000;
-            pointer-events: none; /* Don't interfere with canvas interactions */
-        }
-        
-        .leaderboard, .population-summary {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 10px;
-        }
-        
-        .leaderboard h3, .population-summary h3 {
-            margin: 0 0 10px 0;
-            color: #ecf0f1;
-        }
-
-        .robot-stat.focused {
-            border-left-color: #f39c12; /* Gold color for focused agent */
-            background: rgba(243, 156, 18, 0.15);
-        }
-
-    </style>
-</head>
-<body>
-    <div id="main-container">
-        <div id="robot-stats">
-            <div class="robot-stats-title">🏆 Robot Leaderboard</div>
-            <div id="robotDetails"></div>
-        </div>
-
-        <div id="resizer"></div>
-        <button id="collapse-toggle"><span class="arrow">‹</span></button>
-
-        <div id="canvas-wrapper">
-            <canvas id="simulation-canvas"></canvas>
-            
-            <div id="top-left-overlay" class="overlay-container">
-                 <button id="resetView">Reset View</button>
-            </div>
-
-            <div id="top-right-overlay" class="overlay-container">
-                <div class="stats-container">
-                    <div class="leaderboard">
-                        <h3>🏆 Leaderboard</h3>
-                        <div id="leaderboard-content"></div>
-                    </div>
-                    <div class="population-summary">
-                        <h3>📊 Population Summary</h3>
-                        <div id="population-summary-content"></div>
-                    </div>
-                </div>
-                <div class="focus-indicator" id="focus-indicator" style="display: none;">
-                    <span id="focus-text">🎯 Focused on Agent: <span id="focused-agent-id">-</span></span>
-                </div>
-            </div>
-
-            <div id="bottom-left-overlay" class="overlay-container">
-                <div class="control-panel" id="learning-panel">
-                    <div class="control-panel-title">Learning Settings</div>
-                    <div class="control-panel-content">
-                        <!-- Sliders will be added here -->
-                    </div>
-                </div>
-                <div class="control-panel" id="physical-panel">
-                    <div class="control-panel-title">Physical Settings</div>
-                    <div class="control-panel-content">
-                        <!-- Sliders will be added here -->
-                    </div>
-                </div>
-                <div class="control-panel" id="evolution-panel">
-                    <div class="control-panel-title">Evolution Settings</div>
-                    <div class="control-panel-content">
-                        <!-- Controls will be added here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const canvas = document.getElementById('simulation-canvas');
-        const ctx = canvas.getContext('2d');
-        let scale = 15; // pixels per meter
-        let offsetX = 0;
-        let offsetY = 0;
-        let isDragging = false;
-        let isDraggingRobot = false;
-        let draggedRobotId = null;
-        let lastMouseX, lastMouseY;
-        let focusedAgentId = null;
-        let cameraPosition = { x: 0, y: 0 };
-        let cameraZoom = 1.0;
-        let mouseDownTime = 0;
-        let mouseDownX = 0;
-        let mouseDownY = 0;
-        let mouseDownRobotId = null;
-        const CLICK_THRESHOLD = 5; // pixels
-        const CLICK_TIME_THRESHOLD = 200; // milliseconds
-
-        function resizeCanvas() {
-            const wrapper = document.getElementById('canvas-wrapper');
-            if (!wrapper) return;
-            canvas.width = wrapper.clientWidth;
-            canvas.height = wrapper.clientHeight;
-        }
-        
-        // Initialize canvas immediately
-        resizeCanvas();
-        window.addEventListener('resize', resizeCanvas);
-
-        document.body.addEventListener('click', (e) => {
-            if (e.target.closest('.robot-stat')) {
-                const agentId = e.target.closest('.robot-stat').dataset.agentId;
-                console.log(`Leaderboard item clicked for agent: ${agentId}`);
-                
-                fetch('/click', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ agent_id: parseInt(agentId) })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        focusedAgentId = data.agent_id;
-                        updateFocusIndicator();
-                        console.log(`✅ Agent ${data.agent_id} selected via leaderboard!`);
-                    }
-                });
-            }
-        });
-
-        canvas.addEventListener('mousedown', (e) => {
-            mouseDownTime = Date.now();
-            mouseDownX = e.clientX;
-            mouseDownY = e.clientY;
-            isDragging = false;
-            isDraggingRobot = false;
-            draggedRobotId = null;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
-            
-            // Check if we clicked on a robot
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            // Convert screen coordinates to world coordinates using the new camera system
-            const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
-            const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
-            
-            console.log(`🎯 Mouse down at screen (${x}, ${y}) -> world (${worldX.toFixed(2)}, ${worldY.toFixed(2)})`);
-            console.log(`🎯 Canvas rect: ${rect.left}, ${rect.top}, ${rect.width}, ${rect.height}`);
-            console.log(`🎯 Camera: pos(${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}), zoom: ${cameraZoom}`);
-            
-            // Visual debug indicator
-            const debugOverlay = document.getElementById('debug-overlay');
-            debugOverlay.innerHTML = `<div style="position: absolute; left: ${e.clientX}px; top: ${e.clientY}px; width: 20px; height: 20px; background: red; border-radius: 50%; pointer-events: none; z-index: 9999;"></div>`;
-            setTimeout(() => debugOverlay.innerHTML = '', 1000);
-            
-            // Find robot at click position
-            fetch('/get_agent_at_position', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    x: worldX,
-                    y: worldY
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success' && data.agent_id !== null) {
-                    mouseDownRobotId = data.agent_id;
-                    console.log(`🤖 Mouse down on robot ${data.agent_id}`);
-                    // Visual feedback for robot click
-                    debugOverlay.innerHTML += `<div style="position: absolute; left: ${e.clientX}px; top: ${e.clientY}px; width: 30px; height: 30px; background: green; border-radius: 50%; pointer-events: none; z-index: 9999; border: 3px solid yellow;"></div>`;
-                } else {
-                    mouseDownRobotId = null;
-                    console.log(`🖱️ Mouse down on empty space`);
-                }
-            })
-            .catch(error => {
-                console.error('Error checking robot at position:', error);
-                mouseDownRobotId = null;
-            });
-        });
-        
-        canvas.addEventListener('mousemove', (e) => {
-            if (mouseDownTime > 0) {
-                const distance = Math.sqrt((e.clientX - mouseDownX) ** 2 + (e.clientY - mouseDownY) ** 2);
-                
-                if (distance > CLICK_THRESHOLD) {
-                    if (mouseDownRobotId !== null) {
-                        // Dragging a robot
-                        if (!isDraggingRobot) {
-                            isDraggingRobot = true;
-                            draggedRobotId = mouseDownRobotId;
-                            console.log(`🤖 Started dragging robot ${draggedRobotId}`);
-                        }
-                        
-                        // Move robot to cursor position
-                        const rect = canvas.getBoundingClientRect();
-                        const x = e.clientX - rect.left;
-                        const y = e.clientY - rect.top;
-                        const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
-                        const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
-                        
-                        fetch('/move_agent', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                agent_id: draggedRobotId,
-                                x: worldX,
-                                y: worldY
-                            })
-                        })
-                        .catch(error => {
-                            console.error('Error moving robot:', error);
-                        });
-                    } else {
-                        // Dragging camera
-                        isDragging = true;
-                        cameraPosition.x -= (e.clientX - lastMouseX) / cameraZoom;
-                        cameraPosition.y += (e.clientY - lastMouseY) / cameraZoom;
-                        lastMouseX = e.clientX;
-                        lastMouseY = e.clientY;
-                    }
-                }
-            }
-        });
-        
-        canvas.addEventListener('mouseup', (e) => {
-            const timeDiff = Date.now() - mouseDownTime;
-            const distance = Math.sqrt((e.clientX - mouseDownX)**2 + (e.clientY - mouseDownY)**2);
-
-            if (!isDragging && !isDraggingRobot && timeDiff < CLICK_TIME_THRESHOLD && distance < CLICK_THRESHOLD) {
-                // This is a click, not a drag
-                const rect = canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                
-                fetch('/click', {
-                     method: 'POST',
-                     headers: { 'Content-Type': 'application/json' },
-                     body: JSON.stringify({
-                         screen_x: x,
-                         screen_y: y,
-                         canvas_width: canvas.width,
-                         canvas_height: canvas.height
-                     })
-                 })
-                 .then(response => response.json())
-                 .then(data => {
-                     if (data.status === 'success') {
-                         focusedAgentId = data.agent_id;
-                         updateFocusIndicator();
-                         if (data.agent_id !== null) {
-                             console.log(`✅ Agent ${data.agent_id} selected!`);
-                         } else {
-                             console.log(`✅ Camera focus cleared`);
-                         }
-                     }
-                 });
-            }
-
-            if (isDraggingRobot) {
-                console.log(`🤖 Finished dragging robot ${draggedRobotId}`);
-            }
-            isDragging = false;
-            isDraggingRobot = false;
-            draggedRobotId = null;
-            mouseDownTime = 0;
-            mouseDownRobotId = null;
-        });
-        
-        canvas.addEventListener('mouseleave', () => {
-            isDragging = false;
-            isDraggingRobot = false;
-            draggedRobotId = null;
-            mouseDownTime = 0;
-            mouseDownRobotId = null;
-        });
-
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomFactor = 1.1;
-            const newScale = e.deltaY < 0 ? cameraZoom * zoomFactor : cameraZoom / zoomFactor;
-            cameraZoom = Math.max(0.1, Math.min(5, newScale));
-        });
-
-        document.getElementById('resetView').addEventListener('click', () => {
-            focusedAgentId = null;
-            // Reset camera to default view
-            cameraPosition = { x: 0, y: 0 };
-            cameraZoom = 1.0;
-
-            // Also reset legacy offset and scale if they are used elsewhere
-            scale = 15;
-            offsetX = canvas.width / 2;
-            offsetY = canvas.height * 0.8;
-            
-            // Hide focus indicator
-            const focusIndicator = document.getElementById('focus-indicator');
-            if(focusIndicator) {
-                focusIndicator.style.display = 'none';
-            }
-        });
-
-        function getRewardColor(reward) {
-            // Define threshold for "close to zero"
-            const threshold = 0.1;
-            
-            if (Math.abs(reward) < threshold) {
-                return '#f39c12'; // Yellow for values close to zero
-            } else if (reward > 0) {
-                return '#27ae60'; // Green for positive values
-            } else {
-                return '#e74c3c'; // Red for negative values
-            }
-        }
-
-        function getActionHistoryString(actionHistory) {
-            if (!actionHistory || actionHistory.length === 0) {
-                return "No actions yet";
-            }
-            
-            // Map action indices to readable names
-            const actionNames = {
-                0: "None", 1: "S-Fwd", 2: "E-Fwd", 3: "Both-Fwd", 
-                4: "S-Back", 5: "E-Back", 6: "S-Back", 7: "E-Back"
-            };
-            
-            // Get the last 5 actions for display
-            const recentActions = actionHistory.slice(-5);
-            const actionStrings = recentActions.map(idx => actionNames[idx] || `A${idx}`);
-            
-            return actionStrings.join(" → ");
-        }
-
-        function updateStats(data) {
-            if (!data) return;
-
-            // Update leaderboard and population summary
-            const leaderboardContent = document.getElementById('leaderboard-content');
-            const populationSummaryContent = document.getElementById('population-summary-content');
-
-            if (leaderboardContent && data.leaderboard) {
-                leaderboardContent.innerHTML = data.leaderboard.map(robot => `
-                    <div class="stat-row">
-                        <span class="stat-label">${robot.name}</span>
-                        <span class="stat-value">${robot.distance.toFixed(2)}m</span>
-                    </div>
-                `).join('');
-            }
-
-            if (populationSummaryContent && data.statistics) {
-                 populationSummaryContent.innerHTML = `
-                    <div class="stat-row">
-                        <span class="stat-label">Generation:</span>
-                        <span class="stat-value">${data.statistics.generation || 1}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Avg Distance:</span>
-                        <span class="stat-value">${(data.statistics.average_distance || 0).toFixed(2)}m</span>
-                    </div>
-                 `;
-            }
-
-            // Update detailed robot stats in the side panel
-            const robotDetails = document.getElementById('robotDetails');
-            if (robotDetails && data.robots) {
-                robotDetails.innerHTML = data.robots.slice(0, 10).map(robot => {
-                    const qUpdates = (robot.q_updates || 0);
-                    const isFocused = robot.id === focusedAgentId;
-
-                    return `
-                        <div class="robot-stat ${isFocused ? 'focused' : ''}" data-agent-id="${robot.id}">
-                            <div class="robot-name">${robot.name} (Rank #${robot.rank || 'N/A'})</div>
-                            <div class="robot-stat-row">
-                                <span class="robot-stat-label">Distance:</span>
-                                <span class="robot-stat-value" style="color: ${getRewardColor(robot.distance || 0)};">${(robot.distance || 0).toFixed(2)}</span>
-                            </div>
-                            <div class="robot-stat-row">
-                                <span class="robot-stat-label">Position:</span>
-                                <span class="robot-stat-value">(${(robot.position.x || 0).toFixed(2)}, ${(robot.position.y || 0).toFixed(2)})</span>
-                            </div>
-                            <div class="robot-stat-row">
-                                <span class="robot-stat-label">Episode Reward:</span>
-                                <span class="robot-stat-value" style="color: ${getRewardColor(robot.episode_reward || 0)};">
-                                    ${(robot.episode_reward || 0).toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            }
-
-            // Update focus indicator text
-            updateFocusIndicator();
-        }
-
-        function drawWorld(data) {
-            if (!canvas || !data) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save();
-            
-            // Apply camera transform:
-            // 1. Move origin to center of canvas
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            // 2. Zoom and flip Y axis to match physics coordinates
-            ctx.scale(cameraZoom, -cameraZoom);
-            // 3. Pan the world so the camera position is at the center
-            ctx.translate(-cameraPosition.x, -cameraPosition.y);
-            
-            // Draw ground from geometry
-            if (data.shapes && data.shapes.ground) {
-                 const gradient = ctx.createLinearGradient(0, -1, 0, 1);
-                gradient.addColorStop(0, '#5e738c');
-                gradient.addColorStop(1, '#34495e');
-                ctx.fillStyle = gradient;
-
-                data.shapes.ground.forEach(geom => {
-                    if (geom.type === 'polygon' && geom.vertices.length > 0) {
-                        ctx.beginPath();
-                        ctx.moveTo(geom.vertices[0][0], geom.vertices[0][1]);
-                        for (let i = 1; i < geom.vertices.length; i++) {
-                            ctx.lineTo(geom.vertices[i][0], geom.vertices[i][1]);
-                        }
-                        ctx.closePath();
-                        ctx.fill();
-                    } else if (geom.type === 'line') {
-                        // Fallback for old line-based ground
-                        ctx.strokeStyle = '#34495e';
-                        ctx.lineWidth = 0.1;
-                        ctx.beginPath();
-                        ctx.moveTo(geom.vertices[0][0], geom.vertices[0][1]);
-                        ctx.lineTo(geom.vertices[1][0], geom.vertices[1][1]);
-                        ctx.stroke();
-                    }
-                });
-            }
-
-            if (data.shapes && data.shapes.robots) {
-                data.shapes.robots.forEach(robot => {
-                    const isFocused = robot.id === focusedAgentId;
-                    
-                    robot.body_parts.forEach(part => {
-                        if (part.type === 'circle') { // Wheels
-                            const wheelGradient = ctx.createRadialGradient(
-                                part.center[0], part.center[1], 0,
-                                part.center[0], part.center[1], part.radius
-                            );
-                            wheelGradient.addColorStop(0, '#3498db');
-                            wheelGradient.addColorStop(1, '#2980b9');
-                            ctx.fillStyle = wheelGradient;
-                        } else { // Body parts
-                            ctx.fillStyle = isFocused ? '#e74c3c' : '#c0392b'; // Red if focused
-                        }
-                        
-                        ctx.strokeStyle = '#2c3e50';
-                        ctx.lineWidth = 0.05;
-
-                        if (part.type === 'polygon') {
-                            ctx.beginPath();
-                            ctx.moveTo(part.vertices[0][0], part.vertices[0][1]);
-                            for (let i = 1; i < part.vertices.length; i++) {
-                                ctx.lineTo(part.vertices[i][0], part.vertices[i][1]);
-                            }
-                            ctx.closePath();
-                            ctx.fill();
-                            ctx.stroke();
-                        } else if (part.type === 'circle') {
-                            ctx.beginPath();
-                            ctx.arc(part.center[0], part.center[1], part.radius, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.stroke();
-                        }
-                    });
-                });
-            }
-            ctx.restore();
-        }
-
-        function fetchData() {
-            fetch('/status')
-                .then(response => response.json())
-                .then(data => {
-                    drawWorld(data);
-                    updateStats(data);
-                    requestAnimationFrame(fetchData);
-                })
-                .catch(error => {
-                    console.error('Error fetching data:', error);
-                    setTimeout(fetchData, 1000); // Try again after a second
-                });
-        }
-        fetchData();
-
-        function updateFocusIndicator() {
-            const indicator = document.getElementById('focus-indicator');
-            const agentIdSpan = document.getElementById('focused-agent-id');
-            if (!indicator || !agentIdSpan) return;
-
-            if (focusedAgentId !== null) {
-                agentIdSpan.textContent = focusedAgentId;
-                indicator.style.display = 'block';
-            } else {
-                indicator.style.display = 'none';
-            }
-        }
-
-        // --- Control Panel Interactivity ---
-        function createSlider(id, label, min, max, step, value) {
-            const container = document.createElement('div');
-            container.className = 'control-row'; // You might need to style this class
-            
-            const labelEl = document.createElement('span');
-            labelEl.className = 'control-label';
-            labelEl.textContent = label;
-            
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.id = id;
-            slider.min = min;
-            slider.max = max;
-            slider.step = step;
-            slider.value = value;
-            
-            const valueEl = document.createElement('span');
-            valueEl.className = 'control-value';
-            valueEl.textContent = parseFloat(value).toFixed(3);
-            
-            slider.addEventListener('input', () => {
-                valueEl.textContent = parseFloat(slider.value).toFixed(3);
-            });
-
-            slider.addEventListener('change', () => {
-                updateAgentParams({ [id]: parseFloat(slider.value) });
-            });
-            
-            container.appendChild(labelEl);
-            container.appendChild(slider);
-            container.appendChild(valueEl);
-            
-            return container;
-        }
-
-        const learningPanelContent = document.querySelector('#learning-panel .control-panel-content');
-        if (learningPanelContent) {
-            learningPanelContent.appendChild(createSlider('learning_rate', 'Learning Rate', 0.001, 0.1, 0.001, 0.005));
-            learningPanelContent.appendChild(createSlider('epsilon', 'Epsilon (Randomness)', 0.0, 1.0, 0.01, 0.3));
-        }
-
-        document.querySelectorAll('.control-panel-title').forEach(title => {
-            title.addEventListener('click', () => {
-                title.parentElement.classList.toggle('open');
-            });
-        });
-
-        async function updateAgentParams(params) {
-            // Include focused agent ID if available
-            if (focusedAgentId !== null) {
-                params.target_agent_id = focusedAgentId;
-            }
-            
-            try {
-                await fetch('/update_agent_params', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(params)
-                });
-                console.log('Agent parameters updated:', params);
-            } catch (err) {
-                console.error('Error updating agent parameters:', err);
-            }
-        }
-
-    </script>
-</body>
-</html>
-"""
-
 
 class TrainingEnvironment:
     """
-    Manages the physics simulation and training of crawling crate agents using Box2D.
+    Manages the physics simulation, agents, and their training.
+    This class will be passed to the Dash application.
     """
     def __init__(self, num_agents=50):
         self.num_agents = num_agents
         self.world = b2.b2World(gravity=(0, -10), doSleep=True)
-        self.dt = 1.0 / 60.0
-
-        # World bounds for resetting fallen agents
-        self.world_bounds_y = -20.0 # Reset if agent falls below this y-coordinate
+        self.ground = self._create_ground()
+        self.agents: List[CrawlingCrateAgent] = []
+        self.population = PopulationController(population_size=self.num_agents)
+        self.evolution_engine = EvolutionEngine(self.population)
         
-        # --- Collision Filtering Setup ---
-        # Box2D uses 16-bit collision categories, so we need a different approach for 50 agents
-        # Instead of unique categories per agent, we'll use a simpler approach:
-        # - Ground: category 0x0001
-        # - All agents: category 0x0002 (shared category)
-        # - Agents only collide with ground, not with each other
-        self.GROUND_CATEGORY = 0x0001
-        self.AGENT_CATEGORY = 0x0002
-
-        # 2. Create the ground with its own category.
-        #    Its mask is set to collide with ALL agents.
-        self._create_ground()
-
-        # 3. Create agents, all with the same category.
-        #    Their masks are set to collide ONLY with the ground.
-        self.agents = []
-        for i in range(self.num_agents):
-            # Reduce spacing for 50 agents to fit them all
-            spacing = 8 if self.num_agents > 20 else 15
-            agent = CrawlingCrateAgent(
-                self.world,
-                agent_id=i,
-                position=(i * spacing, 6),
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY  # Only collide with the ground
-            )
-            agent.body.awake = True
-            self.agents.append(agent)
-
-        # --- Statistics and State ---
-        self.step_count = 0
-        self.robot_stats = {}
-        self.population_stats = {
-            'total_distance': 0,
-            'best_distance': 0,
-            'average_distance': 0,
-            'generation': 1,
-            'total_steps': 0,
-            'q_learning_stats': {
-                'avg_epsilon': 0,
-                'avg_learning_rate': 0,
-                'total_q_updates': 0,
-                'avg_q_value': 0
-            }
-        }
+        self.simulation_time_s = 0.0
+        self.time_step = 1.0 / 60.0
+        self.velocity_iterations = 8
+        self.position_iterations = 3
+        
         self.is_running = False
-        self.thread = None
-        self.episode_length = 1200
-        self.episode_step = 0
+        self._stop_event = threading.Event()
+        self._thread = None
+        self._lock = threading.Lock()
         
-        # Statistics update timing
-        self.stats_update_interval = 0.1  # Update stats every 0.1 seconds
-        self.steps_per_stats_update = int(self.stats_update_interval / self.dt)  # 6 steps at 60fps
-        self.last_stats_update = 0
-        
-        # Settle the world
-        for _ in range(10):
-            self.world.Step(self.dt, 8, 3)
-
-        self.population_controller = PopulationController(len(self.agents))
-        self.evolution_engine = EvolutionEngine(self.population_controller)
-        self.mutation_rate = 0.1 # Default mutation rate
-
-        # Camera and focus system
-        self.focused_agent = None
-        self.camera_target = (0, 0)
-        self.camera_position = (0, 0)
+        self.camera_center = (0, 15)
         self.camera_zoom = 1.0
         self.target_zoom = 1.0
-        self.follow_speed = 0.05
-        self.zoom_speed = 0.05
+        self.focused_agent = None
+        self.camera_position = (0, 0)
+        self.camera_target = (0, 0)
+
+        self._init_robot_stats()
+        # Automatically spawn agents at startup
+        for _ in range(self.num_agents):
+            self.spawn_agent()
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1110,8 +75,8 @@ class TrainingEnvironment:
             density=0.0,
             friction=0.9,
             filter=b2.b2Filter(
-                categoryBits=self.GROUND_CATEGORY,
-                maskBits=self.AGENT_CATEGORY  # Collide with all agents
+                categoryBits=0x0001,
+                maskBits=0x0002  # Collide with all agents
             )
         )
         print(f"🔧 Ground setup complete with width {ground_width} for {self.num_agents} agents.")
@@ -1163,7 +128,7 @@ class TrainingEnvironment:
         print("🚀 Training loop started!")
         print(f"🔧 World gravity: {self.world.gravity}")
         print(f"🔧 Number of agents: {len(self.agents)}")
-        print(f"🔧 Physics timestep: {self.dt}")
+        print(f"🔧 Physics timestep: {self.time_step}")
         
         # Initialize robot statistics
         self._init_robot_stats()
@@ -1171,7 +136,7 @@ class TrainingEnvironment:
         # Test physics world
         print("🔧 Testing physics world...")
         for i in range(5):
-            self.world.Step(self.dt, 8, 3)
+            self.world.Step(self.time_step, self.velocity_iterations, self.position_iterations)
             print(f"   Step {i}: World bodies: {len(self.world.bodies)}")
         
         while self.is_running:
@@ -1182,7 +147,7 @@ class TrainingEnvironment:
             self.update_camera(delta_time)
             
             # Step the physics world
-            self.world.Step(self.dt, 8, 3)
+            self.world.Step(self.time_step, self.velocity_iterations, self.position_iterations)
             step_count += 1
             
             # Update all agents
@@ -1191,7 +156,7 @@ class TrainingEnvironment:
             
             # Check for fallen agents and reset them
             for agent in self.agents:
-                if agent.body.position.y < self.world_bounds_y:
+                if agent.body.position.y < -20.0:
                     agent.reset_position()
 
             # Update statistics periodically
@@ -1222,7 +187,7 @@ class TrainingEnvironment:
                 last_debug_time = current_time
             
             last_step_time = current_time
-            time.sleep(max(0, self.dt - (time.time() - current_time)))
+            time.sleep(max(0, self.time_step - (time.time() - current_time)))
 
     def update_agent_params(self, params, target_agent_id=None):
         """Update parameters for specific agent or all agents."""
@@ -1267,78 +232,50 @@ class TrainingEnvironment:
         return True
 
     def get_status(self):
-        """Returns the current state of the simulation for rendering."""
-        if not self.is_running:
-            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'statistics': {}, 'camera': self.get_camera_state()}
-
-        # 1. Get agent shapes for drawing
-        robot_shapes = []
-        for agent in self.agents:
-            body_parts = []
-            # Chassis, Arms, Wheels
-            for part in [agent.body] + agent.wheels + [agent.upper_arm, agent.lower_arm]:
-                 for fixture in part.fixtures:
-                    shape = fixture.shape
-                    if isinstance(shape, b2.b2PolygonShape):
-                        body_parts.append({
-                            'type': 'polygon',
-                            'vertices': [tuple(part.GetWorldPoint(v)) for v in shape.vertices]
-                        })
-                    elif isinstance(shape, b2.b2CircleShape):
-                         body_parts.append({
-                            'type': 'circle',
-                            'center': tuple(part.GetWorldPoint(shape.pos)),
-                            'radius': shape.radius
-                        })
-            robot_shapes.append({'id': agent.id, 'body_parts': body_parts})
-
-        # 2. Get ground shapes for drawing
-        ground_shapes = []
-        for body in self.world.bodies:
-            if body.type == b2.b2_staticBody:
-                for fixture in body.fixtures:
-                    shape = fixture.shape
-                    if isinstance(shape, b2.b2PolygonShape):
-                        ground_shapes.append({
-                            'type': 'polygon',
-                            'vertices': [tuple(body.GetWorldPoint(v)) for v in shape.vertices]
-                        })
-        
-        # 3. Get leaderboard data (top 10 robots)
-        sorted_robots = sorted(self.robot_stats.values(), key=lambda r: r.get('total_distance', 0), reverse=True)
-        leaderboard_data = [
-            {'name': f"Robot {r['id']}", 'distance': r.get('total_distance', 0)}
-            for r in sorted_robots[:10]
-        ]
-        
-        # 4. Get detailed stats for side panel (top 10)
-        robot_details = []
-        for i, r_stat in enumerate(sorted_robots[:10]):
-            agent = self.agents[r_stat['id']]
-            robot_details.append({
-                'id': r_stat['id'],
-                'name': f"Robot {r_stat['id']}",
-                'rank': i + 1,
-                'distance': r_stat.get('total_distance', 0),
-                'position': r_stat.get('current_position', (0,0)),
-                'episode_reward': r_stat.get('episode_reward', 0)
-            })
-
-        return {
-            'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
-            'leaderboard': leaderboard_data,
-            'robots': robot_details,
-            'statistics': self.population_stats,
-            'camera': self.get_camera_state()
-        }
+        """Returns a comprehensive status of the environment for rendering."""
+        with self._lock:
+            agent_data = []
+            for agent_index in range(len(self.agents)):
+                agent: CrawlingCrateAgent = self.agents[agent_index]
+                body_pos = agent.body.position
+                upper_arm_angle = agent.upper_arm.angle
+                lower_arm_angle = agent.lower_arm.angle
+                
+                agent_data.append({
+                    'id': agent.id,
+                    'type': 'crawling_crate',
+                    'chassis_pos': (body_pos.x, body_pos.y),
+                    'chassis_angle': agent.body.angle,
+                    'wheel_pos': (agent.wheels[0].position.x, agent.wheels[0].position.y),
+                    'wheel_angle': agent.wheels[0].angle,
+                    'upper_arm_pos': (agent.upper_arm.position.x, agent.upper_arm.position.y),
+                    'upper_arm_angle': upper_arm_angle,
+                    'lower_arm_pos': (agent.lower_arm.position.x, agent.lower_arm.position.y),
+                    'lower_arm_angle': lower_arm_angle,
+                    'performance': agent.total_reward,
+                    'q_values': agent.q_table.get_best_q_values_for_all_states() if agent.q_table else {},
+                    'action_history': list(agent.action_history),
+                })
+            
+            best_agent = self.get_best_agent()
+            
+            return {
+                'simulation_time_s': self.simulation_time_s,
+                'num_agents': len(self.agents),
+                'agents': agent_data,
+                'camera': self.get_camera_state(),
+                'best_agent_id': best_agent.id if best_agent else None,
+                'population_stats': self.population.get_stats(),
+                'evolution_stats': self.evolution_engine.get_stats(),
+            }
 
     def start(self):
         """Starts the training loop in a separate thread."""
         if not self.is_running:
             print("🔄 Starting training loop thread...")
-            self.thread = threading.Thread(target=self.training_loop)
-            self.thread.daemon = True
-            self.thread.start()
+            self._thread = threading.Thread(target=self.training_loop)
+            self._thread.daemon = True
+            self._thread.start()
             print("✅ Training loop thread started successfully")
         else:
             print("⚠️  Training loop is already running")
@@ -1347,8 +284,8 @@ class TrainingEnvironment:
         """Stops the training loop."""
         print("🛑 Stopping training loop...")
         self.is_running = False
-        if self.thread:
-            self.thread.join()
+        if self._thread:
+            self._thread.join()
             print("✅ Training loop stopped")
 
     def get_best_agent(self):
@@ -1367,11 +304,11 @@ class TrainingEnvironment:
             self.world,
             agent_id=new_id,
             position=position,
-            category_bits=self.AGENT_CATEGORY,
-            mask_bits=self.GROUND_CATEGORY
+            category_bits=0x0002,
+            mask_bits=0x0001
         )
         self.agents.append(new_agent)
-        self.population_controller.add_agent(new_agent)
+        self.population.add_agent(new_agent)
         self.num_agents = len(self.agents)
         print(f"🐣 Spawned new agent {new_id}. Total agents: {self.num_agents}")
 
@@ -1391,8 +328,8 @@ class TrainingEnvironment:
             self.world,
             agent_id=new_id,
             position=position,
-            category_bits=self.AGENT_CATEGORY,
-            mask_bits=self.GROUND_CATEGORY
+            category_bits=0x0002,
+            mask_bits=0x0001
         )
         
         # Copy the learned parameters from the best agent
@@ -1415,7 +352,7 @@ class TrainingEnvironment:
         cloned_agent.discount_factor = best_agent.discount_factor
         
         self.agents.append(cloned_agent)
-        self.population_controller.add_agent(cloned_agent)
+        self.population.add_agent(cloned_agent)
         self.num_agents = len(self.agents)
         print(f"👯 Cloned best agent {best_agent.id} to new agent {new_id}. Total agents: {self.num_agents}")
 
@@ -1423,7 +360,7 @@ class TrainingEnvironment:
         """Runs the evolution engine to create a new generation."""
         # Update fitness values before evolution
         for agent in self.agents:
-            self.population_controller.update_agent_fitness(agent, agent.get_fitness())
+            self.population.update_agent_fitness(agent, agent.get_fitness())
         
         new_population = self.evolution_engine.evolve_generation()
         
@@ -1435,7 +372,7 @@ class TrainingEnvironment:
         self.num_agents = len(self.agents)
 
         # Re-initialize controller and stats
-        self.population_controller = PopulationController(len(self.agents))
+        self.population = PopulationController(len(self.agents))
         self._init_robot_stats() # Helper to re-init stats
         print(f"🧬 Evolved population. New generation has {self.num_agents} agents.")
 
@@ -1467,13 +404,13 @@ class TrainingEnvironment:
         
         # Smooth camera movement using lerp
         self.camera_position = (
-            self.camera_position[0] + (self.camera_target[0] - self.camera_position[0]) * self.follow_speed,
-            self.camera_position[1] + (self.camera_target[1] - self.camera_position[1]) * self.follow_speed
+            self.camera_position[0] + (self.camera_target[0] - self.camera_position[0]) * 0.05,
+            self.camera_position[1] + (self.camera_target[1] - self.camera_position[1]) * 0.05
         )
         
         # Smooth zoom
         if abs(self.target_zoom - self.camera_zoom) > 0.001:
-            self.camera_zoom += (self.target_zoom - self.camera_zoom) * self.zoom_speed
+            self.camera_zoom += (self.target_zoom - self.camera_zoom) * 0.05
 
     def focus_on_agent(self, agent):
         """Focus the camera on a specific agent."""
@@ -1535,161 +472,100 @@ class TrainingEnvironment:
             'focused_agent_id': self.focused_agent.id if self.focused_agent else None
         }
 
-# --- Main Execution ---
-app = Flask(__name__)
-socketio = SocketIO(app, async_mode='threading')
-env = TrainingEnvironment(num_agents=50)
+    def render_to_base64_image(self, width=800, height=600):
+        """Renders the current world state to a base64 encoded PNG image."""
+        try:
+            pygame.init()
+            screen = pygame.Surface((width, height))
+            screen.fill((0, 0, 0)) # Black background
 
-@app.route('/')
-def index():
-    return render_template_string(HTML_TEMPLATE)
+            # --- Camera and Coordinate Conversion ---
+            PPM = 20.0  # pixels per meter
+            TARGET_FPS = 60
+            TIME_STEP = 1.0 / TARGET_FPS
+            SCREEN_WIDTH, SCREEN_HEIGHT = width, height
 
-@app.route('/status')
-def status():
-    # Suppress logging for status endpoint to reduce noise
-    return jsonify(env.get_status())
+            camera_offset = (
+                self.camera_center[0] * PPM - SCREEN_WIDTH / 2,
+                self.camera_center[1] * PPM - SCREEN_HEIGHT / 2
+            )
 
-@app.route('/start', methods=['POST'])
-def start_training():
-    print("🚀 Starting training via web endpoint")
-    env.start()
-    return jsonify({'status': 'Training started'})
+            def world_to_screen(pos):
+                return (
+                    pos[0] * PPM - camera_offset[0],
+                    SCREEN_HEIGHT - (pos[1] * PPM - camera_offset[1])
+                )
 
-@app.route('/stop', methods=['POST'])
-def stop_training():
-    print("🛑 Stopping training via web endpoint")
-    env.stop()
-    return jsonify({'status': 'Training stopped'})
+            # --- Colors ---
+            colors = {
+                b2.b2_staticBody: (255, 255, 255, 255),
+                b2.b2_dynamicBody: (127, 127, 127, 255),
+            }
 
-@app.route('/click', methods=['POST'])
-def handle_click():
-    data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data provided'}), 400
+            # --- Drawing ---
+            with self._lock:
+                for body in self.world.bodies:
+                    for fixture in body.fixtures:
+                        shape = fixture.shape
+                        
+                        # Determine color
+                        color = colors.get(body.type, (255, 0, 0, 255))
+                        # Find the agent this body belongs to, for special coloring
+                        part_of_agent = None
+                        for agent in self.agents:
+                            if hasattr(agent, 'body') and body == agent.body:
+                                part_of_agent = agent
+                                break
+                        if part_of_agent:
+                            color = (224, 60, 51, 255) # Red for agents
 
-    agent_id = None
-    if 'agent_id' in data:
-        # Click from the leaderboard
-        clicked_agent = next((agent for agent in env.agents if agent.id == data['agent_id']), None)
-        env.focus_on_agent(clicked_agent)
-        agent_id = clicked_agent.id if clicked_agent else None
-    elif 'screen_x' in data and 'screen_y' in data:
-        # Click from the canvas
-        agent_id = env.handle_click(
-            data['screen_x'], data['screen_y'],
-            data.get('canvas_width', 800),
-            data.get('canvas_height', 600)
-        )
-    
-    return jsonify({
-        'status': 'success',
-        'agent_id': agent_id,
-        'focused': agent_id is not None
-    })
+                        if isinstance(shape, b2.b2CircleShape):
+                            pos = world_to_screen(body.GetWorldPoint(shape.pos))
+                            pygame.draw.circle(screen, color, pos, shape.radius * PPM)
+                        
+                        elif isinstance(shape, b2.b2PolygonShape):
+                            vertices = [world_to_screen(body.GetWorldPoint(v)) for v in shape.vertices]
+                            pygame.draw.polygon(screen, color, vertices)
 
-@app.route('/get_agent_at_position', methods=['POST'])
-def get_agent_at_position():
-    data = request.get_json()
-    if not data or 'x' not in data or 'y' not in data:
-        return jsonify({'status': 'error', 'message': 'Missing coordinates'}), 400
-    
-    world_x = data['x']
-    world_y = data['y']
-    
-    agent = env.get_agent_at_position(world_x, world_y)
-    agent_id = agent.id if agent else None
-    
-    return jsonify({
-        'status': 'success',
-        'agent_id': agent_id
-    })
-
-@app.route('/move_agent', methods=['POST'])
-def move_agent():
-    data = request.get_json()
-    if not data or 'agent_id' not in data or 'x' not in data or 'y' not in data:
-        return jsonify({'status': 'error', 'message': 'Missing agent_id or coordinates'}), 400
-    
-    agent_id = data['agent_id']
-    x = data['x']
-    y = data['y']
-    
-    success = env.move_agent(agent_id, x, y)
-    
-    if success:
-        return jsonify({'status': 'success', 'agent_id': agent_id})
-    else:
-        return jsonify({'status': 'error', 'message': f'Failed to move agent {agent_id}'}), 500
-
-@app.route('/update_agent_params', methods=['POST'])
-def update_agent_params():
-    params = request.get_json()
-    if not params:
-        return jsonify({'status': 'error', 'message': 'No parameters provided'}), 400
-    
-    # Check if we should target a specific agent
-    target_agent_id = None
-    if 'target_agent_id' in params:
-        target_agent_id = params.pop('target_agent_id')
-    
-    success = env.update_agent_params(params, target_agent_id)
-    
-    if success:
-        return jsonify({'status': 'success', 'updated_params': params})
-    else:
-        return jsonify({'status': 'error', 'message': 'Failed to update parameters'}), 500
-
-@app.route('/evolution_event', methods=['POST'])
-def evolution_event():
-    data = request.get_json()
-    if not data or 'event' not in data:
-        return jsonify({'status': 'error', 'message': 'No event specified'}), 400
-    
-    event = data['event']
-    
-    try:
-        if event == 'spawn':
-            env.spawn_agent()
-        elif event == 'clone':
-            env.clone_best_agent()
-        elif event == 'evolve':
-            env.evolve_population()
-        else:
-            return jsonify({'status': 'error', 'message': f'Unknown event: {event}'}), 400
+            # --- Convert to Base64 ---
+            img_data = pygame.image.tostring(screen, 'RGB')
+            img_byte_io = io.BytesIO()
+            
+            # Create a Pygame surface from the raw RGB data
+            rgb_surface = pygame.image.fromstring(img_data, (width, height), 'RGB')
+            pygame.image.save(rgb_surface, img_byte_io, 'PNG')
+            img_byte_io.seek(0)
+            
+            base64_string = base64.b64encode(img_byte_io.read()).decode('utf-8')
+            return "data:image/png;base64," + base64_string
         
-        return jsonify({'status': 'success', 'event': event})
-    except Exception as e:
-        print(f"❌ Evolution event '{event}' failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        except Exception as e:
+            print(f"Error rendering image: {e}")
+            return None
+        finally:
+            pygame.quit()
 
 def main():
-    # Set a different port for the web server to avoid conflicts
-    web_port = 7777
+    """
+    Initializes the training environment and starts the Dash web server.
+    """
+    port = 8050
     
-    # Start the training loop
-    env.start()
+    # Create the training environment
+    env = TrainingEnvironment(num_agents=50)
     
-    # Start the web server in a separate thread
-    server_thread = threading.Thread(
-        target=lambda: socketio.run(app, host='0.0.0.0', port=web_port, allow_unsafe_werkzeug=True),
-        daemon=True
-    )
-    server_thread.start()
-    
-    print(f"✅ Web server started on http://localhost:{web_port}")
-    
-    # Keep the main thread alive to allow background threads to run
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("🛑 Shutting down training environment...")
-        env.stop()
-        print("✅ Training stopped.")
+    # Create the Dash app and pass the environment to it
+    app = create_app(env)
 
-if __name__ == "__main__":
+    # Start the training loop in a background thread
+    env.start()
+
+    print(f"✅ Starting web server on http://127.0.0.1:{port}")
+    app.run(host='0.0.0.0', port=port, debug=True)
+
+if __name__ == '__main__':
     main()
 
 # When the script exits, ensure the environment is stopped
 import atexit
-atexit.register(lambda: env.stop()) 
+atexit.register(lambda: env.stop() if 'env' in locals() else None) 
