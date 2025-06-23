@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from collections import defaultdict
 import math
+from copy import deepcopy
 
 from src.agents.base_agent import BaseAgent
 from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
@@ -468,8 +469,12 @@ class EnhancedEvolutionEngine:
         print(f"✅ Initial population created with diversity score: {self.diversity_history[-1]:.3f}")
         return population
     
-    def evolve_generation(self) -> List[EvolutionaryCrawlingAgent]:
-        """Evolve one generation of the population."""
+    def evolve_generation(self) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
+        """Evolve one generation of the population.
+        
+        Returns:
+            Tuple of (new_population, agents_to_destroy)
+        """
         self.generation += 1
         print(f"\n🧬 === GENERATION {self.generation} ===")
         
@@ -494,23 +499,29 @@ class EnhancedEvolutionEngine:
         
         # Maintain diversity if needed
         if self.generation % self.config.diversity_check_interval == 0:
-            new_population = self._maintain_diversity(new_population)
+            new_population, diversity_casualties = self._maintain_diversity(new_population)
+        else:
+            diversity_casualties = []
         
         # Immigration: introduce random individuals
+        immigration_casualties = []
         if self.config.immigration_rate > 0:
-            new_population = self._apply_immigration(new_population)
+            new_population, immigration_casualties = self._apply_immigration(new_population)
         
-        # Update population
+        # Identify agents to destroy (those not in new population)
         old_population = self.population
-        self.population = new_population
+        new_agent_ids = {agent.id for agent in new_population}
+        agents_to_destroy = [agent for agent in old_population if agent.id not in new_agent_ids]
+        agents_to_destroy.extend(diversity_casualties)
+        agents_to_destroy.extend(immigration_casualties)
         
-        # Clean up old agents
-        self._cleanup_agents(old_population)
+        # Update population (don't destroy agents here)
+        self.population = new_population
         
         # Log generation results
         self._log_generation_results()
         
-        return self.population
+        return self.population, agents_to_destroy
     
     def _create_next_generation(self, species: Optional[List[List[EvolutionaryCrawlingAgent]]]) -> List[EvolutionaryCrawlingAgent]:
         """Create the next generation through selection and reproduction."""
@@ -602,8 +613,12 @@ class EnhancedEvolutionEngine:
         
         return elite
     
-    def _maintain_diversity(self, population: List[EvolutionaryCrawlingAgent]) -> List[EvolutionaryCrawlingAgent]:
-        """Maintain population diversity."""
+    def _maintain_diversity(self, population: List[EvolutionaryCrawlingAgent]) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
+        """Maintain population diversity.
+        
+        Returns:
+            Tuple of (updated_population, agents_to_destroy)
+        """
         # Extract physical parameters
         param_sets = [agent.physical_params for agent in population]
         
@@ -612,8 +627,11 @@ class EnhancedEvolutionEngine:
             param_sets, self.config.target_diversity
         )
         
+        # Track agents that need to be destroyed
+        agents_to_destroy = []
+        
         # Update agents with enhanced parameters
-        for agent, new_params in zip(population, enhanced_params):
+        for i, (agent, new_params) in enumerate(zip(population, enhanced_params)):
             if new_params != agent.physical_params:
                 # Create new agent with diverse parameters
                 diverse_agent = EvolutionaryCrawlingAgent(
@@ -627,16 +645,21 @@ class EnhancedEvolutionEngine:
                 )
                 # Copy learned behavior
                 diverse_agent.q_table = agent.q_table.copy()
-                population[population.index(agent)] = diverse_agent
+                population[i] = diverse_agent
                 
-                # Clean up old agent
-                agent.destroy()
+                # Queue old agent for destruction
+                agents_to_destroy.append(agent)
         
-        return population
+        return population, agents_to_destroy
     
-    def _apply_immigration(self, population: List[EvolutionaryCrawlingAgent]) -> List[EvolutionaryCrawlingAgent]:
-        """Introduce random individuals to maintain diversity."""
+    def _apply_immigration(self, population: List[EvolutionaryCrawlingAgent]) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
+        """Introduce random individuals to maintain diversity.
+        
+        Returns:
+            Tuple of (updated_population, agents_to_destroy)
+        """
         immigrant_count = int(len(population) * self.config.immigration_rate)
+        agents_to_destroy = []
         
         if immigrant_count > 0:
             print(f"🌍 Introducing {immigrant_count} immigrants")
@@ -646,14 +669,14 @@ class EnhancedEvolutionEngine:
             
             for i in range(immigrant_count):
                 if i < len(sorted_pop):
-                    # Clean up old agent
-                    sorted_pop[i].destroy()
+                    # Queue old agent for destruction
+                    agents_to_destroy.append(sorted_pop[i])
                     
                     # Create immigrant
                     immigrant = self._create_random_agent(sorted_pop[i].id)
                     sorted_pop[i] = immigrant
         
-        return population
+        return population, agents_to_destroy
     
     def _create_random_agent(self, agent_id: int) -> EvolutionaryCrawlingAgent:
         """Create a random agent with diverse parameters."""
@@ -739,13 +762,13 @@ class EnhancedEvolutionEngine:
                 print(f"   Hall of Fame best: {hall_best.get_evolutionary_fitness():.3f}")
     
     def _cleanup_agents(self, agents: List[EvolutionaryCrawlingAgent]):
-        """Clean up Box2D bodies from old agents."""
-        for agent in agents:
-            if agent not in self.population:  # Only clean up agents not in new population
-                try:
-                    agent.destroy()
-                except Exception as e:
-                    print(f"⚠️  Error cleaning up agent {agent.id}: {e}")
+        """DEPRECATED: Clean up Box2D bodies from old agents.
+        
+        This method is deprecated. Agents should be queued for destruction
+        by the training environment instead of being destroyed directly here.
+        """
+        print("⚠️  WARNING: _cleanup_agents is deprecated and should not be called")
+        # Don't actually destroy anything here to avoid race conditions
     
     def get_evolution_summary(self) -> Dict[str, Any]:
         """Get comprehensive evolution summary."""
