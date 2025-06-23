@@ -85,9 +85,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.epsilon_decay = 0.9999
         
         self.actions = [
-            (0, 0), (1, 0), (0, 1), (1, 1),
-            (-1, 0), (0, -1), (-1, -1), (1, -1)
-        ]
+            (1, 0), (0, 1), (1, 1),
+            (-1, 0), (0, -1), (-1, -1)
+        ]  # Removed (0, 0) "none" action
         
         self.state_size = 6
         self.action_size = len(self.actions)
@@ -161,40 +161,42 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.max_action_history = 10
 
     def get_discretized_state(self) -> Tuple:
-        """Simplified state discretization matching Java implementation's focused approach."""
-        # Cache the state to avoid multiple calls
+        """State discretization using 10-degree bucket increments."""
         state = self.get_state()
         
-        # Extract only the critical variables like Java implementation
-        shoulder_angle = state[5]  # Shoulder joint angle
-        elbow_angle = state[6]     # Elbow joint angle
+        # Extract shoulder and elbow angles
+        shoulder_angle = state[5]
+        elbow_angle = state[6]
         
-        # Convert to degrees like Java implementation
+        # Convert to degrees
         shoulder_deg = np.degrees(shoulder_angle)
         elbow_deg = np.degrees(elbow_angle)
         
-        # Apply ranges like Java implementation
-        arm_range = 60   # Java default
-        wrist_range = 180  # Java default
-        precision = 0.1   # Java default
+        # Define realistic angle ranges
+        shoulder_range = (-180, 180)
+        elbow_range = (-180, 180)
         
-        # Clamp angles to ranges like Java
-        shoulder_deg = np.clip(shoulder_deg, 0, arm_range)
-        elbow_deg = np.clip(elbow_deg, 0, wrist_range)
+        # Clamp to the new, larger ranges
+        shoulder_deg = np.clip(shoulder_deg, shoulder_range[0], shoulder_range[1])
+        elbow_deg = np.clip(elbow_deg, elbow_range[0], elbow_range[1])
         
-        # Apply precision scaling like Java
-        shoulder_bin = int(shoulder_deg * precision)
-        elbow_bin = int(elbow_deg * precision)
+        # Normalize angles to a 0-based index for binning
+        # This shifts the range from [-180, 180] to [0, 360]
+        normalized_shoulder = shoulder_deg + 180
+        normalized_elbow = elbow_deg + 180
         
-        # Calculate bin ranges like Java
-        q_arm_range = int((arm_range + 1) * precision) + 1    # = 7 bins
-        q_wrist_range = int((wrist_range + 1) * precision) + 1  # = 19 bins
+        # Use 10-degree buckets
+        shoulder_bin = int(normalized_shoulder // 10)
+        elbow_bin = int(normalized_elbow // 10)
         
-        # Ensure bins are within range
-        shoulder_bin = np.clip(shoulder_bin, 0, q_arm_range - 1)
-        elbow_bin = np.clip(elbow_bin, 0, q_wrist_range - 1)
+        # Calculate the number of bins
+        num_shoulder_bins = (shoulder_range[1] - shoulder_range[0]) // 10
+        num_elbow_bins = (elbow_range[1] - elbow_range[0]) // 10
         
-        # Return simplified state: only arm angles like Java
+        # Ensure bins are within the calculated range
+        shoulder_bin = np.clip(shoulder_bin, 0, num_shoulder_bins - 1)
+        elbow_bin = np.clip(elbow_bin, 0, num_elbow_bins - 1)
+        
         return (shoulder_bin, elbow_bin)
         
     def choose_action(self) -> int:
@@ -348,6 +350,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.learning_interval = 60  # Update Q-values every 1 second (60 steps at 60fps)
         
         if self.steps % self.action_interval == 0:
+            # Store previous action for comparison
+            previous_action_tuple = self.current_action_tuple
+            
             # Choose new action
             self.current_state = self.get_discretized_state()
             action_idx = self.choose_action()
@@ -355,8 +360,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             self.current_action_tuple = self.actions[action_idx]
             self.add_action_to_history(action_idx)
             
-            # Debug for first agent
-            if self.id == 0:
+            # Debug for first agent - only log if action changed
+            if self.id == 0 and self.current_action_tuple != previous_action_tuple:
                 print(f"🤖 Agent {self.id}: New action {action_idx} = {self.current_action_tuple}")
         
         # Q-learning update every N steps
