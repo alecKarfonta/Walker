@@ -103,7 +103,7 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         """Create body using evolved physical parameters."""
         body_def = b2.b2BodyDef(
             type=b2.b2_dynamicBody,
-            position=self.initial_position,
+            position=(float(self.initial_position[0]), float(self.initial_position[1])),
             linearDamping=self.physical_params.body_linear_damping,
             angularDamping=self.physical_params.body_angular_damping
         )
