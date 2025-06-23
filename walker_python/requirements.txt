@@ -2,6 +2,10 @@ Flask==3.0.3
 numpy==1.26.4
 pandas==2.2.2
 pygame==2.5.2
-pymunk==6.7.0
 pytest==8.2.0
-box2d==2.3.10 
+box2d==2.3.10
+dash
+# For Bootstrap components in Dash
+ dash-bootstrap-components
+# For typing (Python 3.8+ includes it, but for older versions)
+typing-extensions 
