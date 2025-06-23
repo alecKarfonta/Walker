@@ -336,6 +336,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         reward = self.get_reward(self.prev_x)
         self.total_reward += reward
         
+        # CRITICAL: Update prev_x for next step - this was missing!
+        self.prev_x = current_x
+        
         # Prevent total reward from exploding negatively
         if self.total_reward < -10.0:  # If accumulated reward is too negative
             self.total_reward = max(self.total_reward, -10.0)  # Cap at -10
@@ -346,7 +349,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         if self.id == 0 and self.steps % 100 == 0:
             print(f"🤖 Agent {self.id}: Step {self.steps}, pos=({self.body.position.x:.2f}, {self.body.position.y:.2f}), "
                   f"vel=({self.body.linearVelocity.x:.2f}, {self.body.linearVelocity.y:.2f}), "
-                  f"action={self.current_action_tuple}, reward={reward:.3f}")
+                  f"action={self.current_action_tuple}, reward={reward:.3f}, total_reward={self.total_reward:.2f}")
         
         # Action interval optimization - only choose new actions every N steps
         self.action_interval = 3  # Choose new action every 0.2 seconds (3 steps at 60fps) - more responsive
