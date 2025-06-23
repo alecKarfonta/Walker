@@ -864,35 +864,63 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         Resets the agent's position and physics state to its starting point,
         but preserves the learned Q-table and other learning parameters.
         """
-        self.body.position = self.initial_position
-        self.body.angle = 0
-        self.body.linearVelocity = (0, 0)
-        self.body.angularVelocity = 0
+        try:
+            # Disable motors during reset to prevent issues
+            if hasattr(self, 'upper_arm_joint') and self.upper_arm_joint:
+                self.upper_arm_joint.enableMotor = False
+            if hasattr(self, 'lower_arm_joint') and self.lower_arm_joint:
+                self.lower_arm_joint.enableMotor = False
+            
+            # Reset main body safely
+            if self.body and hasattr(self.body, 'position'):
+                self.body.position = self.initial_position
+                self.body.angle = 0
+                self.body.linearVelocity = (0, 0)
+                self.body.angularVelocity = 0
+                self.body.awake = True  # Ensure body is active
 
-        # Reset arms and wheels relative to the body using the original offsets
-        # These offsets match those used when creating joints in _create_joints()
-        base_x, base_y = float(self.body.position.x), float(self.body.position.y)
+            # Reset arms and wheels relative to the body using the original offsets
+            base_x, base_y = float(self.initial_position[0]), float(self.initial_position[1])
 
-        self.upper_arm.position = (base_x - 1.0, base_y + 1.0)
-        self.upper_arm.angle = 0
-        self.upper_arm.linearVelocity = (0, 0)
-        self.upper_arm.angularVelocity = 0
+            # Reset upper arm safely
+            if hasattr(self, 'upper_arm') and self.upper_arm:
+                self.upper_arm.position = (base_x - 1.0, base_y + 1.0)
+                self.upper_arm.angle = 0
+                self.upper_arm.linearVelocity = (0, 0)
+                self.upper_arm.angularVelocity = 0
+                self.upper_arm.awake = True
 
-        self.lower_arm.position = (self.upper_arm.position[0] + 1.0, self.upper_arm.position[1])
-        self.lower_arm.angle = 0
-        self.lower_arm.linearVelocity = (0, 0)
-        self.lower_arm.angularVelocity = 0
+            # Reset lower arm safely
+            if hasattr(self, 'lower_arm') and self.lower_arm:
+                self.lower_arm.position = (base_x + 1.0, base_y + 1.0)  # Use base position, not upper arm
+                self.lower_arm.angle = 0
+                self.lower_arm.linearVelocity = (0, 0)
+                self.lower_arm.angularVelocity = 0
+                self.lower_arm.awake = True
 
-        wheel_offsets = [(-1.0, -0.75), (1.0, -0.75)]
-        for wheel, offset in zip(self.wheels, wheel_offsets):
-            wheel.position = (base_x + offset[0], base_y + offset[1])
-            wheel.linearVelocity = (0, 0)
-            wheel.angularVelocity = 0
-        
-        # Reset reward and internal state, but not the Q-table itself
-        self.total_reward = 0
-        self.steps = 0
-        print(f"Agent {self.id} was reset due to falling off the world.")
+            # Reset wheels safely
+            if hasattr(self, 'wheels') and self.wheels:
+                wheel_offsets = [(-1.0, -0.75), (1.0, -0.75)]
+                for wheel, offset in zip(self.wheels, wheel_offsets):
+                    if wheel:
+                        wheel.position = (base_x + offset[0], base_y + offset[1])
+                        wheel.linearVelocity = (0, 0)
+                        wheel.angularVelocity = 0
+                        wheel.awake = True
+            
+            # Re-enable motors after reset
+            if hasattr(self, 'upper_arm_joint') and self.upper_arm_joint:
+                self.upper_arm_joint.enableMotor = True
+            if hasattr(self, 'lower_arm_joint') and self.lower_arm_joint:
+                self.lower_arm_joint.enableMotor = True
+            
+            # Reset reward and internal state, but not the Q-table itself
+            self.total_reward = 0
+            self.steps = 0
+            
+        except Exception as e:
+            print(f"⚠️  Error resetting position for agent {self.id}: {e}")
+            # Don't print reset message on error to avoid spam
 
     def get_fitness(self) -> float:
         """Get fitness score for evolution."""
