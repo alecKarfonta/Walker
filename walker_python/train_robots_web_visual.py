@@ -1006,7 +1006,7 @@ class TrainingEnvironment:
     Enhanced training environment with evolutionary physical parameters.
     Manages physics simulation and evolution of diverse crawling robots.
     """
-    def __init__(self, num_agents=50):
+    def __init__(self, num_agents=30):  # Reduced from 50 to 30 to save memory
         self.num_agents = num_agents
         self.world = b2.b2World(gravity=(0, -10), doSleep=True)
         self.dt = 1.0 / 60.0
@@ -1065,7 +1065,11 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 6000  # 100 seconds at 60 Hz - longer for diverse agents
+        self.episode_length = 12000  # 200 seconds at 60 Hz - much longer to prevent constant resets
+        
+        # Add thread safety for Box2D operations
+        import threading
+        self._physics_lock = threading.Lock()
         
         # Statistics update timing
         self.stats_update_interval = 1.0
@@ -1108,8 +1112,8 @@ class TrainingEnvironment:
         """Creates a static ground body."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
-        # Calculate ground width based on number of agents
-        ground_width = max(500, self.num_agents * 20)  # Ensure enough width for all agents
+        # Calculate ground width based on number of agents (reasonable size)
+        ground_width = max(500, self.num_agents * 15)  # Ensure enough width for all agents
         
         # The ground's mask is set to collide with the agent category
         ground_fixture = ground_body.CreateFixture(
@@ -1207,23 +1211,33 @@ class TrainingEnvironment:
             # Add frame time to the accumulator
             accumulator += frame_time
             
-            # Fixed-step physics updates
+            # Fixed-step physics updates with thread safety
             while accumulator >= self.dt:
-                # Step the physics world
-                self.world.Step(self.dt, 8, 3)
-                
-                # Update all agents
-                for agent in self.agents:
-                    agent.step(self.dt)
+                with self._physics_lock:  # Protect Box2D operations
+                    # Step the physics world
+                    self.world.Step(self.dt, 8, 3)
+                    
+                    # Update all agents
+                    agents_to_reset = []
+                    for agent in self.agents:
+                        agent.step(self.dt)
 
-                    # Reset agent if it falls off the world
-                    if agent.body.position.y < self.world_bounds_y:
-                        agent.reset_position()
-
-                    # Reset at end of episode but keep learned Q-table
-                    if agent.steps >= self.episode_length:
-                        agent.reset()  # preserves Q-table
-                        agent.reset_position()
+                        # Check for reset conditions but don't reset immediately
+                        if agent.body.position.y < self.world_bounds_y:
+                            agents_to_reset.append(('world_bounds', agent))
+                        elif agent.steps >= self.episode_length:
+                            agents_to_reset.append(('episode_end', agent))
+                    
+                    # Process resets after physics step to avoid corruption
+                    for reset_type, agent in agents_to_reset:
+                        try:
+                            if reset_type == 'world_bounds':
+                                agent.reset_position()
+                            elif reset_type == 'episode_end':
+                                agent.reset()  # preserves Q-table
+                                agent.reset_position()
+                        except Exception as e:
+                            print(f"⚠️  Error resetting agent {agent.id}: {e}")
                 
                 # Decrement accumulator
                 accumulator -= self.dt
@@ -1246,6 +1260,14 @@ class TrainingEnvironment:
                 current_time - self.last_evolution_time >= self.evolution_interval):
                 self.trigger_evolution()
                 self.last_evolution_time = current_time
+            
+            # Memory monitoring
+            if current_time - last_debug_time > 30.0:  # Every 30 seconds
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                memory_mb = process.memory_info().rss / 1024 / 1024
+                print(f"🔍 Memory usage: {memory_mb:.1f} MB")
             
             if current_time - last_debug_time > 10.0:
                 print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active")
@@ -1512,39 +1534,46 @@ class TrainingEnvironment:
             print(f"\n🧬 === EVOLUTION TRIGGER ===")
             print(f"🔄 Evolving generation {self.evolution_engine.generation} -> {self.evolution_engine.generation + 1}")
             
-            # Store old agents for cleanup
-            old_agents = self.agents.copy()
-            old_agent_ids = {agent.id for agent in old_agents}
+            # Monitor memory before evolution
+            try:
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                memory_before = process.memory_info().rss / 1024 / 1024
+                print(f"🔍 Memory before evolution: {memory_before:.1f} MB")
+            except:
+                pass
             
-            # Temporarily pause physics stepping to prevent race conditions
-            # (This prevents core dumps during body destruction)
-            evolution_start_time = time.time()
+            # Use physics lock to prevent race conditions during evolution
+            with self._physics_lock:
+                # Store old agents for cleanup
+                old_agents = self.agents.copy()
+                old_agent_ids = {agent.id for agent in old_agents}
+                
+                evolution_start_time = time.time()
+                
+                # Evolve to next generation
+                new_population = self.evolution_engine.evolve_generation()
+                new_agent_ids = {agent.id for agent in new_population}
+                
+                # Update agents list BEFORE cleanup
+                self.agents = new_population
             
-            # Evolve to next generation
-            new_population = self.evolution_engine.evolve_generation()
-            new_agent_ids = {agent.id for agent in new_population}
+                # Clean up old agents that are no longer in the population
+                cleanup_count = 0
+                for old_agent in old_agents:
+                    if old_agent.id not in new_agent_ids:
+                        try:
+                            # Mark agent as destroyed before cleanup
+                            if not hasattr(old_agent, '_destroyed'):
+                                old_agent.destroy()
+                                cleanup_count += 1
+                        except Exception as e:
+                            print(f"⚠️  Error cleaning up agent {old_agent.id}: {e}")
+                
+                print(f"🧹 Cleaned up {cleanup_count} old agents")
             
-            # Update agents list BEFORE cleanup
-            self.agents = new_population
-            
-            # Allow some time for physics to settle before cleanup
-            time.sleep(0.1)
-            
-            # Clean up old agents that are no longer in the population
-            cleanup_count = 0
-            for old_agent in old_agents:
-                if old_agent.id not in new_agent_ids:
-                    try:
-                        # Mark agent as destroyed before cleanup
-                        if not hasattr(old_agent, '_destroyed'):
-                            old_agent.destroy()
-                            cleanup_count += 1
-                    except Exception as e:
-                        print(f"⚠️  Error cleaning up agent {old_agent.id}: {e}")
-            
-            print(f"🧹 Cleaned up {cleanup_count} old agents")
-            
-            # Clean up robot stats - remove entries for agents that no longer exist
+            # Clean up robot stats - remove entries for agents that no longer exist (outside lock)
             old_stats_keys = list(self.robot_stats.keys())
             stats_cleaned = 0
             for old_id in old_stats_keys:
@@ -1565,6 +1594,17 @@ class TrainingEnvironment:
             evolution_time = time.time() - evolution_start_time
             print(f"✅ Evolution complete! New generation has {len(self.agents)} agents")
             print(f"⏱️  Evolution took {evolution_time:.2f} seconds")
+            
+            # Monitor memory after evolution
+            try:
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                memory_after = process.memory_info().rss / 1024 / 1024
+                print(f"🔍 Memory after evolution: {memory_after:.1f} MB")
+            except:
+                pass
+                
             print(f"🧬 === EVOLUTION COMPLETE ===\n")
             
         except Exception as e:
@@ -1699,15 +1739,21 @@ class TrainingEnvironment:
             print(f"❌ Agent {agent_id} not found for moving")
             return False
         
-        # Set the agent's position
-        agent.body.position = (x, y)
-        
-        # Reset velocity to prevent physics issues
-        agent.body.linearVelocity = (0, 0)
-        agent.body.angularVelocity = 0
-        
-        print(f"🤖 Moved agent {agent_id} to ({x:.2f}, {y:.2f})")
-        return True
+        # Use physics lock to prevent race conditions
+        with self._physics_lock:
+            try:
+                # Set the agent's position
+                agent.body.position = (x, y)
+                
+                # Reset velocity to prevent physics issues
+                agent.body.linearVelocity = (0, 0)
+                agent.body.angularVelocity = 0
+                
+                print(f"🤖 Moved agent {agent_id} to ({x:.2f}, {y:.2f})")
+                return True
+            except Exception as e:
+                print(f"❌ Error moving agent {agent_id}: {e}")
+                return False
 
     def handle_click(self, screen_x, screen_y, canvas_width, canvas_height):
         """Handles a click event from the frontend."""
@@ -1760,7 +1806,7 @@ class TrainingEnvironment:
 # --- Main Execution ---
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading')
-env = TrainingEnvironment(num_agents=50)
+env = TrainingEnvironment(num_agents=30)  # Reduced from 50 to 30 for memory stability
 
 @app.route('/')
 def index():
