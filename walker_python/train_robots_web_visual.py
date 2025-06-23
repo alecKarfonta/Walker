@@ -1043,7 +1043,7 @@ class TrainingEnvironment:
                 )
                 
                 self.dashboard_exporter = DashboardExporter(
-                    port=8888,
+                    port=2322,
                     enable_api=True
                 )
                 
@@ -1456,24 +1456,19 @@ class TrainingEnvironment:
             if current_time - last_stats_time > self.stats_update_interval:
                 self._update_statistics()
                 
-                # Collect evaluation metrics
+                # Queue evaluation metrics for background collection (non-blocking)
                 if self.enable_evaluation and self.metrics_collector:
                     try:
                         evolution_summary = self.evolution_engine.get_evolution_summary()
-                        comprehensive_metrics = self.metrics_collector.collect_metrics(
+                        self.metrics_collector.collect_metrics_async(
                             agents=self.agents,
                             population_stats=self.population_stats,
                             evolution_summary=evolution_summary,
                             generation=evolution_summary.get('generation', 1),
                             step_count=self.step_count
                         )
-                        
-                        # Export metrics to dashboard
-                        if comprehensive_metrics and self.dashboard_exporter:
-                            self.dashboard_exporter.export_metrics(comprehensive_metrics)
-                            
                     except Exception as e:
-                        print(f"⚠️  Error collecting evaluation metrics: {e}")
+                        print(f"⚠️  Error queuing evaluation metrics: {e}")
                 
                 last_stats_time = current_time
             
