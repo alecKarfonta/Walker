@@ -1,4 +1,5 @@
 Flask==3.0.3
+flask-socketio==5.3.6
 numpy==1.26.4
 pandas==2.2.2
 pygame==2.5.2

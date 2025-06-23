@@ -342,7 +342,6 @@ HTML_TEMPLATE = """
                 .then(data => {
                     if (data.status === 'success') {
                         focusedAgentId = data.agent_id;
-                        updateFocusIndicator();
                         console.log(`✅ Agent ${data.agent_id} selected via leaderboard!`);
                     }
                 });
@@ -460,7 +459,6 @@ HTML_TEMPLATE = """
                  .then(data => {
                      if (data.status === 'success') {
                          focusedAgentId = data.agent_id;
-                         updateFocusIndicator();
                          if (data.agent_id !== null) {
                              console.log(`✅ Agent ${data.agent_id} selected!`);
                          } else {
@@ -547,6 +545,11 @@ HTML_TEMPLATE = """
         function updateStats(data) {
             if (!data) return;
 
+            // Update global focused agent ID from backend
+            if (data.focused_agent_id !== undefined) {
+                focusedAgentId = data.focused_agent_id;
+            }
+
             // Update leaderboard
             const leaderboardContent = document.getElementById('leaderboard-content');
             if (leaderboardContent && data.leaderboard) {
@@ -573,8 +576,11 @@ HTML_TEMPLATE = """
                  `;
             }
 
-            // NEW: Update robot details panel
+            // Update robot details panel
             updateRobotDetails(data);
+            
+            // Update focus indicator
+            updateFocusIndicator();
         }
 
         function updateRobotDetails(data) {
@@ -739,8 +745,6 @@ HTML_TEMPLATE = """
                 });
             }
             ctx.restore();
-
-            updateFocusIndicator();
         }
 
         function fetchData() {
@@ -769,10 +773,6 @@ HTML_TEMPLATE = """
                 indicator.style.display = 'block';
             } else {
                 indicator.style.display = 'none';
-            }
-            // Force an update of the details panel whenever focus changes
-            if (window.lastData) {
-                updateRobotDetails(window.lastData);
             }
         }
 
@@ -1120,7 +1120,7 @@ class TrainingEnvironment:
     def get_status(self):
         """Returns the current state of the simulation for rendering."""
         if not self.is_running:
-            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state()}
+            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
         # 1. Get agent shapes for drawing
         robot_shapes = []
@@ -1206,13 +1206,21 @@ class TrainingEnvironment:
             }
             agents_data.append(agent_data)
 
+        # 6. Get focused agent ID - if no agent is focused and agents exist, focus on the first one
+        focused_agent_id = self.focused_agent.id if self.focused_agent else None
+        if focused_agent_id is None and self.agents:
+            # Auto-select first agent if none is focused
+            focused_agent_id = self.agents[0].id
+            self.focus_on_agent(self.agents[0])
+
         return {
             'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
             'leaderboard': leaderboard_data,
             'robots': robot_details,
             'agents': agents_data,
             'statistics': self.population_stats,
-            'camera': self.get_camera_state()
+            'camera': self.get_camera_state(),
+            'focused_agent_id': focused_agent_id
         }
 
     def start(self):
