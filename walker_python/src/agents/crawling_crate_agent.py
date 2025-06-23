@@ -3,9 +3,45 @@ Q-learning agent for CrawlingCrate that learns crawling strategies.
 """
 
 import numpy as np
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List, NamedTuple
+from collections import deque
+import random
 from .crawling_crate import CrawlingCrate
 from .q_table import QTable, SparseQTable
+
+
+class Experience(NamedTuple):
+    """Experience tuple for replay buffer."""
+    state: Tuple
+    action: int
+    reward: float
+    next_state: Tuple
+    done: bool
+
+
+class ReplayBuffer:
+    """Experience replay buffer for Q-learning."""
+    
+    def __init__(self, capacity: int = 10000):
+        self.buffer = deque(maxlen=capacity)
+        self.capacity = capacity
+        
+    def add(self, experience: Experience):
+        """Add experience to buffer."""
+        self.buffer.append(experience)
+        
+    def sample(self, batch_size: int) -> List[Experience]:
+        """Sample a batch of experiences."""
+        if len(self.buffer) < batch_size:
+            return list(self.buffer)
+        return random.sample(self.buffer, batch_size)
+        
+    def __len__(self):
+        return len(self.buffer)
+        
+    def clear(self):
+        """Clear the buffer."""
+        self.buffer.clear()
 
 
 class CrawlingCrateAgent(CrawlingCrate):
@@ -18,25 +54,32 @@ class CrawlingCrateAgent(CrawlingCrate):
         
         # Q-learning parameters
         self.learning_rate = 0.005
-        self.discount_factor = 0.95
+        self.discount_factor = 0.9  # Reduced from 0.95 to prevent value explosion
         self.epsilon = 0.3  # Start with higher exploration
         self.min_epsilon = 0.01
         self.epsilon_decay = 0.9999  # Slower decay since we learn less frequently
                 
-        # Action space: (shoulder_motor, elbow_motor) combinations
+        # Action space: (shoulder_motor, elbow_motor) combinations - match Java's 6 actions
         self.actions = [
             (0, 0),      # No movement
             (1, 0),      # Shoulder forward only
             (0, 1),      # Elbow forward only
             (1, 1),      # Both forward
-            (-1, 1),     # Shoulder back, elbow forward
-            (1, -1),     # Shoulder forward, elbow back
             (-1, 0),     # Shoulder back only
             (0, -1),     # Elbow back only
         ]
         
         # Initialize Q-table - use sparse version for much better performance
         self.q_table = SparseQTable(len(self.actions))
+        
+        # Q-value bounds to prevent explosion
+        self.min_q_value = -2.0  # Minimum Q-value
+        self.max_q_value = 2.0   # Maximum Q-value
+        
+        # Experience replay buffer
+        self.replay_buffer = ReplayBuffer(capacity=5000)
+        self.batch_size = 32
+        self.replay_frequency = 10  # Learn from replay every N steps
         
         # Training state
         self.current_state = None
@@ -64,8 +107,8 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.impatience = 0.001  # How quickly to adapt parameters
         
         # Action interval optimization - only choose new actions every N steps
-        self.action_interval = 120  # Choose new action every 2 seconds (120 steps at 60fps)
-        self.learning_interval = 60  # Update Q-values every 1 second (60 steps at 60fps)
+        self.action_interval = 30  # Choose new action every 2 seconds (120 steps at 60fps)
+        self.learning_interval = 120  # Update Q-values every 1 second (60 steps at 60fps)
         self.steps_since_last_action = 0
         self.steps_since_last_learning = 0
         self.current_action_tuple = (0, 0)  # Store the actual action tuple
@@ -83,32 +126,45 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.max_speed = 0.0
         
         # Reward weights (inspired by Java implementation)
-        self.speed_value_weight = 0.1  # Reduced from 1.0 to prevent gradient explosions
-        self.acceleration_value_weight = 0.1  # Reduced from 1.0 to prevent gradient explosions
+        self.speed_value_weight = 0.05  # Reduced from 0.1 to prevent gradient explosions
+        self.acceleration_value_weight = 0.05  # Reduced from 0.1 to prevent gradient explosions
         
     def get_discretized_state(self) -> Tuple:
-        """Optimized state discretization - much faster version."""
+        """Simplified state discretization matching Java implementation's focused approach."""
         # Cache the state to avoid multiple calls
         state = self.get_state()
         
-        # Simplified state components - focus on most important features
-        x_pos = state[0] - self.initial_position[0]  # Use initial_position from parent class
-        vel_x = np.clip(state[2], -3, 3)   # Velocity
-        angle = np.clip(state[4], -np.pi/3, np.pi/3)  # Body angle
-        shoulder_angle = np.clip(state[5], -np.pi, np.pi)  # Shoulder angle
-        elbow_angle = np.clip(state[6], -np.pi, np.pi)  # Elbow angle
+        # Extract only the critical variables like Java implementation
+        shoulder_angle = state[5]  # Shoulder joint angle
+        elbow_angle = state[6]     # Elbow joint angle
         
-        # Simplified binning with fewer calculations
-        x_pos_bin = int(np.clip((x_pos + 10) / 20 * 7, 0, 7))
-        vel_x_bin = int((vel_x + 3) / 6 * 4)
-        angle_bin = int((angle + np.pi/3) / (2*np.pi/3) * 4)
-        shoulder_angle_bin = int((shoulder_angle + np.pi) / (2*np.pi) * 6)
-        elbow_angle_bin = int((elbow_angle + np.pi) / (2*np.pi) * 6)
+        # Convert to degrees like Java implementation
+        shoulder_deg = np.degrees(shoulder_angle)
+        elbow_deg = np.degrees(elbow_angle)
         
-        # Ground contact (simplified)
-        ground_contact = 1 if state[1] < 1.5 else 0
+        # Apply ranges like Java implementation
+        arm_range = 60   # Java default
+        wrist_range = 180  # Java default
+        precision = 0.1   # Java default
         
-        return (x_pos_bin, vel_x_bin, angle_bin, shoulder_angle_bin, elbow_angle_bin, ground_contact)
+        # Clamp angles to ranges like Java
+        shoulder_deg = np.clip(shoulder_deg, 0, arm_range)
+        elbow_deg = np.clip(elbow_deg, 0, wrist_range)
+        
+        # Apply precision scaling like Java
+        shoulder_bin = int(shoulder_deg * precision)
+        elbow_bin = int(elbow_deg * precision)
+        
+        # Calculate bin ranges like Java
+        q_arm_range = int((arm_range + 1) * precision) + 1    # = 7 bins
+        q_wrist_range = int((wrist_range + 1) * precision) + 1  # = 19 bins
+        
+        # Ensure bins are within range
+        shoulder_bin = np.clip(shoulder_bin, 0, q_arm_range - 1)
+        elbow_bin = np.clip(elbow_bin, 0, q_wrist_range - 1)
+        
+        # Return simplified state: only arm angles like Java
+        return (shoulder_bin, elbow_bin)
         
     def choose_action(self) -> int:
         """Choose action using decaying epsilon-greedy policy."""
@@ -128,7 +184,7 @@ class CrawlingCrateAgent(CrawlingCrate):
         return self.learning_rate / (1 + visit_count * 0.1)
             
     def get_reward(self, prev_x: float) -> float:
-        """Improved reward function based on Java implementation - uses speed and acceleration."""
+        """Improved reward function with bounded penalties to prevent negative reward explosion."""
         # Get x velocity of body (like Java implementation)
         x_velocity = self.body.linearVelocity.x
         
@@ -147,30 +203,55 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.acceleration = self.speed - self.previous_speed
         self.previous_speed = self.speed
         
-        # Calculate reward based on speed and acceleration (like Java implementation)
-        # Positive reward for rightward movement, negative for leftward, zero for stationary
+        # Base reward based on speed and acceleration - REDUCED WEIGHTS
         if x_velocity > 0:
             # Moving right - positive reward
-            reward = (self.speed_value_weight * x_velocity) + (self.acceleration * self.acceleration_value_weight)
+            base_reward = (self.speed_value_weight * x_velocity) + (self.acceleration * self.acceleration_value_weight)
         elif x_velocity < 0:
-            # Moving left - negative reward
-            reward = (self.speed_value_weight * x_velocity) + (self.acceleration * self.acceleration_value_weight)
+            # Moving left - negative reward (REDUCED MAGNITUDE)
+            base_reward = (self.speed_value_weight * x_velocity * 0.5) + (self.acceleration * self.acceleration_value_weight * 0.5)
         else:
             # Stationary - neutral reward
-            reward = 0.0
+            base_reward = 0.0
+        
+        # MUCH GENTLER speed penalties with bounds
+        speed_penalty = 0.0
+        if abs(self.speed) < 0.5:  # If moving slowly
+            # Much smaller penalty for being slow
+            if abs(self.acceleration) < 0.1:  # Very little acceleration
+                speed_penalty = -0.05  # Reduced from -0.2
+            elif abs(self.acceleration) < 0.2:  # Some acceleration but not much
+                speed_penalty = -0.02  # Reduced from -0.1
+        
+        # Much gentler penalty for negative acceleration when moving slowly
+        if abs(self.speed) < 0.5 and self.acceleration < -0.1:
+            speed_penalty -= 0.03  # Reduced from -0.15
+        
+        # Add small positive reward for any forward progress to encourage exploration
+        progress_reward = 0.0
+        if x_velocity > 0.1:  # If making meaningful forward progress
+            progress_reward = 0.01  # Small constant reward
+        
+        final_reward = base_reward + speed_penalty + progress_reward
+        
+        # BOUND THE FINAL REWARD to prevent extreme values
+        final_reward = np.clip(final_reward, -0.5, 1.0)  # Limit negative rewards to -0.5, positive to 1.0
         
         # DEBUG LOGGING
-        print(f"Reward Debug:")
-        print(f"  Raw x_velocity: {self.body.linearVelocity.x:.4f}")
-        print(f"  Thresholded x_velocity: {x_velocity:.4f}")
-        print(f"  Speed (moving avg): {self.speed:.4f}")
-        print(f"  Acceleration: {self.acceleration:.4f}")
-        print(f"  Speed weight: {self.speed_value_weight:.4f}")
-        print(f"  Acceleration weight: {self.acceleration_value_weight:.4f}")
-        print(f"  Final reward: {reward:.4f}")
-        print("---")
+        #print(f"Reward Debug:")
+        #print(f"  Raw x_velocity: {self.body.linearVelocity.x:.4f}")
+        #print(f"  Thresholded x_velocity: {x_velocity:.4f}")
+        #print(f"  Speed (moving avg): {self.speed:.4f}")
+        #print(f"  Acceleration: {self.acceleration:.4f}")
+        #print(f"  Speed weight: {self.speed_value_weight:.4f}")
+        #print(f"  Acceleration weight: {self.acceleration_value_weight:.4f}")
+        #print(f"  Base reward: {base_reward:.4f}")
+        #print(f"  Speed penalty: {speed_penalty:.4f}")
+        #print(f"  Progress reward: {progress_reward:.4f}")
+        #print(f"  Final reward: {final_reward:.4f}")
+        #print("---")
         
-        return reward
+        return final_reward
         
     def add_action_to_history(self, action_idx: int):
         """Add action to history for reporting."""
@@ -178,16 +259,62 @@ class CrawlingCrateAgent(CrawlingCrate):
         if len(self.action_history) > self.max_action_history:
             self.action_history.pop(0)  # Remove oldest action
     
+    def add_experience(self, state, action, reward, next_state, done=False):
+        """Add experience to replay buffer."""
+        experience = Experience(state, action, reward, next_state, done)
+        self.replay_buffer.add(experience)
+        
+    def learn_from_replay(self):
+        """Learn from a batch of experiences in the replay buffer."""
+        if len(self.replay_buffer) < self.batch_size:
+            return
+            
+        batch = self.replay_buffer.sample(self.batch_size)
+        
+        for experience in batch:
+            # Get current Q-value
+            current_q = self.q_table.get_q_value(experience.state, experience.action)
+            
+            # Get max Q-value for next state
+            if not experience.done:
+                max_next_q = self.q_table.get_best_action(experience.next_state)[1]
+                target_q = experience.reward + self.discount_factor * max_next_q
+            else:
+                target_q = experience.reward
+            
+            # Update Q-value
+            new_q = (1 - self.learning_rate) * current_q + self.learning_rate * target_q
+            self.q_table.set_q_value(experience.state, experience.action, new_q)
+            
     def step(self, dt: float):
-        """Step the agent with Q-learning - optimized to only choose actions and learn at intervals."""
+        """Step the agent with Q-learning and experience replay."""
         # Always apply the current action (cheap operation)
         self.apply_action(self.current_action_tuple)
         
         # Track reward over time
         current_x = self.body.position.x
         reward = self.get_reward(self.prev_x)
-        self.immediate_reward = reward
-        self.total_reward += reward
+        
+        # NORMALIZE reward to prevent extreme values
+        # Use exponential moving average to track reward statistics
+        if not hasattr(self, 'reward_mean'):
+            self.reward_mean = 0.0
+            self.reward_std = 1.0
+            self.reward_count = 0
+        
+        # Update reward statistics
+        self.reward_count += 1
+        alpha = 0.01  # Learning rate for reward normalization
+        self.reward_mean = (1 - alpha) * self.reward_mean + alpha * reward
+        self.reward_std = (1 - alpha) * self.reward_std + alpha * abs(reward - self.reward_mean)
+        self.reward_std = max(0.1, self.reward_std)  # Prevent division by zero
+        
+        # Normalize reward to prevent extreme values
+        normalized_reward = (reward - self.reward_mean) / self.reward_std
+        normalized_reward = np.clip(normalized_reward, -2.0, 2.0)  # Clip normalized reward
+        
+        self.immediate_reward = normalized_reward
+        self.total_reward += normalized_reward
         self.prev_x = current_x
         
         # Learning interval - update Q-values periodically
@@ -195,14 +322,23 @@ class CrawlingCrateAgent(CrawlingCrate):
             if self.current_state is not None and self.current_action is not None:
                 # Get next state for Q-learning update
                 next_state = self.get_discretized_state()
-                print(f"Q-Learning Update Triggered:")
-                print(f"  Steps since last learning: {self.steps_since_last_learning}")
-                print(f"  Learning interval: {self.learning_interval}")
-                print(f"  Current state: {self.current_state}")
-                print(f"  Next state: {next_state}")
-                print(f"  Current action: {self.current_action}")
-                print(f"  Immediate reward: {self.immediate_reward:.4f}")
-                print("---")
+                
+                # Add experience to replay buffer
+                self.add_experience(self.current_state, self.current_action, self.immediate_reward, next_state)
+                
+                # Learn from replay buffer
+                if self.steps_since_last_learning % self.replay_frequency == 0:
+                    self.learn_from_replay()
+                
+                #print(f"Q-Learning Update Triggered:")
+                #print(f"  Steps since last learning: {self.steps_since_last_learning}")
+                #print(f"  Learning interval: {self.learning_interval}")
+                #print(f"  Current state: {self.current_state}")
+                #print(f"  Next state: {next_state}")
+                #print(f"  Current action: {self.current_action}")
+                #print(f"  Immediate reward: {self.immediate_reward:.4f}")
+                #print(f"  Replay buffer size: {len(self.replay_buffer)}")
+                #print("---")
                 self.update_q_value(next_state, self.immediate_reward)
             self.steps_since_last_learning = 0
         else:
@@ -234,7 +370,7 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.episode_steps += 1
         
     def update_q_value(self, next_state: Tuple, reward: float):
-        """Update Q-value for the current state-action pair using Java-inspired approach."""
+        """Update Q-value for the current state-action pair using Java-inspired approach with bounds."""
         if self.current_state is not None and self.current_action is not None:
             # Get the old Q-value (like Java implementation)
             self.old_value = self.q_table.get_q_value(self.current_state, self.current_action)
@@ -242,36 +378,42 @@ class CrawlingCrateAgent(CrawlingCrate):
             # Get the maximum Q-value for the next state (like Java implementation)
             max_next_q_value = self.q_table.get_best_action(next_state)[1]
             
+            # BOUND the next Q-value to prevent explosion
+            max_next_q_value = np.clip(max_next_q_value, self.min_q_value, self.max_q_value)
+            
             # Calculate the new Q-value using standard Q-learning formula (like Java)
             self.new_value = (
                 (1 - self.learning_rate) * self.old_value +
                 self.learning_rate * (reward + self.discount_factor * max_next_q_value)
             )
             
-            # DEBUG LOGGING
-            print(f"Q-Update Debug:")
-            print(f"  State: {self.current_state}")
-            print(f"  Action: {self.current_action}")
-            print(f"  Old Q-value: {self.old_value:.4f}")
-            print(f"  Reward: {reward:.4f}")
-            print(f"  Max next Q-value: {max_next_q_value:.4f}")
-            print(f"  Learning rate: {self.learning_rate:.4f}")
-            print(f"  Discount factor: {self.discount_factor:.4f}")
-            print(f"  New Q-value: {self.new_value:.4f}")
-            print(f"  Q-value change: {self.new_value - self.old_value:.4f}")
-            print(f"  Best value: {self.best_value:.4f}")
-            print(f"  Worst value: {self.worst_value:.4f}")
-            print(f"  Time since good: {self.time_since_good_value:.1f}")
-            print("---")
+            # CRITICAL: BOUND the new Q-value to prevent explosion
+            self.new_value = np.clip(self.new_value, self.min_q_value, self.max_q_value)
             
-            # Update the Q-table
+            # DEBUG LOGGING
+            #print(f"Q-Update Debug:")
+            #print(f"  State: {self.current_state}")
+            #print(f"  Action: {self.current_action}")
+            #print(f"  Old Q-value: {self.old_value:.4f}")
+            #print(f"  Reward: {reward:.4f}")
+            #print(f"  Max next Q-value (clipped): {max_next_q_value:.4f}")
+            #print(f"  Learning rate: {self.learning_rate:.4f}")
+            #print(f"  Discount factor: {self.discount_factor:.4f}")
+            #print(f"  New Q-value (clipped): {self.new_value:.4f}")
+            #print(f"  Q-value change: {self.new_value - self.old_value:.4f}")
+            #print(f"  Best value: {self.best_value:.4f}")
+            #print(f"  Worst value: {self.worst_value:.4f}")
+            #print(f"  Time since good: {self.time_since_good_value:.1f}")
+            #print("---")
+            
+            # Update the Q-table with bounded value
             self.q_table.set_q_value(self.current_state, self.current_action, self.new_value)
             
-            # Track best and worst values (like Java implementation)
+            # Track best and worst values (like Java implementation) - but bounded
             if self.new_value > self.best_value:
-                self.best_value = self.new_value
+                self.best_value = min(self.new_value, self.max_q_value)  # Bound best value
             elif self.new_value < self.worst_value:
-                self.worst_value = self.new_value
+                self.worst_value = max(self.new_value, self.min_q_value)  # Bound worst value
             
             # Adaptive learning based on performance (like Java implementation)
             if self.best_value > 0 and self.new_value > self.best_value * 0.5:
@@ -327,6 +469,11 @@ class CrawlingCrateAgent(CrawlingCrate):
         self.old_value = 0.0
         self.new_value = 0.0
         self.time_since_good_value = 0.0
+        
+        # Reset reward normalization statistics
+        self.reward_mean = 0.0
+        self.reward_std = 1.0
+        self.reward_count = 0
         
     def get_fitness(self) -> float:
         """Get fitness score for evolution."""
@@ -398,10 +545,10 @@ class CrawlingCrateAgent(CrawlingCrate):
         if not self.action_history:
             return "No actions yet"
         
-        # Map action indices to readable names
+        # Map action indices to readable names - match Java's 6 actions
         action_names = {
             0: "None", 1: "S-Fwd", 2: "E-Fwd", 3: "Both-Fwd", 
-            4: "S-Back", 5: "E-Back", 6: "S-Back", 7: "E-Back"
+            4: "S-Back", 5: "E-Back"
         }
         
         # Get the last 5 actions for display
@@ -451,5 +598,10 @@ class CrawlingCrateAgent(CrawlingCrate):
             'old_value': self.old_value,
             'new_value': self.new_value,
             'time_since_good_value': self.time_since_good_value,
+            # Replay buffer info
+            'replay_buffer_size': len(self.replay_buffer),
+            'replay_buffer_capacity': self.replay_buffer.capacity,
+            'batch_size': self.batch_size,
+            'replay_frequency': self.replay_frequency,
         })
         return debug 

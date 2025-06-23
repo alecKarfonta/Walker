@@ -272,6 +272,22 @@ HTML_TEMPLATE = """
             margin-bottom: 8px;
         }
         
+        /* Leaderboard specific styling */
+        .robot-stat:nth-child(1) .robot-name {
+            color: #f39c12; /* Gold for 1st place */
+            font-size: 16px;
+        }
+        
+        .robot-stat:nth-child(2) .robot-name {
+            color: #95a5a6; /* Silver for 2nd place */
+            font-size: 15px;
+        }
+        
+        .robot-stat:nth-child(3) .robot-name {
+            color: #d35400; /* Bronze for 3rd place */
+            font-size: 15px;
+        }
+        
         .robot-stat-row {
             display: flex;
             justify-content: space-between;
@@ -330,7 +346,7 @@ HTML_TEMPLATE = """
     <canvas id="world"></canvas>
     
     <div id="robot-stats">
-        <div class="robot-stats-title">Robot Details</div>
+        <div class="robot-stats-title">🏆 Robot Leaderboard</div>
         <div id="robotDetails"></div>
         <div id="resizer"></div>
     </div>
@@ -508,24 +524,45 @@ HTML_TEMPLATE = """
             robotDetails.innerHTML = '';
             
             if (data.agents) {
-                data.agents.slice(0, 5).forEach((agent, index) => { // Show first 5 robots
-                    const stats = agent.statistics || {};
+                // Create leaderboard based on distance moved
+                const leaderboard = data.agents
+                    .map((agent, index) => ({
+                        index: index,
+                        agent: agent,
+                        distance: agent.statistics?.total_distance || 0
+                    }))
+                    .sort((a, b) => b.distance - a.distance) // Sort by distance descending
+                    .slice(0, 10); // Show top 10 performers
+                
+                // Add leaderboard title
+                const leaderboardTitle = document.createElement('div');
+                leaderboardTitle.className = 'robot-stats-title';
+                leaderboardTitle.style.marginBottom = '10px';
+                leaderboardTitle.innerHTML = `🏆 Top 10 Performers (${data.agents.length} total)`;
+                robotDetails.appendChild(leaderboardTitle);
+                
+                leaderboard.forEach((entry, leaderboardIndex) => {
+                    const stats = entry.agent.statistics || {};
                     const robotDiv = document.createElement('div');
                     robotDiv.className = 'robot-stat';
+                    
+                    // Add rank indicator
+                    const rank = leaderboardIndex + 1;
+                    const rankEmoji = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
                     
                     const position = stats.current_position || [0, 0];
                     const velocity = stats.velocity || [0, 0];
                     const armAngles = stats.arm_angles || {shoulder: 0, elbow: 0};
                     
                     robotDiv.innerHTML = `
-                        <div class="robot-name">Robot ${index + 1}</div>
+                        <div class="robot-name">${rankEmoji} Robot ${entry.index + 1} (Rank #${rank})</div>
+                        <div class="robot-stat-row">
+                            <span class="robot-stat-label">Distance:</span>
+                            <span class="robot-stat-value" style="color: #27ae60; font-weight: bold;">${(stats.total_distance || 0).toFixed(2)}</span>
+                        </div>
                         <div class="robot-stat-row">
                             <span class="robot-stat-label">Position:</span>
                             <span class="robot-stat-value">(${position[0].toFixed(2)}, ${position[1].toFixed(2)})</span>
-                        </div>
-                        <div class="robot-stat-row">
-                            <span class="robot-stat-label">Distance:</span>
-                            <span class="robot-stat-value">${(stats.total_distance || 0).toFixed(2)}</span>
                         </div>
                         <div class="robot-stat-row">
                             <span class="robot-stat-label">Velocity:</span>
@@ -554,6 +591,41 @@ HTML_TEMPLATE = """
                     `;
                     robotDetails.appendChild(robotDiv);
                 });
+                
+                // Add summary stats
+                if (data.agents.length > 10) {
+                    const summaryDiv = document.createElement('div');
+                    summaryDiv.className = 'robot-stat';
+                    summaryDiv.style.marginTop = '15px';
+                    summaryDiv.style.borderTop = '2px solid #3498db';
+                    summaryDiv.style.paddingTop = '10px';
+                    
+                    const allDistances = data.agents.map(agent => agent.statistics?.total_distance || 0);
+                    const avgDistance = allDistances.reduce((a, b) => a + b, 0) / allDistances.length;
+                    const minDistance = Math.min(...allDistances);
+                    const maxDistance = Math.max(...allDistances);
+                    
+                    summaryDiv.innerHTML = `
+                        <div class="robot-name">📊 Population Summary</div>
+                        <div class="robot-stat-row">
+                            <span class="robot-stat-label">Best Distance:</span>
+                            <span class="robot-stat-value" style="color: #27ae60;">${maxDistance.toFixed(2)}</span>
+                        </div>
+                        <div class="robot-stat-row">
+                            <span class="robot-stat-label">Average Distance:</span>
+                            <span class="robot-stat-value">${avgDistance.toFixed(2)}</span>
+                        </div>
+                        <div class="robot-stat-row">
+                            <span class="robot-stat-label">Worst Distance:</span>
+                            <span class="robot-stat-value" style="color: #e74c3c;">${minDistance.toFixed(2)}</span>
+                        </div>
+                        <div class="robot-stat-row">
+                            <span class="robot-stat-label">Total Robots:</span>
+                            <span class="robot-stat-value">${data.agents.length}</span>
+                        </div>
+                    `;
+                    robotDetails.appendChild(summaryDiv);
+                }
             }
         }
 
@@ -722,33 +794,36 @@ class TrainingEnvironment:
     """
     Manages the physics simulation and training of crawling crate agents using Box2D.
     """
-    def __init__(self, num_agents=10):
+    def __init__(self, num_agents=50):
         self.num_agents = num_agents
         self.world = b2.b2World(gravity=(0, -10), doSleep=True)
         self.dt = 1.0 / 60.0
 
         # --- Collision Filtering Setup ---
-        # 1. Define categories
+        # Box2D uses 16-bit collision categories, so we need a different approach for 50 agents
+        # Instead of unique categories per agent, we'll use a simpler approach:
+        # - Ground: category 0x0001
+        # - All agents: category 0x0002 (shared category)
+        # - Agents only collide with ground, not with each other
         self.GROUND_CATEGORY = 0x0001
-        self.AGENT_CATEGORIES = [0x0002 << i for i in range(num_agents)]
+        self.AGENT_CATEGORY = 0x0002
 
         # 2. Create the ground with its own category.
         #    Its mask is set to collide with ALL agents.
         self._create_ground()
 
-        # 3. Create agents, each with a unique category.
+        # 3. Create agents, all with the same category.
         #    Their masks are set to collide ONLY with the ground.
         self.agents = []
         for i in range(self.num_agents):
-            agent_category = self.AGENT_CATEGORIES[i]
-            agent_mask = self.GROUND_CATEGORY  # Only collide with the ground
-            
+            # Reduce spacing for 50 agents to fit them all
+            spacing = 8 if self.num_agents > 20 else 15
             agent = CrawlingCrateAgent(
                 self.world,
                 agent_id=i,
-                position=(i * 15, 6),
-                category_bits=agent_category,
-                mask_bits=agent_mask
+                position=(i * spacing, 6),
+                category_bits=self.AGENT_CATEGORY,
+                mask_bits=self.GROUND_CATEGORY  # Only collide with the ground
             )
             agent.body.awake = True
             self.agents.append(agent)
@@ -774,6 +849,11 @@ class TrainingEnvironment:
         self.episode_length = 1200
         self.episode_step = 0
         
+        # Statistics update timing
+        self.stats_update_interval = 0.1  # Update stats every 0.1 seconds
+        self.steps_per_stats_update = int(self.stats_update_interval / self.dt)  # 6 steps at 60fps
+        self.last_stats_update = 0
+        
         # Settle the world
         for _ in range(10):
             self.world.Step(self.dt, 8, 3)
@@ -782,21 +862,51 @@ class TrainingEnvironment:
         """Creates a static ground body."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
-        # The ground's mask is a combination of all agent categories.
-        all_agent_categories_mask = 0
-        for category in self.AGENT_CATEGORIES:
-            all_agent_categories_mask |= category
-            
+        # Calculate ground width based on number of agents
+        ground_width = max(500, self.num_agents * 10)  # Ensure enough width for all agents
+        
+        # The ground's mask is set to collide with the agent category
         ground_fixture = ground_body.CreateFixture(
-            shape=b2.b2PolygonShape(box=(500, 1)),
+            shape=b2.b2PolygonShape(box=(ground_width, 1)),
             density=0.0,
             friction=0.9,
             filter=b2.b2Filter(
                 categoryBits=self.GROUND_CATEGORY,
-                maskBits=all_agent_categories_mask
+                maskBits=self.AGENT_CATEGORY  # Collide with all agents
             )
         )
-        print("🔧 Ground setup complete.")
+        print(f"🔧 Ground setup complete with width {ground_width} for {self.num_agents} agents.")
+
+    def _update_statistics(self):
+        """Update population and Q-learning statistics."""
+        # Update population statistics
+        distances = [stats['total_distance'] for stats in self.robot_stats.values()]
+        self.population_stats['total_distance'] = sum(distances)
+        self.population_stats['best_distance'] = max(distances)
+        self.population_stats['average_distance'] = sum(distances) / len(distances)
+        self.population_stats['total_steps'] = self.step_count
+        
+        # Update Q-learning statistics
+        q_agents = [agent for agent in self.agents if hasattr(agent, 'q_table') and agent.q_table is not None]
+        if q_agents:
+            self.population_stats['q_learning_stats']['avg_epsilon'] = float(sum(agent.epsilon for agent in q_agents) / len(q_agents))
+            self.population_stats['q_learning_stats']['avg_learning_rate'] = float(sum(agent.learning_rate for agent in q_agents) / len(q_agents))
+            self.population_stats['q_learning_stats']['total_q_updates'] = int(sum(stats['q_updates'] for stats in self.robot_stats.values()))
+            
+            # Calculate average Q-value
+            all_q_values = []
+            for agent in q_agents:
+                if hasattr(agent.q_table, 'q_values'):
+                    q_values = agent.q_table.q_values
+                    if hasattr(q_values, 'flatten'):
+                        # Handle numpy array (QTable)
+                        all_q_values.extend(q_values.flatten())
+                    elif isinstance(q_values, dict):
+                        # Handle dictionary (SparseQTable)
+                        for action_values in q_values.values():
+                            all_q_values.extend(action_values)
+            if all_q_values:
+                self.population_stats['q_learning_stats']['avg_q_value'] = float(sum(all_q_values) / len(all_q_values))
 
     def training_loop(self):
         """The main training loop that steps the physics world and updates agents."""
@@ -881,6 +991,10 @@ class TrainingEnvironment:
             self.step_count = step_count
             self.episode_step += 1
             
+            # Update statistics only every 0.1 seconds (every 6 steps at 60fps)
+            if step_count % self.steps_per_stats_update == 0:
+                self._update_statistics()
+            
             # Print step count every 60 steps (1 second at 60fps)
             if step_count % 60 == 0:
                 print(f"⏱️  Step {step_count} - Loop running at {(step_count / (time.time() - start_time)):.1f} steps/sec")
@@ -890,40 +1004,12 @@ class TrainingEnvironment:
                 self.episode_step = 0
                 print(f"🔄 Episode completed at step {step_count}")
             
-            # Update population statistics
-            distances = [stats['total_distance'] for stats in self.robot_stats.values()]
-            self.population_stats['total_distance'] = sum(distances)
-            self.population_stats['best_distance'] = max(distances)
-            self.population_stats['average_distance'] = sum(distances) / len(distances)
-            self.population_stats['total_steps'] = step_count
-            
-            # Update Q-learning statistics
-            q_agents = [agent for agent in self.agents if hasattr(agent, 'q_table') and agent.q_table is not None]
-            if q_agents:
-                self.population_stats['q_learning_stats']['avg_epsilon'] = float(sum(agent.epsilon for agent in q_agents) / len(q_agents))
-                self.population_stats['q_learning_stats']['avg_learning_rate'] = float(sum(agent.learning_rate for agent in q_agents) / len(q_agents))
-                self.population_stats['q_learning_stats']['total_q_updates'] = int(sum(stats['q_updates'] for stats in self.robot_stats.values()))
-                
-                # Calculate average Q-value
-                all_q_values = []
-                for agent in q_agents:
-                    if hasattr(agent.q_table, 'q_values'):
-                        q_values = agent.q_table.q_values
-                        if hasattr(q_values, 'flatten'):
-                            # Handle numpy array (QTable)
-                            all_q_values.extend(q_values.flatten())
-                        elif isinstance(q_values, dict):
-                            # Handle dictionary (SparseQTable)
-                            for action_values in q_values.values():
-                                all_q_values.extend(action_values)
-                if all_q_values:
-                    self.population_stats['q_learning_stats']['avg_q_value'] = float(sum(all_q_values) / len(all_q_values))
-            
             # Debug: print robot positions every 60 steps (1 second)
             if step_count % 60 == 0:
                 print(f"Step {step_count}: Robot 0 at {self.agents[0].body.position}")
                 print(f"Population stats: Best={self.population_stats['best_distance']:.2f}, Avg={self.population_stats['average_distance']:.2f}")
                 print(f"⏱️  Step duration: {step_duration*1000:.1f}ms (target: {self.dt*1000:.1f}ms)")
+                q_agents = [agent for agent in self.agents if hasattr(agent, 'q_table') and agent.q_table is not None]
                 if q_agents:
                     print(f"Q-Learning: ε={self.population_stats['q_learning_stats']['avg_epsilon']:.3f}, Q_updates={self.population_stats['q_learning_stats']['total_q_updates']}")
             
@@ -1020,7 +1106,7 @@ class TrainingEnvironment:
 # --- Main Execution ---
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='threading')
-env = TrainingEnvironment(num_agents=10)
+env = TrainingEnvironment(num_agents=50)
 
 @app.route('/')
 def index():
