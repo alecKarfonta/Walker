@@ -365,6 +365,7 @@ HTML_TEMPLATE = """
         let mouseDownRobotId = null;
         const CLICK_THRESHOLD = 5; // pixels
         const CLICK_TIME_THRESHOLD = 200; // milliseconds
+        let lastLeaderboardHtml = ''; // Variable to store the last state of the leaderboard HTML
 
         function resizeCanvas() {
             const wrapper = document.getElementById('canvas-wrapper');
@@ -377,16 +378,15 @@ HTML_TEMPLATE = """
         resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
 
-        const bottomBar = document.getElementById('bottom-bar');
-        bottomBar.addEventListener('click', function(e) {
+        const leaderboardPanel = document.getElementById('leaderboard-panel');
+        leaderboardPanel.addEventListener('click', function(e) {
             const robotRow = e.target.closest('.robot-stat-row');
             if (robotRow && robotRow.dataset.agentId) {
-                // This is a click on a leaderboard button. Stop it from doing anything else.
                 e.preventDefault();
                 e.stopPropagation();
 
                 const agentId = parseInt(robotRow.dataset.agentId);
-                console.log(`🎯 Leaderboard button clicked for agent: ${agentId}`);
+                console.log(`🎯 CLIENT: Leaderboard button clicked for agent: ${agentId}`);
 
                 // Send the click to the server to select the agent
                 fetch('/click', {
@@ -396,12 +396,8 @@ HTML_TEMPLATE = """
                 })
                 .then(response => response.json())
                 .then(data => {
-                    console.log(`✅ Server response to click:`, data);
                     if (data.status === 'success') {
-                        // The server now knows who is focused.
-                        // The next update from fetchData will update the visuals.
                         focusedAgentId = data.agent_id;
-                        console.log(`✅ Client focus set to agent ${data.agent_id}.`);
                     }
                 })
                 .catch(error => {
@@ -612,14 +608,12 @@ HTML_TEMPLATE = """
                 focusedAgentId = data.focused_agent_id;
             }
 
-            // Update leaderboard
+            // Update leaderboard only if it has changed to prevent re-rendering
             const leaderboardContent = document.getElementById('leaderboard-content');
             if (leaderboardContent && data.leaderboard) {
-                console.log(`📊 Updating leaderboard with ${data.leaderboard.length} robots, focused: ${data.focused_agent_id}`);
-                leaderboardContent.innerHTML = data.leaderboard.map((robot, index) => {
+                const newLeaderboardHtml = data.leaderboard.map((robot, index) => {
                     const isFocused = robot.id === data.focused_agent_id;
                     const focusedClass = isFocused ? ' focused' : '';
-                    console.log(`   Robot ${robot.id}: focused=${isFocused}, class="${focusedClass}"`);
                     return `
                         <div class="robot-stat-row${focusedClass}" data-agent-id="${robot.id}" title="Click to focus on Robot ${robot.id}">
                             <span class="robot-stat-label">${robot.name}${isFocused ? ' 🎯' : ''}</span>
@@ -628,8 +622,11 @@ HTML_TEMPLATE = """
                     `;
                 }).join('');
                 
-                // After updating leaderboard HTML, make sure visual focus is correct
-                updateLeaderboardVisualFocus();
+                // Only update the DOM if the content has actually changed.
+                if (newLeaderboardHtml !== lastLeaderboardHtml) {
+                    leaderboardContent.innerHTML = newLeaderboardHtml;
+                    lastLeaderboardHtml = newLeaderboardHtml;
+                }
             }
 
             // Update population summary
@@ -1130,7 +1127,7 @@ class TrainingEnvironment:
                 
                 # Decrement accumulator
                 accumulator -= self.dt
-                step_count += 1
+                self.step_count += 1
 
             # Update camera and statistics (can be done once per frame)
             self.update_camera(frame_time)
@@ -1144,8 +1141,8 @@ class TrainingEnvironment:
                 self.perform_periodic_learning()
                 self.last_learning_time = current_time
             
-            if current_time - last_debug_time > 2.0:
-                print(f"🔧 Physics step {step_count}: {len(self.agents)} agents active")
+            if current_time - last_debug_time > 10.0:
+                print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active")
                 if self.agents:
                     # Debug output for the first agent
                     first_agent = self.agents[0]
@@ -1310,12 +1307,11 @@ class TrainingEnvironment:
             }
             agents_data.append(agent_data)
 
-        # 6. Get focused agent ID - if no agent is focused and agents exist, focus on the first one
+        # 6. Get focused agent ID
         focused_agent_id = self.focused_agent.id if self.focused_agent else None
-        if focused_agent_id is None and self.agents:
-            # Auto-select first agent if none is focused
-            focused_agent_id = self.agents[0].id
-            self.focus_on_agent(self.agents[0])
+        
+        if self.step_count % 600 == 0: # Log every 10 seconds or so
+            print(f"DEBUG: get_status returning focused_agent_id: {focused_agent_id}")
 
         return {
             'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
@@ -1502,32 +1498,33 @@ class TrainingEnvironment:
             }
             
     def update_camera(self, delta_time):
-        """Update camera position with smooth following."""
+        """Smoothly moves the camera towards the focused agent."""
         if self.focused_agent:
-            # Get the focused agent's position
-            agent_pos = self.focused_agent.body.position
-            self.camera_target = (agent_pos.x, agent_pos.y)
-        
-        # Smooth camera movement using lerp
+            self.camera_target = self.focused_agent.body.position
+        else:
+            # If no agent is focused, smoothly return to the origin
+            self.camera_target = (0, 0)
+            
+        # Smoothly interpolate camera position and zoom
         self.camera_position = (
             self.camera_position[0] + (self.camera_target[0] - self.camera_position[0]) * self.follow_speed,
             self.camera_position[1] + (self.camera_target[1] - self.camera_position[1]) * self.follow_speed
         )
-        
-        # Smooth zoom
-        if abs(self.target_zoom - self.camera_zoom) > 0.001:
-            self.camera_zoom += (self.target_zoom - self.camera_zoom) * self.zoom_speed
+        self.camera_zoom += (self.target_zoom - self.camera_zoom) * self.zoom_speed
 
     def focus_on_agent(self, agent):
-        """Focus the camera on a specific agent."""
-        self.focused_agent = agent
-        if agent:
-            print(f"🎯 Camera focused on agent {agent.id}")
+        """Sets the given agent as the camera focus."""
+        if agent and agent in self.agents:
+            self.focused_agent = agent
+            print(f"🎯 SERVER: Focusing on agent {agent.id}")
+            # Target zoom can also be adjusted based on agent type or state
+            self.target_zoom = 1.5 
         else:
-            print("🎯 Camera focus cleared")
+            self.focused_agent = None
+            print("🎯 SERVER: Camera focus cleared.")
 
     def get_agent_at_position(self, world_x, world_y):
-        """Find an agent at the given world coordinates."""
+        """Finds an agent at a given world coordinate."""
         for agent in self.agents:
             # Check if click is near the agent's body
             agent_pos = agent.body.position
@@ -1554,21 +1551,24 @@ class TrainingEnvironment:
         return True
 
     def handle_click(self, screen_x, screen_y, canvas_width, canvas_height):
-        """Handle mouse click to select an agent."""
-        # Convert screen coordinates to world coordinates
-        # Assuming the world view is centered and scaled
-        world_x = (screen_x - canvas_width / 2) / self.camera_zoom + self.camera_position[0]
-        world_y = (canvas_height / 2 - screen_y) / self.camera_zoom + self.camera_position[1]
-        
-        # Find agent at click position
-        clicked_agent = self.get_agent_at_position(world_x, world_y)
-        
-        if clicked_agent:
-            self.focus_on_agent(clicked_agent)
-            return clicked_agent.id
+        """Handles a click event from the frontend."""
+        data = request.get_json()
+        agent_id = data.get('agent_id')
+        print(f"🖱️ SERVER: Received click for agent_id: {agent_id}")
+
+        if agent_id is not None:
+            # Find the agent by ID
+            agent_to_focus = next((agent for agent in self.agents if agent.id == agent_id), None)
+            if agent_to_focus:
+                self.focus_on_agent(agent_to_focus)
+                return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
+            else:
+                self.focus_on_agent(None) # Clear focus if agent not found
+                return jsonify({'status': 'error', 'message': f'Agent {agent_id} not found', 'agent_id': None})
         else:
+            # If no agent_id is provided, it's a click on empty space, so clear focus
             self.focus_on_agent(None)
-            return None
+            return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
 
     def get_camera_state(self):
         """Get current camera state for rendering."""
@@ -1600,34 +1600,33 @@ def start_training():
 
 @app.route('/stop', methods=['POST'])
 def stop_training():
-    print("🛑 Stopping training via web endpoint")
     env.stop()
-    return jsonify({'status': 'Training stopped'})
+    return jsonify({'status': 'success'})
 
 @app.route('/click', methods=['POST'])
 def handle_click():
+    """Handles a click event from the frontend."""
     data = request.get_json()
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No data provided'}), 400
-
     agent_id = data.get('agent_id')
+    print(f"🖱️ SERVER: Received click for agent_id: {agent_id}")
 
-    clicked_agent = None
     if agent_id is not None:
-        clicked_agent = next((agent for agent in env.agents if agent.id == agent_id), None)
-
-    env.focus_on_agent(clicked_agent)
-    
-    final_agent_id = clicked_agent.id if clicked_agent else None
-    
-    return jsonify({
-        'status': 'success',
-        'agent_id': final_agent_id,
-        'focused': final_agent_id is not None
-    })
+        # Find the agent by ID
+        agent_to_focus = next((agent for agent in env.agents if agent.id == agent_id), None)
+        if agent_to_focus:
+            env.focus_on_agent(agent_to_focus)
+            return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
+        else:
+            env.focus_on_agent(None) # Clear focus if agent not found
+            return jsonify({'status': 'error', 'message': f'Agent {agent_id} not found', 'agent_id': None})
+    else:
+        # If no agent_id is provided, it's a click on empty space, so clear focus
+        env.focus_on_agent(None)
+        return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
 
 @app.route('/get_agent_at_position', methods=['POST'])
 def get_agent_at_position():
+    """Gets the agent at a specific mouse position."""
     data = request.get_json()
     if not data or 'x' not in data or 'y' not in data:
         return jsonify({'status': 'error', 'message': 'Missing coordinates'}), 400

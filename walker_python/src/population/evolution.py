@@ -283,6 +283,11 @@ class EvolutionEngine:
             
             new_population.append(child)
         
+        # After creating the new population, re-assign unique IDs
+        for i, agent in enumerate(new_population):
+            if hasattr(agent, 'id'):
+                agent.id = i
+
         return new_population
     
     def _tournament_selection(self, ranked_agents: List[AgentRecord]) -> BaseAgent:
