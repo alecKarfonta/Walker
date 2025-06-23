@@ -214,9 +214,12 @@ class SparseQTable:
         return self.q_values[state_key][action]
     
     def set_q_value(self, state: Tuple[int, ...], action: int, value: float):
-        """Set Q-value for state-action pair."""
+        """Set Q-value for state-action pair with bounds checking."""
         if action >= self.action_count:
             raise ValueError(f"Action {action} exceeds action count {self.action_count}")
+        
+        # BOUND the Q-value to prevent explosion
+        value = np.clip(value, -10.0, 10.0)  # Conservative bounds for Q-values
         
         self._ensure_state_exists(state)
         state_key = self._get_state_key(state)
