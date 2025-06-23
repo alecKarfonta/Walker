@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src'
 import threading
 import time
 import json
+import logging
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
@@ -19,6 +20,8 @@ from src.population.population_controller import PopulationController
 from src.population.evolution import EvolutionEngine
 from flask_socketio import SocketIO
 
+# Suppress Flask logging for status endpoint
+logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # HTML template with Canvas rendering
 HTML_TEMPLATE = """
@@ -1019,6 +1022,9 @@ class TrainingEnvironment:
         self.world = b2.b2World(gravity=(0, -10), doSleep=True)
         self.dt = 1.0 / 60.0
 
+        # World bounds for resetting fallen agents
+        self.world_bounds_y = -20.0 # Reset if agent falls below this y-coordinate
+        
         # --- Collision Filtering Setup ---
         # Box2D uses 16-bit collision categories, so we need a different approach for 50 agents
         # Instead of unique categories per agent, we'll use a simpler approach:
@@ -1151,11 +1157,22 @@ class TrainingEnvironment:
         self.is_running = True
         last_step_time = time.time()
         last_stats_time = time.time()
+        last_debug_time = time.time()
+        step_count = 0
         
         print("🚀 Training loop started!")
+        print(f"🔧 World gravity: {self.world.gravity}")
+        print(f"🔧 Number of agents: {len(self.agents)}")
+        print(f"🔧 Physics timestep: {self.dt}")
         
         # Initialize robot statistics
         self._init_robot_stats()
+        
+        # Test physics world
+        print("🔧 Testing physics world...")
+        for i in range(5):
+            self.world.Step(self.dt, 8, 3)
+            print(f"   Step {i}: World bodies: {len(self.world.bodies)}")
         
         while self.is_running:
             current_time = time.time()
@@ -1166,15 +1183,43 @@ class TrainingEnvironment:
             
             # Step the physics world
             self.world.Step(self.dt, 8, 3)
+            step_count += 1
             
             # Update all agents
             for agent in self.agents:
                 agent.step(delta_time)
             
+            # Check for fallen agents and reset them
+            for agent in self.agents:
+                if agent.body.position.y < self.world_bounds_y:
+                    agent.reset_position()
+
             # Update statistics periodically
             if current_time - last_stats_time > 0.1:  # Update every 0.1 seconds
                 self._update_statistics()
                 last_stats_time = current_time
+            
+            # Debug output every 2 seconds
+            if current_time - last_debug_time > 2.0:
+                print(f"🔧 Physics step {step_count}: {len(self.agents)} agents active")
+                if self.agents:
+                    first_agent = self.agents[0]
+                    print(f"   Agent 0: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
+                          f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
+                          f"reward={first_agent.total_reward:.2f}")
+                    print(f"   Agent 0: action={first_agent.current_action_tuple}, "
+                          f"state={first_agent.current_state}, "
+                          f"steps={first_agent.steps}")
+                    
+                    # Check if agent is awake
+                    print(f"   Agent 0 awake: {first_agent.body.awake}, "
+                          f"upper_arm awake: {first_agent.upper_arm.awake}, "
+                          f"lower_arm awake: {first_agent.lower_arm.awake}")
+                    
+                    # Check arm angles
+                    print(f"   Agent 0 arm angles: shoulder={first_agent.upper_arm.angle:.2f}, "
+                          f"elbow={first_agent.lower_arm.angle:.2f}")
+                last_debug_time = current_time
             
             last_step_time = current_time
             time.sleep(max(0, self.dt - (time.time() - current_time)))
@@ -1380,7 +1425,7 @@ class TrainingEnvironment:
         for agent in self.agents:
             self.population_controller.update_agent_fitness(agent, agent.get_fitness())
         
-        new_population = self.evolution_engine.evolve_generation(self.mutation_rate)
+        new_population = self.evolution_engine.evolve_generation()
         
         # Simple replacement: clear old agents and add new ones
         for agent in self.agents:
@@ -1501,15 +1546,18 @@ def index():
 
 @app.route('/status')
 def status():
+    # Suppress logging for status endpoint to reduce noise
     return jsonify(env.get_status())
 
 @app.route('/start', methods=['POST'])
 def start_training():
+    print("🚀 Starting training via web endpoint")
     env.start()
     return jsonify({'status': 'Training started'})
 
 @app.route('/stop', methods=['POST'])
 def stop_training():
+    print("🛑 Stopping training via web endpoint")
     env.stop()
     return jsonify({'status': 'Training stopped'})
 
