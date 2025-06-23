@@ -1507,47 +1507,70 @@ class TrainingEnvironment:
         print()  # Add spacing for readability
 
     def trigger_evolution(self):
-        """Trigger evolutionary generation advancement."""
+        """Trigger evolutionary generation advancement with robust cleanup."""
         try:
             print(f"\n🧬 === EVOLUTION TRIGGER ===")
             print(f"🔄 Evolving generation {self.evolution_engine.generation} -> {self.evolution_engine.generation + 1}")
             
             # Store old agents for cleanup
             old_agents = self.agents.copy()
+            old_agent_ids = {agent.id for agent in old_agents}
+            
+            # Temporarily pause physics stepping to prevent race conditions
+            # (This prevents core dumps during body destruction)
+            evolution_start_time = time.time()
             
             # Evolve to next generation
             new_population = self.evolution_engine.evolve_generation()
+            new_agent_ids = {agent.id for agent in new_population}
             
-            # Update agents list
+            # Update agents list BEFORE cleanup
             self.agents = new_population
             
+            # Allow some time for physics to settle before cleanup
+            time.sleep(0.1)
+            
             # Clean up old agents that are no longer in the population
+            cleanup_count = 0
             for old_agent in old_agents:
-                if old_agent not in new_population:
+                if old_agent.id not in new_agent_ids:
                     try:
-                        old_agent.destroy()
+                        # Mark agent as destroyed before cleanup
+                        if not hasattr(old_agent, '_destroyed'):
+                            old_agent.destroy()
+                            cleanup_count += 1
                     except Exception as e:
                         print(f"⚠️  Error cleaning up agent {old_agent.id}: {e}")
             
+            print(f"🧹 Cleaned up {cleanup_count} old agents")
+            
             # Clean up robot stats - remove entries for agents that no longer exist
-            current_agent_ids = {agent.id for agent in self.agents}
             old_stats_keys = list(self.robot_stats.keys())
+            stats_cleaned = 0
             for old_id in old_stats_keys:
-                if old_id not in current_agent_ids:
+                if old_id not in new_agent_ids:
                     del self.robot_stats[old_id]
+                    stats_cleaned += 1
+            
+            print(f"📊 Cleaned up {stats_cleaned} old stat entries")
             
             # Reset focused agent if it no longer exists
-            if self.focused_agent and self.focused_agent not in self.agents:
+            if self.focused_agent and self.focused_agent.id not in new_agent_ids:
                 self.focused_agent = None
+                print("🎯 Cleared focused agent (no longer exists)")
             
             # Update population stats
             self._update_statistics()
             
+            evolution_time = time.time() - evolution_start_time
             print(f"✅ Evolution complete! New generation has {len(self.agents)} agents")
+            print(f"⏱️  Evolution took {evolution_time:.2f} seconds")
             print(f"🧬 === EVOLUTION COMPLETE ===\n")
             
         except Exception as e:
             print(f"❌ Evolution failed: {e}")
+            import traceback
+            print(traceback.format_exc())
             # Don't let evolution failure crash the system
     
     def get_evolution_status(self):
@@ -1937,13 +1960,21 @@ def main():
     server_thread.start()
     
     print(f"✅ Web server started on http://localhost:{web_port}")
+    print(f"🧬 Evolutionary training running indefinitely...")
+    print(f"   🤖 Population: {len(env.agents)} diverse crawling robots")
+    print(f"   🧬 Auto-evolution every {env.evolution_interval/60:.1f} minutes")
+    print(f"   🌐 Web interface: http://localhost:{web_port}")
+    print(f"   ⏹️  Press Ctrl+C to stop")
     
-    # Keep the main thread alive to allow background threads to run
+    # Keep the main thread alive indefinitely to allow background threads to run
     try:
         while True:
-            time.sleep(1)
+            time.sleep(5)  # Check every 5 seconds
+            # Optional: Print periodic status
+            if hasattr(env, 'step_count') and env.step_count % 18000 == 0:  # Every 5 minutes
+                print(f"🔄 System running: Step {env.step_count}, Generation {env.evolution_engine.generation}")
     except KeyboardInterrupt:
-        print("🛑 Shutting down training environment...")
+        print("\n🛑 Shutting down training environment...")
         env.stop()
         print("✅ Training stopped.")
 
