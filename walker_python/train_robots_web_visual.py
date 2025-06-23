@@ -641,7 +641,7 @@ HTML_TEMPLATE = """
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">State:</span>
-                            <span class="detail-value">(${agent.state[0]}, ${agent.state[1]})</span>
+                            <span class="detail-value" id="robot-state">N/A</span>
                         </div>
                     </div>
                     
@@ -670,85 +670,60 @@ HTML_TEMPLATE = """
         }
 
         function drawWorld(data) {
-            if (!canvas || !data) return;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.save();
-            
-            // Apply camera transform:
-            // 1. Move origin to center of canvas
-            ctx.translate(canvas.width / 2, canvas.height / 2);
-            // 2. Zoom and flip Y axis to match physics coordinates
-            ctx.scale(cameraZoom, -cameraZoom);
-            // 3. Pan the world so the camera position is at the center
-            ctx.translate(-cameraPosition.x, -cameraPosition.y);
-            
-            // Draw ground from geometry
-            if (data.shapes && data.shapes.ground) {
-                 const gradient = ctx.createLinearGradient(0, -1, 0, 1);
-                gradient.addColorStop(0, '#5e738c');
-                gradient.addColorStop(1, '#34495e');
-                ctx.fillStyle = gradient;
+            if (!ctx) return;
 
-                data.shapes.ground.forEach(geom => {
-                    if (geom.type === 'polygon' && geom.vertices.length > 0) {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Apply camera transformations
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2); // Center of canvas
+            ctx.scale(cameraZoom, -cameraZoom); // Zoom and flip Y-axis
+            ctx.translate(-cameraPosition.x, -cameraPosition.y); // Pan
+
+            // Draw ground
+            if (data.shapes && data.shapes.ground) {
+                ctx.strokeStyle = '#8e8e8e';
+                ctx.lineWidth = 0.1;
+                data.shapes.ground.forEach(shape => {
+                    if (shape.type === 'polygon' && shape.vertices.length > 1) {
                         ctx.beginPath();
-                        ctx.moveTo(geom.vertices[0][0], geom.vertices[0][1]);
-                        for (let i = 1; i < geom.vertices.length; i++) {
-                            ctx.lineTo(geom.vertices[i][0], geom.vertices[i][1]);
+                        ctx.moveTo(shape.vertices[0][0], shape.vertices[0][1]);
+                        for (let i = 1; i < shape.vertices.length; i++) {
+                            ctx.lineTo(shape.vertices[i][0], shape.vertices[i][1]);
                         }
                         ctx.closePath();
-                        ctx.fill();
-                    } else if (geom.type === 'line') {
-                        // Fallback for old line-based ground
-                        ctx.strokeStyle = '#34495e';
-                        ctx.lineWidth = 0.1;
-                        ctx.beginPath();
-                        ctx.moveTo(geom.vertices[0][0], geom.vertices[0][1]);
-                        ctx.lineTo(geom.vertices[1][0], geom.vertices[1][1]);
                         ctx.stroke();
                     }
                 });
             }
 
+            // Draw robots
             if (data.shapes && data.shapes.robots) {
                 data.shapes.robots.forEach(robot => {
-                    const isFocused = robot.id === focusedAgentId;
-                    
-                    robot.body_parts.forEach(part => {
-                        if (part.type === 'circle') { // Wheels
-                            const wheelGradient = ctx.createRadialGradient(
-                                part.center[0], part.center[1], 0,
-                                part.center[0], part.center[1], part.radius
-                            );
-                            wheelGradient.addColorStop(0, '#3498db');
-                            wheelGradient.addColorStop(1, '#2980b9');
-                            ctx.fillStyle = wheelGradient;
-                        } else { // Body parts
-                            ctx.fillStyle = isFocused ? '#e74c3c' : '#c0392b'; // Red if focused
-                        }
-                        
-                        ctx.strokeStyle = '#2c3e50';
-                        ctx.lineWidth = 0.05;
+                    const isFocused = (robot.id === focusedAgentId);
+                    ctx.strokeStyle = isFocused ? '#e74c3c' : '#3498db'; // Highlight focused robot
+                    ctx.fillStyle = isFocused ? 'rgba(231, 76, 60, 0.4)' : 'rgba(52, 152, 219, 0.4)';
+                    ctx.lineWidth = isFocused ? 0.2 : 0.1;
 
-                        if (part.type === 'polygon') {
-                            ctx.beginPath();
+                    robot.body_parts.forEach(part => {
+                        ctx.beginPath();
+                        if (part.type === 'polygon' && part.vertices.length > 1) {
                             ctx.moveTo(part.vertices[0][0], part.vertices[0][1]);
                             for (let i = 1; i < part.vertices.length; i++) {
                                 ctx.lineTo(part.vertices[i][0], part.vertices[i][1]);
                             }
                             ctx.closePath();
-                            ctx.fill();
-                            ctx.stroke();
                         } else if (part.type === 'circle') {
-                            ctx.beginPath();
-                            ctx.arc(part.center[0], part.center[1], part.radius, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.stroke();
+                            ctx.arc(part.center[0], part.center[1], part.radius, 0, 2 * Math.PI);
                         }
+                        ctx.fill();
+                        ctx.stroke();
                     });
                 });
             }
-            ctx.restore();
+
+            ctx.restore(); // Restore to pre-camera transform state
         }
 
         function fetchData() {
@@ -976,88 +951,96 @@ class TrainingEnvironment:
         if not self.agents:
             return
         
-        # Calculate distances and fitness
-        distances = []
+        # Ensure robot_stats is initialized for all agents
         for i, agent in enumerate(self.agents):
-            # Update robot statistics
+            if i not in self.robot_stats:
+                self.robot_stats[i] = {
+                    'id': agent.id,
+                    'current_position': tuple(agent.body.position),
+                    'velocity': tuple(agent.body.linearVelocity),
+                    'arm_angles': {'shoulder': agent.upper_arm.angle, 'elbow': agent.lower_arm.angle},
+                    'steps_alive': 0,
+                    'total_distance': 0.0,
+                    'fitness': 0.0,
+                    'q_updates': 0,
+                    'episode_reward': 0.0,
+                    # Add any other keys you use elsewhere here
+                }
+            # Now update all stats as usual
             self.robot_stats[i]['current_position'] = tuple(agent.body.position)
             self.robot_stats[i]['velocity'] = tuple(agent.body.linearVelocity)
             self.robot_stats[i]['arm_angles']['shoulder'] = agent.upper_arm.angle
             self.robot_stats[i]['arm_angles']['elbow'] = agent.lower_arm.angle
             self.robot_stats[i]['steps_alive'] += 1
+            self.robot_stats[i]['total_distance'] = agent.body.position.x - agent.initial_position[0]
+            self.robot_stats[i]['fitness'] = self.robot_stats[i]['total_distance']
             self.robot_stats[i]['episode_reward'] = agent.total_reward
             self.robot_stats[i]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
             self.robot_stats[i]['action_history'] = agent.action_history
-            
-            # Calculate distance traveled
-            distance = agent.body.position.x - agent.initial_position[0]
-            self.robot_stats[i]['total_distance'] = distance
-            self.robot_stats[i]['fitness'] = distance
-            distances.append(distance)
         
         # Update population statistics
-        self.population_stats = {
-            'best_distance': max(distances),
-            'average_distance': sum(distances) / len(distances),
-            'worst_distance': min(distances),
-            'total_agents': len(self.agents),
-            'q_learning_stats': {
-                'avg_epsilon': sum(agent.epsilon for agent in self.agents) / len(self.agents),
-                'total_q_updates': sum(self.robot_stats[i]['q_updates'] for i in range(len(self.agents)))
+        if self.robot_stats:
+            distances = [stats['total_distance'] for stats in self.robot_stats.values()]
+            self.population_stats = {
+                'best_distance': max(distances),
+                'average_distance': sum(distances) / len(distances),
+                'worst_distance': min(distances),
+                'total_agents': len(self.robot_stats),
+                'q_learning_stats': {
+                    'avg_epsilon': sum(agent.epsilon for agent in self.agents) / len(self.agents),
+                    'total_q_updates': sum(stats['q_updates'] for stats in self.robot_stats.values())
+                }
             }
-        }
 
     def training_loop(self):
-        """Main training loop."""
+        """Main simulation loop."""
         self.is_running = True
-        last_step_time = time.time()
+        
+        # Timing parameters for a fixed-step loop
+        fps = 60
+        self.dt = 1.0 / fps
+        accumulator = 0.0
+        
+        last_time = time.time()
+        
+        # Stats and debug timers
         last_stats_time = time.time()
         last_debug_time = time.time()
+        
         step_count = 0
-        
-        print("🚀 Training loop started!")
-        print(f"🔧 World gravity: {self.world.gravity}")
-        print(f"🔧 Number of agents: {len(self.agents)}")
-        print(f"🔧 Physics timestep: {self.dt}")
-        
-        # Initialize robot statistics
-        self._init_robot_stats()
-        
-        # Test physics world
-        print("🔧 Testing physics world...")
-        for i in range(5):
-            self.world.Step(self.dt, 8, 3)
-            print(f"   Step {i}: World bodies: {len(self.world.bodies)}")
-        
+
         while self.is_running:
             current_time = time.time()
-            delta_time = min(current_time - last_step_time, 1.0 / 30.0)  # Cap at 30 FPS
+            frame_time = current_time - last_time
+            last_time = current_time
             
-            # Update camera
-            self.update_camera(delta_time)
+            # Add frame time to the accumulator
+            accumulator += frame_time
             
-            # Step the physics world
-            self.world.Step(self.dt, 8, 3)
-            step_count += 1
-            
-            # Update all agents
-            for agent in self.agents:
-                agent.step(delta_time)
-            
-            # Check for fallen agents and reset them
-            for agent in self.agents:
-                if agent.body.position.y < self.world_bounds_y:
-                    agent.reset_position()
+            # Fixed-step physics updates
+            while accumulator >= self.dt:
+                # Step the physics world
+                self.world.Step(self.dt, 8, 3)
+                
+                # Update all agents
+                for agent in self.agents:
+                    agent.step(self.dt)
+                
+                # Decrement accumulator
+                accumulator -= self.dt
+                step_count += 1
 
-            # Update statistics periodically
-            if current_time - last_stats_time > 0.1:  # Update every 0.1 seconds
+            # Update camera and statistics (can be done once per frame)
+            self.update_camera(frame_time)
+            
+            if current_time - last_stats_time > 0.1:
                 self._update_statistics()
                 last_stats_time = current_time
             
-            # Debug output every 2 seconds
             if current_time - last_debug_time > 2.0:
                 print(f"🔧 Physics step {step_count}: {len(self.agents)} agents active")
                 if self.agents:
+                    # Debug output for the first agent
                     first_agent = self.agents[0]
                     print(f"   Agent 0: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
                           f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
@@ -1065,18 +1048,9 @@ class TrainingEnvironment:
                     print(f"   Agent 0: action={first_agent.current_action_tuple}, "
                           f"state={first_agent.current_state}, "
                           f"steps={first_agent.steps}")
-                    
-                    # Check if agent is awake
-                    print(f"   Agent 0 awake: {first_agent.body.awake}, "
-                          f"upper_arm awake: {first_agent.upper_arm.awake}, "
-                          f"lower_arm awake: {first_agent.lower_arm.awake}")
-                    
-                    # Check arm angles
-                    print(f"   Agent 0 arm angles: shoulder={first_agent.upper_arm.angle:.2f}, "
-                          f"elbow={first_agent.lower_arm.angle:.2f}")
                 last_debug_time = current_time
             
-            last_step_time = current_time
+            # Sleep to maintain target FPS
             time.sleep(max(0, self.dt - (time.time() - current_time)))
 
     def update_agent_params(self, params, target_agent_id=None):
