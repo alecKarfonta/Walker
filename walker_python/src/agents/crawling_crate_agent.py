@@ -68,7 +68,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         # Physical properties
         self.motor_torque = 150.0
-        self.motor_speed = 5.0
+        self.motor_speed = 0.5
         self.category_bits = category_bits
         self.mask_bits = mask_bits
 
@@ -100,6 +100,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             confidence_threshold=15,  # Visits needed for confidence
             exploration_bonus=0.15    # Higher bonus for under-explored actions
         )
+        
+        # Q-table size management to prevent performance degradation
+        self.max_q_table_states = 1500  # Limit Q-table size
+        self.q_table_pruning_threshold = 1800  # Start pruning at this size
         
         self.total_reward = 0.0
         self.steps = 0
@@ -209,14 +213,14 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         shoulder_deg = np.degrees(shoulder_angle)
         elbow_deg = np.degrees(elbow_angle)
         
-        # Normalize angles and create bins - use 15-degree buckets for better granularity
-        shoulder_bin = int(np.clip((shoulder_deg + 180) // 15, 0, 23))  # 24 bins (360/15)
-        elbow_bin = int(np.clip((elbow_deg + 180) // 15, 0, 23))        # 24 bins (360/15)
+        # Normalize angles and create bins - use 20-degree buckets for performance balance
+        shoulder_bin = int(np.clip((shoulder_deg + 180) // 45, 0, 7))  # 18 bins (360/20)
+        elbow_bin = int(np.clip((elbow_deg + 180) // 45, 0, 7))        # 18 bins (360/20)
         
-        # Add velocity discretization (clamped and binned) - keep it simple but informative
-        vel_x = np.clip(self.body.linearVelocity.x, -4, 4)
-        vel_x_bin = int((vel_x + 4) // 1)  # 8 bins: [-4,-3), [-3,-2), ... [3,4]
-        vel_x_bin = np.clip(vel_x_bin, 0, 7)  # Ensure it's in valid range
+        # Add velocity discretization (clamped and binned) - reduced bins for performance
+        vel_x = np.clip(self.body.linearVelocity.x, -3, 3)
+        vel_x_bin = int((vel_x + 3) // 1.5)  # 4 bins: [-3,-1.5), [-1.5,0), [0,1.5), [1.5,3]
+        vel_x_bin = np.clip(vel_x_bin, 0, 3)  # Ensure it's in valid range
         
         return (shoulder_bin, elbow_bin, vel_x_bin)  # 3D state: angles + velocity
         
@@ -262,82 +266,36 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         return (shoulder_bin, elbow_bin)
         
-    def get_multi_goal_reward(self, prev_x: float, goal_type: Optional[str] = None) -> float:
+    def get_acceleration_reward(self, prev_x: float) -> float:
         """
-        Multi-goal reward system inspired by Java implementation.
-        Different goals emphasize different aspects of movement.
+        Simple reward system focused on rightward acceleration only.
+        Rewards come from accelerating to the right, penalties for moving left.
         """
-        if goal_type is None:
-            goal_type = self.goals[self.current_goal]
+        # Get current position and calculate actual displacement this step
+        current_x = self.body.position.x
+        displacement = current_x - prev_x  # How far we moved this step
         
-        # Get basic physics measurements
-        x_velocity = self.body.linearVelocity.x
-        y_position = self.body.position.y
-        body_angle = self.body.angle
-        position_x = self.body.position.x
+        # Calculate instantaneous velocity (displacement per step)
+        current_velocity = displacement
         
-        # Track max speed
-        if x_velocity > self.max_speed:
-            self.max_speed = x_velocity
+        # Calculate acceleration (change in velocity)
+        acceleration = current_velocity - getattr(self, 'prev_velocity', 0.0)
+        self.prev_velocity = current_velocity
         
-        # Apply velocity threshold (like Java implementation) - reduced for better learning
-        if abs(x_velocity) < 0.1:  # Lower threshold to reward small movements
-            x_velocity = 0.0
-        
-        # Calculate speed as moving average (like Java implementation)
-        self.speed = (1 - self.speed_decay) * self.speed + (self.speed_decay * x_velocity)
-        
-        # Calculate acceleration
-        self.acceleration = self.speed - self.previous_speed
-        self.previous_speed = self.speed
-        
+        # Reward rightward acceleration, penalize leftward
         reward = 0.0
+        if acceleration > 0.001:  # Accelerating right
+            reward = acceleration * 10.0  # Strong reward for rightward acceleration
+        elif acceleration < -0.001:  # Accelerating left
+            reward = acceleration * 5.0   # Moderate penalty for leftward acceleration
+        # No reward for maintaining speed (acceleration = 0)
         
-        if goal_type == 'speed':
-            # Focus on achieving high forward velocity
-            if x_velocity > 0:
-                reward = self.goal_weights['speed'] * x_velocity * 2.0
-            elif x_velocity < 0:
-                reward = self.goal_weights['speed'] * x_velocity * 0.3  # Small penalty for backward
-                
-        elif goal_type == 'distance':
-            # Focus on total distance traveled
-            distance_reward = (position_x - self.initial_position[0]) * self.goal_weights['distance']
-            reward = max(0, distance_reward)  # Only positive progress counts
-            
-        elif goal_type == 'stability':
-            # Focus on maintaining upright position and stable movement
-            stability_factor = max(0, 1.0 - abs(body_angle))  # Penalty for tilting
-            height_factor = max(0, y_position - self.initial_position[1])  # Bonus for staying up
-            smooth_movement = 1.0 / (1.0 + abs(self.acceleration))  # Bonus for smooth movement
-            reward = self.goal_weights['stability'] * (stability_factor + height_factor * 0.5 + smooth_movement)
-            
-        elif goal_type == 'efficiency':
-            # Focus on energy-efficient movement (speed relative to effort)
-            if x_velocity > 0:
-                # Reward speed but penalize excessive acceleration (wasted energy)
-                efficiency = x_velocity - abs(self.acceleration) * 0.5
-                reward = self.goal_weights['efficiency'] * max(0, efficiency)
-            else:
-                reward = 0.0
-                
-        elif goal_type == 'combined':
-            # Balanced combination of all goals
-            speed_component = max(0, x_velocity * 0.5)
-            distance_component = max(0, (position_x - self.initial_position[0]) * 0.01)
-            stability_component = max(0, 1.0 - abs(body_angle)) * 0.3
-            efficiency_component = max(0, x_velocity - abs(self.acceleration) * 0.3) * 0.2
-            
-            reward = self.goal_weights['combined'] * (
-                speed_component + distance_component + stability_component + efficiency_component
-            )
+        # Additional small penalty for moving backwards
+        if current_velocity < -0.01:
+            reward -= 0.01  # Small penalty for backward movement
         
-        # Add small progress bonus for any forward movement
-        if x_velocity > 0.1:
-            reward += 0.005  # Small universal progress bonus
-        
-        # Bound the reward to prevent extremes
-        reward = np.clip(reward, -0.2, 0.8)
+        # Bound reward to reasonable range
+        reward = np.clip(reward, -0.1, 0.1)
         
         return reward
         
@@ -409,8 +367,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         return self.q_table.get_adaptive_learning_rate(state, action, self.learning_rate)
             
     def get_reward(self, prev_x: float) -> float:
-        """Use multi-goal reward system instead of single reward."""
-        reward = self.get_multi_goal_reward(prev_x)
+        """Use acceleration-based reward system focused on rightward movement."""
+        reward = self.get_acceleration_reward(prev_x)
         
         # Track immediate reward for debugging
         self.immediate_reward = reward
@@ -418,14 +376,14 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Add to recent rewards for performance tracking
         self.recent_rewards.append(reward)
         
-        # DEBUG LOGGING - enabled temporarily to monitor rewards
+        # DEBUG LOGGING - enabled temporarily to monitor acceleration-based rewards
         if self.id == 0 and self.steps % 100 == 0:  # Only for first agent, every 100 steps
-            current_goal = self.goals[self.current_goal]
-            print(f"💰 Multi-Goal Reward Debug Agent {self.id} (Goal: {current_goal}):")
-            print(f"  Raw x_velocity: {self.body.linearVelocity.x:.4f}")
-            print(f"  Speed (moving avg): {self.speed:.4f}")
-            print(f"  Acceleration: {self.acceleration:.4f}")
-            print(f"  Body angle: {np.degrees(self.body.angle):.1f}°")
+            current_x = self.body.position.x
+            displacement = current_x - prev_x
+            acceleration = displacement - getattr(self, 'prev_velocity', 0.0)
+            print(f"💰 Acceleration Reward Debug Agent {self.id}:")
+            print(f"  Position: {current_x:.4f}, Displacement: {displacement:.4f}")
+            print(f"  Velocity: {displacement:.4f}, Acceleration: {acceleration:.4f}")
             print(f"  Reward: {reward:.4f}")
             print(f"  Total reward: {getattr(self, 'total_reward', 'N/A'):.2f}")
             print(f"  Recent avg: {np.mean(list(self.recent_rewards)[-50:]):.4f}")
@@ -486,9 +444,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             self.q_table.set_q_value(experience.state, experience.action, new_q)
         
     def step(self, dt: float):
-        """Enhanced step method with adaptive exploration, goal cycling, and improved Q-learning."""
-        # Cycle goals periodically
-        self.cycle_goal()
+        """Enhanced step method with adaptive exploration and improved Q-learning."""
+        # No goal cycling needed - using simple acceleration-based rewards
         
         # Initialize action if not set
         if self.current_action_tuple == (0, 0) and self.current_action is None:
@@ -517,16 +474,21 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             if self.id == 0:  # Debug for first agent
                 print(f"⚠️  Agent {self.id}: Total reward capped at -20.0 to prevent explosion")
         
-        # Debug for first agent every 120 steps (less frequent)
+        # Debug for first agent every 120 steps (less frequent) - Add performance monitoring
         if self.id == 0 and self.steps % 120 == 0:
-            current_goal = self.goals[self.current_goal]
             convergence = self.q_table.get_convergence_estimate()
-            print(f"🤖 Agent {self.id}: Step {self.steps}, Goal: {current_goal}")
+            q_table_size = len(self.q_table.q_values)
+            total_state_actions = sum(len(actions) for actions in self.q_table.q_values.values())
+            print(f"🤖 Agent {self.id}: Step {self.steps}")
             print(f"    Pos: ({self.body.position.x:.2f}, {self.body.position.y:.2f})")
             print(f"    Vel: ({self.body.linearVelocity.x:.2f}, {self.body.linearVelocity.y:.2f})")
             print(f"    Action: {self.current_action_tuple}, Reward: {reward:.3f}")
             print(f"    Total reward: {self.total_reward:.2f}, Epsilon: {self.epsilon:.3f}")
-            print(f"    Q-table states: {len(self.q_table.state_coverage)}, Convergence: {convergence:.3f}")
+            print(f"    🧠 Q-table: {q_table_size} states, {total_state_actions} state-actions, Convergence: {convergence:.3f}")
+            
+            # Performance warning - updated threshold for new state space (18×18×4 = 1,296 max states)
+            if q_table_size > 1000:
+                print(f"    ⚠️  Q-table getting large! {q_table_size} states may slow performance")
         
         # Enhanced action selection with adaptive intervals
         if self.steps % self.action_interval == 0:
@@ -571,7 +533,42 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         if self.steps % self.replay_frequency == 0 and len(self.replay_buffer) > self.batch_size:
             self.learn_from_replay_enhanced()
         
+        # Q-table size management - prune if getting too large
+        if self.steps % 200 == 0:  # Check every 200 steps
+            self.prune_q_table_if_needed()
+        
         self.steps += 1
+        
+    def prune_q_table_if_needed(self):
+        """Prune Q-table by removing least-visited states to maintain performance."""
+        current_size = len(self.q_table.q_values)
+        
+        if current_size > self.q_table_pruning_threshold:
+            # Calculate visit counts for each state
+            state_visit_counts = {}
+            for state, action_values in self.q_table.visit_counts.items():
+                state_visit_counts[state] = sum(action_values)
+            
+            # Sort states by visit count (least visited first)
+            sorted_states = sorted(state_visit_counts.items(), key=lambda x: x[1])
+            
+            # Remove least visited states until we reach target size
+            states_to_remove = current_size - self.max_q_table_states
+            for i in range(min(states_to_remove, len(sorted_states))):
+                state_to_remove = sorted_states[i][0]
+                
+                # Only remove states with very few visits to avoid losing important learning
+                if state_visit_counts[state_to_remove] <= 2:
+                    if state_to_remove in self.q_table.q_values:
+                        del self.q_table.q_values[state_to_remove]
+                    if state_to_remove in self.q_table.visit_counts:
+                        del self.q_table.visit_counts[state_to_remove]
+                    if state_to_remove in self.q_table.state_coverage:
+                        self.q_table.state_coverage.remove(state_to_remove)
+            
+            new_size = len(self.q_table.q_values)
+            if self.id == 0:  # Debug for first agent
+                print(f"🧹 Agent {self.id}: Pruned Q-table from {current_size} to {new_size} states")
         
     def update_q_value(self, next_state: Tuple, reward: float):
         """Update Q-value for the current state-action pair using Java-inspired approach with bounds."""
@@ -665,6 +662,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.previous_speed = 0.0
         self.acceleration = 0.0
         self.max_speed = 0.0
+        
+        # Initialize velocity tracking for acceleration-based rewards
+        self.prev_velocity = 0.0
         
         # Reset Q-value tracking
         self.best_value = 0.0
