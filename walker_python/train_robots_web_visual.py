@@ -15,9 +15,10 @@ import logging
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
-from src.agents.crawling_crate_agent import CrawlingCrateAgent
+from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.physical_parameters import PhysicalParameters
+from src.population.enhanced_evolution import EnhancedEvolutionEngine, EvolutionConfig, TournamentSelection
 from src.population.population_controller import PopulationController
-from src.population.evolution import EvolutionEngine
 from flask_socketio import SocketIO
 
 # Suppress Flask logging for status endpoint
@@ -388,7 +389,7 @@ HTML_TEMPLATE = """
                 e.preventDefault();
                 e.stopPropagation();
 
-                const agentId = parseInt(robotRow.dataset.agentId);
+                const agentId = robotRow.dataset.agentId;  // Keep as string, don't parseInt
                 console.log(`🎯 CLIENT: Leaderboard button clicked for agent: ${agentId}`);
 
                 // Send the click to the server to select the agent
@@ -896,7 +897,7 @@ HTML_TEMPLATE = """
             // Update the visual state of leaderboard items
             const leaderboardItems = document.querySelectorAll('.robot-stat-row[data-agent-id]');
             leaderboardItems.forEach(item => {
-                const itemAgentId = parseInt(item.dataset.agentId);
+                const itemAgentId = item.dataset.agentId;  // Keep as string, don't parseInt
                 if (itemAgentId === focusedAgentId) {
                     item.classList.add('focused');
                 } else {
@@ -1002,7 +1003,8 @@ def convert_numpy_types(obj):
 
 class TrainingEnvironment:
     """
-    Manages the physics simulation and training of crawling crate agents using Box2D.
+    Enhanced training environment with evolutionary physical parameters.
+    Manages physics simulation and evolution of diverse crawling robots.
     """
     def __init__(self, num_agents=50):
         self.num_agents = num_agents
@@ -1010,46 +1012,50 @@ class TrainingEnvironment:
         self.dt = 1.0 / 60.0
 
         # World bounds for resetting fallen agents
-        self.world_bounds_y = -20.0 # Reset if agent falls below this y-coordinate
+        self.world_bounds_y = -20.0
         
-        # --- Collision Filtering Setup ---
-        # Box2D uses 16-bit collision categories, so we need a different approach for 50 agents
-        # Instead of unique categories per agent, we'll use a simpler approach:
-        # - Ground: category 0x0001
-        # - All agents: category 0x0002 (shared category)
-        # - Agents only collide with ground, not with each other
+        # Collision filtering setup
         self.GROUND_CATEGORY = 0x0001
         self.AGENT_CATEGORY = 0x0002
 
-        # 2. Create the ground with its own category.
-        #    Its mask is set to collide with ALL agents.
+        # Create the ground
         self._create_ground()
 
-        # 3. Create agents, all with the same category.
-        #    Their masks are set to collide ONLY with the ground.
-        self.agents = []
-        for i in range(self.num_agents):
-            # Reduce spacing for 50 agents to fit them all
-            spacing = 8 if self.num_agents > 20 else 15
-            agent = CrawlingCrateAgent(
-                self.world,
-                agent_id=i,
-                position=(i * spacing, 6),
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY  # Only collide with the ground
-            )
-            agent.body.awake = True
-            self.agents.append(agent)
+        # Enhanced evolution configuration
+        self.evolution_config = EvolutionConfig(
+            population_size=num_agents,
+            elite_size=max(2, num_agents // 10),  # 10% elite
+            max_generations=100,
+            tournament_size=3,
+            crossover_rate=0.7,
+            mutation_rate=0.15,
+            clone_rate=0.1,
+            immigration_rate=0.05,
+            target_diversity=0.3,
+            adaptive_mutation=True,
+            use_speciation=True,
+            use_hall_of_fame=True
+        )
 
-        # --- Statistics and State ---
+        # Initialize enhanced evolution engine
+        self.evolution_engine = EnhancedEvolutionEngine(
+            world=self.world,
+            config=self.evolution_config,
+            selection_strategy=TournamentSelection()
+        )
+
+        # Create initial diverse population
+        self.agents = self.evolution_engine.initialize_population()
+
+        # Statistics and state
         self.step_count = 0
         self.robot_stats = {}
         self.population_stats = {
-            'total_distance': 0,
+            'generation': 1,
             'best_distance': 0,
             'average_distance': 0,
-            'generation': 1,
-            'total_steps': 0,
+            'diversity': 0,
+            'total_agents': len(self.agents),
             'q_learning_stats': {
                 'avg_epsilon': 0,
                 'avg_learning_rate': 0,
@@ -1059,21 +1065,20 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 4800  # 80 seconds at 60 Hz – gives slow crawlers time to accumulate reward
-        self.episode_step = 0
+        self.episode_length = 6000  # 100 seconds at 60 Hz - longer for diverse agents
         
         # Statistics update timing
-        self.stats_update_interval = 1.0  # Update stats every 1.0 seconds
-        self.steps_per_stats_update = int(self.stats_update_interval / self.dt)
+        self.stats_update_interval = 1.0
         self.last_stats_update = 0
+        
+        # Evolution timing
+        self.evolution_interval = 180.0  # 3 minutes between generations
+        self.last_evolution_time = time.time()
+        self.auto_evolution_enabled = True
         
         # Settle the world
         for _ in range(10):
             self.world.Step(self.dt, 8, 3)
-
-        self.population_controller = PopulationController(len(self.agents))
-        self.evolution_engine = EvolutionEngine(self.population_controller)
-        self.mutation_rate = 0.1 # Default mutation rate
 
         # Camera and focus system
         self.focused_agent = None
@@ -1085,13 +1090,19 @@ class TrainingEnvironment:
         self.zoom_speed = 0.05
         
         # User zoom tracking
-        self.user_zoom_level = 1.0  # Track user's preferred zoom level
-        self.user_has_manually_zoomed = False  # Track if user has manually adjusted zoom
+        self.user_zoom_level = 1.0
+        self.user_has_manually_zoomed = False
         
-        # Periodic learning system - robots learn from best performers every minute
+        # Periodic learning system
         self.last_learning_time = time.time()
-        self.learning_interval = 60.0  # 60 seconds = 1 minute
-        self.learning_rate = 0.3  # How much to learn from the leader
+        self.learning_interval = 90.0  # 1.5 minutes between learning events
+        self.learning_rate = 0.3
+
+        print(f"🧬 Enhanced Training Environment initialized:")
+        print(f"   Population: {len(self.agents)} diverse agents")
+        print(f"   Evolution: {self.evolution_config.population_size} agents, {self.evolution_config.elite_size} elite")
+        print(f"   Diversity target: {self.evolution_config.target_diversity}")
+        print(f"   Auto-evolution every {self.evolution_interval}s")
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1117,10 +1128,11 @@ class TrainingEnvironment:
         if not self.agents:
             return
         
-        # Ensure robot_stats is initialized for all agents
-        for i, agent in enumerate(self.agents):
-            if i not in self.robot_stats:
-                self.robot_stats[i] = {
+        # Use agent ID as key instead of list index to avoid evolution issues
+        for agent in self.agents:
+            agent_id = agent.id
+            if agent_id not in self.robot_stats:
+                self.robot_stats[agent_id] = {
                     'id': agent.id,
                     'current_position': tuple(agent.body.position),
                     'velocity': tuple(agent.body.linearVelocity),
@@ -1133,25 +1145,37 @@ class TrainingEnvironment:
                     # Add any other keys you use elsewhere here
                 }
             # Now update all stats as usual
-            self.robot_stats[i]['current_position'] = tuple(agent.body.position)
-            self.robot_stats[i]['velocity'] = tuple(agent.body.linearVelocity)
-            self.robot_stats[i]['arm_angles']['shoulder'] = agent.upper_arm.angle
-            self.robot_stats[i]['arm_angles']['elbow'] = agent.lower_arm.angle
-            self.robot_stats[i]['steps_alive'] += 1
-            self.robot_stats[i]['total_distance'] = agent.body.position.x - agent.initial_position[0]
-            self.robot_stats[i]['fitness'] = self.robot_stats[i]['total_distance']
-            self.robot_stats[i]['episode_reward'] = agent.total_reward
-            self.robot_stats[i]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
-            self.robot_stats[i]['action_history'] = agent.action_history
+            self.robot_stats[agent_id]['current_position'] = tuple(agent.body.position)
+            self.robot_stats[agent_id]['velocity'] = tuple(agent.body.linearVelocity)
+            self.robot_stats[agent_id]['arm_angles']['shoulder'] = agent.upper_arm.angle
+            self.robot_stats[agent_id]['arm_angles']['elbow'] = agent.lower_arm.angle
+            self.robot_stats[agent_id]['steps_alive'] += 1
+            self.robot_stats[agent_id]['total_distance'] = agent.body.position.x - agent.initial_position[0]
+            self.robot_stats[agent_id]['fitness'] = self.robot_stats[agent_id]['total_distance']
+            self.robot_stats[agent_id]['episode_reward'] = agent.total_reward
+            self.robot_stats[agent_id]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
+            self.robot_stats[agent_id]['action_history'] = agent.action_history
         
         # Update population statistics
         if self.robot_stats:
             distances = [stats['total_distance'] for stats in self.robot_stats.values()]
+            fitnesses = [agent.get_evolutionary_fitness() for agent in self.agents]
+            
+            # Get evolution summary
+            evolution_summary = self.evolution_engine.get_evolution_summary()
+            
             self.population_stats = {
+                'generation': evolution_summary['generation'],
                 'best_distance': max(distances),
                 'average_distance': sum(distances) / len(distances),
                 'worst_distance': min(distances),
+                'best_fitness': max(fitnesses) if fitnesses else 0,
+                'average_fitness': sum(fitnesses) / len(fitnesses) if fitnesses else 0,
+                'diversity': evolution_summary['diversity'],
                 'total_agents': len(self.robot_stats),
+                'species_count': evolution_summary.get('species_count', 1),
+                'hall_of_fame_size': evolution_summary.get('hall_of_fame_size', 0),
+                'mutation_rate': evolution_summary['mutation_rate'],
                 'q_learning_stats': {
                     'avg_epsilon': sum(agent.epsilon for agent in self.agents) / len(self.agents),
                     'total_q_updates': sum(stats['q_updates'] for stats in self.robot_stats.values())
@@ -1212,10 +1236,16 @@ class TrainingEnvironment:
                 self._update_statistics()
                 last_stats_time = current_time
             
-            # Check for periodic learning (every minute)
+            # Check for periodic learning
             if current_time - self.last_learning_time >= self.learning_interval:
                 self.perform_periodic_learning()
                 self.last_learning_time = current_time
+            
+            # Check for automatic evolution
+            if (self.auto_evolution_enabled and 
+                current_time - self.last_evolution_time >= self.evolution_interval):
+                self.trigger_evolution()
+                self.last_evolution_time = current_time
             
             if current_time - last_debug_time > 10.0:
                 print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active")
@@ -1342,15 +1372,17 @@ class TrainingEnvironment:
         # 4. Get detailed stats for side panel (top 10)
         robot_details = []
         for i, r_stat in enumerate(sorted_robots[:10]):
-            agent = self.agents[r_stat['id']]
-            robot_details.append({
-                'id': r_stat['id'],
-                'name': f"Robot {r_stat['id']}",
-                'rank': i + 1,
-                'distance': r_stat.get('total_distance', 0),
-                'position': r_stat.get('current_position', (0,0)),
-                'episode_reward': r_stat.get('episode_reward', 0)
-            })
+            # Find agent by ID instead of assuming ID matches list index
+            agent = next((a for a in self.agents if a.id == r_stat['id']), None)
+            if agent:
+                robot_details.append({
+                    'id': r_stat['id'],
+                    'name': f"Robot {r_stat['id']}",
+                    'rank': i + 1,
+                    'distance': r_stat.get('total_distance', 0),
+                    'position': r_stat.get('current_position', (0,0)),
+                    'episode_reward': r_stat.get('episode_reward', 0)
+                })
 
         # 5. Get full agent data for robot details panel
         agents_data = []
@@ -1421,10 +1453,10 @@ class TrainingEnvironment:
             print("✅ Training loop stopped")
 
     def get_best_agent(self):
-        """Utility to get the best agent based on fitness (distance)."""
+        """Utility to get the best agent based on evolutionary fitness."""
         if not self.agents:
             return None
-        return max(self.agents, key=lambda agent: agent.get_fitness())
+        return max(self.agents, key=lambda agent: agent.get_evolutionary_fitness())
     
     def find_leader(self):
         """Find the robot with the best performance (highest distance traveled)."""
@@ -1474,92 +1506,114 @@ class TrainingEnvironment:
         print(f"🎓 === LEARNING EVENT COMPLETE ===")
         print()  # Add spacing for readability
 
+    def trigger_evolution(self):
+        """Trigger evolutionary generation advancement."""
+        try:
+            print(f"\n🧬 === EVOLUTION TRIGGER ===")
+            print(f"🔄 Evolving generation {self.evolution_engine.generation} -> {self.evolution_engine.generation + 1}")
+            
+            # Store old agents for cleanup
+            old_agents = self.agents.copy()
+            
+            # Evolve to next generation
+            new_population = self.evolution_engine.evolve_generation()
+            
+            # Update agents list
+            self.agents = new_population
+            
+            # Clean up old agents that are no longer in the population
+            for old_agent in old_agents:
+                if old_agent not in new_population:
+                    try:
+                        old_agent.destroy()
+                    except Exception as e:
+                        print(f"⚠️  Error cleaning up agent {old_agent.id}: {e}")
+            
+            # Clean up robot stats - remove entries for agents that no longer exist
+            current_agent_ids = {agent.id for agent in self.agents}
+            old_stats_keys = list(self.robot_stats.keys())
+            for old_id in old_stats_keys:
+                if old_id not in current_agent_ids:
+                    del self.robot_stats[old_id]
+            
+            # Reset focused agent if it no longer exists
+            if self.focused_agent and self.focused_agent not in self.agents:
+                self.focused_agent = None
+            
+            # Update population stats
+            self._update_statistics()
+            
+            print(f"✅ Evolution complete! New generation has {len(self.agents)} agents")
+            print(f"🧬 === EVOLUTION COMPLETE ===\n")
+            
+        except Exception as e:
+            print(f"❌ Evolution failed: {e}")
+            # Don't let evolution failure crash the system
+    
+    def get_evolution_status(self):
+        """Get current evolution status."""
+        return {
+            'generation': self.evolution_engine.generation,
+            'auto_evolution_enabled': self.auto_evolution_enabled,
+            'time_until_next_evolution': max(0, self.evolution_interval - (time.time() - self.last_evolution_time)),
+            'evolution_summary': self.evolution_engine.get_evolution_summary()
+        }
+    
+    def toggle_auto_evolution(self):
+        """Toggle automatic evolution on/off."""
+        self.auto_evolution_enabled = not self.auto_evolution_enabled
+        status = "enabled" if self.auto_evolution_enabled else "disabled"
+        print(f"🧬 Auto-evolution {status}")
+        return self.auto_evolution_enabled
+
     def spawn_agent(self):
         """Adds a new, random agent to the simulation."""
-        new_id = len(self.agents)
-        spacing = 8 if self.num_agents > 20 else 15
-        position = (new_id * spacing, 6)
+        spacing = 8 if len(self.agents) > 20 else 15
+        position = (len(self.agents) * spacing, 6)
         
-        new_agent = CrawlingCrateAgent(
-            self.world,
-            agent_id=new_id,
+        # Create random physical parameters for diversity
+        random_params = PhysicalParameters.random_parameters()
+        
+        new_agent = EvolutionaryCrawlingAgent(
+            world=self.world,
+            agent_id=None,  # Generate new UUID automatically
             position=position,
             category_bits=self.AGENT_CATEGORY,
-            mask_bits=self.GROUND_CATEGORY
+            mask_bits=self.GROUND_CATEGORY,
+            physical_params=random_params
         )
         self.agents.append(new_agent)
-        self.population_controller.add_agent(new_agent)
-        self.num_agents = len(self.agents)
-        print(f"🐣 Spawned new agent {new_id}. Total agents: {self.num_agents}")
+        print(f"🐣 Spawned new agent {new_agent.id} with random parameters. Total agents: {len(self.agents)}")
 
     def clone_best_agent(self):
-        """Clones the best performing agent."""
-        best_agent = self.get_best_agent()
+        """Clones the best performing agent using evolutionary methods."""
+        best_agent = self.evolution_engine.get_best_agent()
         if not best_agent:
             print("No agents to clone.")
             return
 
-        new_id = len(self.agents)
-        spacing = 8 if self.num_agents > 20 else 15
-        position = (new_id * spacing, 6)
+        spacing = 8 if len(self.agents) > 20 else 15
+        position = (len(self.agents) * spacing, 6)
 
-        # Create a new agent with the same parameters
-        cloned_agent = CrawlingCrateAgent(
-            self.world,
-            agent_id=new_id,
-            position=position,
-            category_bits=self.AGENT_CATEGORY,
-            mask_bits=self.GROUND_CATEGORY
-        )
+        # Use the evolutionary clone method with slight mutation
+        cloned_agent = best_agent.clone_with_mutation(mutation_rate=0.05)
         
-        # Copy the learned parameters from the best agent
-        if hasattr(best_agent, 'q_table') and hasattr(cloned_agent, 'q_table'):
-            # Create a deep copy of the Q-table based on its type
-            if hasattr(best_agent.q_table, 'q_values') and hasattr(best_agent.q_table.q_values, 'copy'):
-                # Regular QTable with numpy arrays
-                cloned_agent.q_table.q_values = best_agent.q_table.q_values.copy()
-                if hasattr(best_agent.q_table, 'visit_counts'):
-                    cloned_agent.q_table.visit_counts = best_agent.q_table.visit_counts.copy()
-            elif hasattr(best_agent.q_table, 'q_values') and isinstance(best_agent.q_table.q_values, dict):
-                # SparseQTable with dictionary
-                cloned_agent.q_table.q_values = best_agent.q_table.q_values.copy()
-                if hasattr(best_agent.q_table, 'visit_counts'):
-                    cloned_agent.q_table.visit_counts = best_agent.q_table.visit_counts.copy()
-        
-        # Copy other learning parameters
-        cloned_agent.learning_rate = best_agent.learning_rate
-        cloned_agent.epsilon = best_agent.epsilon
-        cloned_agent.discount_factor = best_agent.discount_factor
+        # Update position for the clone (ID is already generated)
+        cloned_agent.initial_position = position
+        cloned_agent.reset_with_new_position(position)
         
         self.agents.append(cloned_agent)
-        self.population_controller.add_agent(cloned_agent)
-        self.num_agents = len(self.agents)
-        print(f"👯 Cloned best agent {best_agent.id} to new agent {new_id}. Total agents: {self.num_agents}")
+        print(f"👯 Cloned best agent {best_agent.id} to new agent {cloned_agent.id} (fitness: {best_agent.get_evolutionary_fitness():.3f}). Total agents: {len(self.agents)}")
 
     def evolve_population(self):
-        """Runs the evolution engine to create a new generation."""
-        # Update fitness values before evolution
-        for agent in self.agents:
-            self.population_controller.update_agent_fitness(agent, agent.get_fitness())
-        
-        new_population = self.evolution_engine.evolve_generation()
-        
-        # Simple replacement: clear old agents and add new ones
-        for agent in self.agents:
-            agent.destroy()
-
-        self.agents = new_population
-        self.num_agents = len(self.agents)
-
-        # Re-initialize controller and stats
-        self.population_controller = PopulationController(len(self.agents))
-        self._init_robot_stats() # Helper to re-init stats
-        print(f"🧬 Evolved population. New generation has {self.num_agents} agents.")
+        """Legacy method - use trigger_evolution() instead."""
+        print("⚠️  evolve_population() is deprecated. Using trigger_evolution() instead.")
+        self.trigger_evolution()
 
     def _init_robot_stats(self):
         self.robot_stats = {}
-        for i, agent in enumerate(self.agents):
-             self.robot_stats[i] = {
+        for agent in self.agents:
+             self.robot_stats[agent.id] = {
                 'id': agent.id,
                 'initial_position': tuple(agent.initial_position),
                 'current_position': tuple(agent.body.position),
@@ -1817,15 +1871,55 @@ def evolution_event():
         elif event == 'clone':
             env.clone_best_agent()
         elif event == 'evolve':
-            env.evolve_population()
+            env.trigger_evolution()  # Use new evolution method
         elif event == 'learn_from_leader':
             env.perform_periodic_learning()
+        elif event == 'toggle_auto_evolution':
+            enabled = env.toggle_auto_evolution()
+            return jsonify({'status': 'success', 'event': event, 'auto_evolution_enabled': enabled})
         else:
             return jsonify({'status': 'error', 'message': f'Unknown event: {event}'}), 400
         
         return jsonify({'status': 'success', 'event': event})
     except Exception as e:
         print(f"❌ Evolution event '{event}' failed: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/evolution_status', methods=['GET'])
+def evolution_status():
+    """Get current evolution status."""
+    try:
+        status = env.get_evolution_status()
+        return jsonify({'status': 'success', 'evolution_status': status})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/get_diverse_agents', methods=['GET'])
+def get_diverse_agents():
+    """Get diverse representatives from the population."""
+    try:
+        count = request.args.get('count', 5, type=int)
+        diverse_agents = env.evolution_engine.get_diverse_representatives(count)
+        
+        agent_info = []
+        for agent in diverse_agents:
+            info = {
+                'id': agent.id,
+                'fitness': agent.get_evolutionary_fitness(),
+                'generation': agent.generation,
+                'diversity_metrics': agent.get_diversity_metrics(),
+                'physical_summary': {
+                    'body_size': f"{agent.physical_params.body_width:.2f}x{agent.physical_params.body_height:.2f}",
+                    'wheel_radius': agent.physical_params.wheel_radius,
+                    'motor_torque': agent.physical_params.motor_torque,
+                    'learning_rate': agent.physical_params.learning_rate,
+                    'epsilon': agent.physical_params.epsilon
+                }
+            }
+            agent_info.append(info)
+        
+        return jsonify({'status': 'success', 'diverse_agents': agent_info})
+    except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def main():
