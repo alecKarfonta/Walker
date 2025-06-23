@@ -640,8 +640,12 @@ HTML_TEMPLATE = """
                             <span class="detail-value">(${agent.current_action[0]}, ${agent.current_action[1]})</span>
                         </div>
                         <div class="detail-row">
-                            <span class="detail-label">State:</span>
-                            <span class="detail-value" id="robot-state">N/A</span>
+                            <span class="detail-label">State (Discretized):</span>
+                            <span class="detail-value">S-bin:${agent.state[0] || 'N/A'}, E-bin:${agent.state[1] || 'N/A'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">State (Angles):</span>
+                            <span class="detail-value">S:${agent.state[0] ? ((agent.state[0] * 10) - 180).toFixed(0) + '°' : 'N/A'}, E:${agent.state[1] ? ((agent.state[1] * 10) - 180).toFixed(0) + '°' : 'N/A'}</span>
                         </div>
                     </div>
                     
