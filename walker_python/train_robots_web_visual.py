@@ -36,381 +36,134 @@ HTML_TEMPLATE = """
             box-sizing: border-box;
         }
         
-        body { 
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-            color: #e8e8e8; 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        body, html {
+            width: 100%;
+            height: 100%;
             overflow: hidden;
-            display: flex;
+            background: #1a1a2e;
+            color: #e8e8e8;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
 
-        #main-container {
+        #app-container {
             display: flex;
-            width: 100vw;
-            height: 100vh;
+            flex-direction: column;
+            width: 100%;
+            height: 100%;
         }
         
         #canvas-wrapper {
-            flex-grow: 1;
+            flex-grow: 1; /* Canvas takes up all available space */
             position: relative;
-            overflow: hidden;
         }
 
         canvas { 
-            display: block; 
-            position: absolute;
-            top: 0;
-            left: 0;
+            display: block;
             width: 100%;
             height: 100%;
-            background: linear-gradient(180deg, #2c3e50 0%, #34495e 100%);
-            box-shadow: inset 0 0 50px rgba(0,0,0,0.3);
         }
         
-        /* Side Panel for Robot Stats */
-        #robot-stats { 
-            flex: 0 0 380px; /* Initial width */
-            min-width: 250px;
-            max-width: 800px;
-            height: 100vh;
-            background: rgba(15, 20, 35, 0.9);
-            backdrop-filter: blur(12px);
-            padding: 20px;
-            border-right: 2px solid #e74c3c;
-            box-shadow: 5px 0 25px rgba(0,0,0,0.3);
-            overflow-y: auto;
-            z-index: 100;
-            transition: flex-basis 0.3s ease, transform 0.3s ease, padding 0.3s ease;
-        }
-        
-        /* Debug overlay to help visualize click areas */
-        #debug-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 0;
-            pointer-events: none; /* Don't interfere with canvas */
-            background: transparent;
-        }
-        
-        #controls { 
-            position: absolute; 
-            top: 20px; 
-            left: 400px; /* Initial position, will be updated by JS */
-            z-index: 100;
-            transition: left 0.3s ease;
-            pointer-events: auto; /* Ensure controls are clickable */
-        }
-        
-        button { 
-            background: linear-gradient(145deg, #2c3e50, #34495e);
-            color: #ecf0f1; 
-            border: 2px solid #3498db; 
-            padding: 12px 20px; 
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        
-        button:hover {
-            background: linear-gradient(145deg, #3498db, #2980b9);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(52, 152, 219, 0.3);
-        }
-        
-        .stats-container {
-            background: rgba(26, 26, 46, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-radius: 15px;
-            border: 2px solid #3498db;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            width: 350px;
-            text-align: center;
-        }
-        
-        .stats-title {
-            color: #3498db;
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 15px;
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .stat-row { 
-            margin: 8px 0; 
-            font-size: 14px;
+        /* The new RTS-style bottom bar */
+        #bottom-bar {
+            flex-shrink: 0; /* Prevent the bar from shrinking */
+            height: 220px; /* Adjust height as needed */
+            background: rgba(15, 20, 35, 0.95);
+            border-top: 3px solid #e74c3c;
+            box-shadow: 0 -5px 25px rgba(0,0,0,0.4);
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(52, 152, 219, 0.2);
+            padding: 10px;
+            gap: 15px;
+            z-index: 100;
+            overflow: hidden;
+        }
+
+        /* Sections within the bottom bar */
+        .bottom-bar-section {
+            background: rgba(26, 26, 46, 0.8);
+            border-radius: 10px;
+            border: 1px solid #3498db;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        #leaderboard-panel {
+            flex: 1; /* Flexible width */
         }
         
-        .stat-row:last-child {
-            border-bottom: none;
+        #summary-panel {
+            flex: 1;
+        }
+
+        #controls-panel {
+            flex: 2; /* More space for controls */
+            display: flex;
+            gap: 10px;
         }
         
-        .stat-label { 
-            color: #bdc3c7; 
-            font-weight: 500;
+        .control-column {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
-        
-        .stat-value { 
-            color: #ecf0f1; 
-            font-weight: 700;
-            background: linear-gradient(45deg, #3498db, #2980b9);
-            padding: 4px 8px;
-            border-radius: 6px;
-            min-width: 60px;
-            text-align: center;
-        }
-        
-        .q-learning-section {
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 2px solid #e74c3c;
-        }
-        
-        .q-learning-title {
-            color: #e74c3c;
+
+        .panel-title {
+            color: #3498db;
             font-size: 16px;
             font-weight: 700;
             margin-bottom: 10px;
-            text-align: center;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
-        
-        .q-stat-row {
-            margin: 6px 0;
-            font-size: 12px;
+
+        .stat-row, .robot-stat-row { 
             display: flex;
             justify-content: space-between;
             align-items: center;
             padding: 6px 0;
-            border-bottom: 1px solid rgba(231, 76, 60, 0.2);
-        }
-        
-        .q-stat-row:last-child {
-            border-bottom: none;
-        }
-        
-        .q-stat-label {
-            color: #bdc3c7;
-            font-weight: 500;
-        }
-        
-        .q-stat-value {
-            color: #ecf0f1;
-            font-weight: 600;
-            background: rgba(231, 76, 60, 0.3);
-            padding: 3px 6px;
-            border-radius: 4px;
-            min-width: 50px;
-            text-align: center;
-        }
-        
-        #robot-stats.collapsed {
-            flex-basis: 0 !important;
-            min-width: 0 !important;
-            transform: translateX(-100%);
-            padding-left: 0;
-            padding-right: 0;
-        }
-        
-        #robot-stats.collapsed > * {
-            display: none;
-        }
-        
-        #resizer {
-            position: absolute;
-            top: 0;
-            right: 0;
-            width: 8px;
-            height: 100%;
-            cursor: col-resize;
-            z-index: 102;
-        }
-
-        #collapse-toggle {
-            position: absolute;
-            top: 50%;
-            left: 380px; /* Initial position, will be updated by JS */
-            transform: translateY(-50%);
-            width: 25px;
-            height: 50px;
-            background: #e74c3c;
-            border: none;
-            color: white;
-            font-size: 20px;
-            cursor: pointer;
-            border-radius: 0 5px 5px 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 99;
-            transition: left 0.3s ease;
-        }
-        
-        #collapse-toggle .arrow {
-            display: inline-block;
-            transition: transform 0.3s ease;
-        }
-
-        #robot-stats.collapsed + #collapse-toggle .arrow {
-            transform: rotate(180deg);
-        }
-        
-        .robot-stats-title {
-            color: #e74c3c;
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 15px;
-            text-align: center;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        
-        .robot-stat { 
-            margin: 12px 0; 
-            padding: 15px; 
-            border-left: 4px solid #e74c3c;
-            background: rgba(231, 76, 60, 0.1);
-            border-radius: 8px;
-            transition: all 0.3s ease;
-        }
-        
-        .robot-stat:hover {
-            background: rgba(231, 76, 60, 0.25);
-            transform: none; /* Removed jarring hover movement */
-        }
-        
-        .robot-name {
-            color: #e74c3c;
-            font-weight: 700;
+            border-bottom: 1px solid rgba(52, 152, 219, 0.2);
             font-size: 14px;
-            margin-bottom: 8px;
-        }
-        
-        /* Leaderboard specific styling */
-        .robot-stat:nth-child(1) .robot-name {
-            color: #f39c12; /* Gold for 1st place */
-            font-size: 16px;
-        }
-        
-        .robot-stat:nth-child(2) .robot-name {
-            color: #95a5a6; /* Silver for 2nd place */
-            font-size: 15px;
-        }
-        
-        .robot-stat:nth-child(3) .robot-name {
-            color: #d35400; /* Bronze for 3rd place */
-            font-size: 15px;
-        }
-        
-        .robot-stat-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin: 4px 0;
-            font-size: 12px;
-        }
-        
-        .robot-stat-label {
-            color: #bdc3c7;
-            font-weight: 500;
-        }
-        
-        .robot-stat-value {
-            color: #ecf0f1;
-            font-weight: 600;
-            background: rgba(231, 76, 60, 0.3);
-            padding: 2px 6px;
-            border-radius: 4px;
-            min-width: 50px;
-            text-align: center;
-        }
-        
-        /* Scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        
-        ::-webkit-scrollbar-track {
-            background: rgba(52, 152, 219, 0.1);
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb {
-            background: linear-gradient(45deg, #3498db, #2980b9);
-            border-radius: 4px;
-        }
-        
-        ::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(45deg, #2980b9, #1f5f8b);
-        }
-        
-        /* Animation for stats updates */
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-        }
-        
-        .stat-value.updated {
-            animation: pulse 0.3s ease-in-out;
         }
 
-        /* New Controls Container */
-        #controls-container {
-            position: absolute;
-            bottom: 20px;
-            left: 20px;
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            pointer-events: auto; /* Ensure controls are clickable */
+        .stat-label, .robot-stat-label { color: #bdc3c7; }
+        .stat-value, .robot-stat-value {
+            color: #ecf0f1;
+            font-weight: 700;
+            background: #34495e;
+            padding: 3px 8px;
+            border-radius: 4px;
         }
-        
+
+        /* Collapsible control panels */
         .control-panel {
-            background: rgba(26, 26, 46, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 15px;
-            border-radius: 15px;
-            border: 1px solid #3498db;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-            width: 350px;
+            background: rgba(30, 40, 60, 0.9);
+            border-radius: 8px;
+            border: 1px solid #2980b9;
+            padding: 10px;
+            flex-grow: 1;
         }
 
         .control-panel-title {
             color: #3498db;
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 10px;
+            font-weight: 600;
             cursor: pointer;
             user-select: none;
         }
-
+        
         .control-panel-title::before {
             content: '▶ ';
             display: inline-block;
             transition: transform 0.2s ease-in-out;
         }
-
+        
         .control-panel.open .control-panel-title::before {
             transform: rotate(90deg);
         }
-
+        
         .control-panel-content {
-            padding: 10px;
+            padding-top: 10px;
             display: none;
         }
         
@@ -418,88 +171,54 @@ HTML_TEMPLATE = """
             display: block;
         }
         
-        .focus-indicator {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: rgba(231, 76, 60, 0.9);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 5px;
-            font-weight: bold;
-            z-index: 1000;
-            pointer-events: none; /* Don't interfere with canvas interactions */
-        }
-        
-        .leaderboard, .population-summary {
-            background: rgba(255, 255, 255, 0.1);
-            padding: 15px;
-            border-radius: 5px;
-            margin-bottom: 10px;
-        }
-        
-        .leaderboard h3, .population-summary h3 {
-            margin: 0 0 10px 0;
-            color: #ecf0f1;
-        }
-
-        .robot-stat.focused {
-            border-left-color: #f39c12; /* Gold color for focused agent */
-            background: rgba(243, 156, 18, 0.15);
-        }
+        /* Scrollbar styling for panels */
+        .bottom-bar-section::-webkit-scrollbar { width: 6px; }
+        .bottom-bar-section::-webkit-scrollbar-track { background: transparent; }
+        .bottom-bar-section::-webkit-scrollbar-thumb { background: #3498db; border-radius: 3px; }
 
     </style>
 </head>
 <body>
-    <div id="main-container">
-        <div id="robot-stats">
-            <div class="robot-stats-title">🏆 Robot Leaderboard</div>
-            <div id="robotDetails"></div>
-        </div>
-
-        <div id="resizer"></div>
-        <button id="collapse-toggle"><span class="arrow">‹</span></button>
-
+    <div id="app-container">
         <div id="canvas-wrapper">
             <canvas id="simulation-canvas"></canvas>
-            
-            <div id="top-left-overlay" class="overlay-container">
-                 <button id="resetView">Reset View</button>
+            <button id="resetView" style="position:absolute; top:10px; left:10px; z-index:50;">Reset View</button>
+            <div id="focus-indicator" style="display:none; position:absolute; top:10px; right:10px; z-index:50; background:rgba(231, 76, 60, 0.9); color:white; padding:10px 15px; border-radius:5px;">
+                🎯 Focused on Agent: <span id="focused-agent-id">-</span>
+            </div>
+        </div>
+
+        <div id="bottom-bar">
+            <!-- Section 1: Leaderboard -->
+            <div id="leaderboard-panel" class="bottom-bar-section">
+                <div class="panel-title">🏆 Leaderboard</div>
+                <div id="leaderboard-content"></div>
             </div>
 
-            <div id="top-right-overlay" class="overlay-container">
-                <div class="stats-container">
-                    <div class="leaderboard">
-                        <h3>🏆 Leaderboard</h3>
-                        <div id="leaderboard-content"></div>
-                    </div>
-                    <div class="population-summary">
-                        <h3>📊 Population Summary</h3>
-                        <div id="population-summary-content"></div>
-                    </div>
-                </div>
-                <div class="focus-indicator" id="focus-indicator" style="display: none;">
-                    <span id="focus-text">🎯 Focused on Agent: <span id="focused-agent-id">-</span></span>
-                </div>
+            <!-- Section 2: Population Summary -->
+            <div id="summary-panel" class="bottom-bar-section">
+                <div class="panel-title">📊 Population Summary</div>
+                <div id="population-summary-content"></div>
             </div>
 
-            <div id="bottom-left-overlay" class="overlay-container">
-                <div class="control-panel" id="learning-panel">
-                    <div class="control-panel-title">Learning Settings</div>
-                    <div class="control-panel-content">
-                        <!-- Sliders will be added here -->
+            <!-- Section 3: Controls -->
+            <div id="controls-panel" class="bottom-bar-section">
+                <div class="control-column">
+                    <div class="control-panel" id="learning-panel">
+                        <div class="control-panel-title">Learning Settings</div>
+                        <div class="control-panel-content"></div>
                     </div>
                 </div>
-                <div class="control-panel" id="physical-panel">
-                    <div class="control-panel-title">Physical Settings</div>
-                    <div class="control-panel-content">
-                        <!-- Sliders will be added here -->
+                <div class="control-column">
+                    <div class="control-panel" id="physical-panel">
+                        <div class="control-panel-title">Physical Settings</div>
+                        <div class="control-panel-content"></div>
                     </div>
                 </div>
-                <div class="control-panel" id="evolution-panel">
-                    <div class="control-panel-title">Evolution Settings</div>
-                    <div class="control-panel-content">
-                        <!-- Controls will be added here -->
+                <div class="control-column">
+                     <div class="control-panel" id="evolution-panel">
+                        <div class="control-panel-title">Evolution Settings</div>
+                        <div class="control-panel-content"></div>
                     </div>
                 </div>
             </div>
@@ -717,7 +436,7 @@ HTML_TEMPLATE = """
             e.preventDefault();
             const zoomFactor = 1.1;
             const newScale = e.deltaY < 0 ? cameraZoom * zoomFactor : cameraZoom / zoomFactor;
-            cameraZoom = Math.max(0.1, Math.min(5, newScale));
+            cameraZoom = Math.max(0.01, Math.min(20, newScale));
         });
 
         document.getElementById('resetView').addEventListener('click', () => {
@@ -772,19 +491,19 @@ HTML_TEMPLATE = """
         function updateStats(data) {
             if (!data) return;
 
-            // Update leaderboard and population summary
+            // Update leaderboard
             const leaderboardContent = document.getElementById('leaderboard-content');
-            const populationSummaryContent = document.getElementById('population-summary-content');
-
             if (leaderboardContent && data.leaderboard) {
                 leaderboardContent.innerHTML = data.leaderboard.map(robot => `
-                    <div class="stat-row">
-                        <span class="stat-label">${robot.name}</span>
-                        <span class="stat-value">${robot.distance.toFixed(2)}m</span>
+                    <div class="robot-stat-row" data-agent-id="${robot.id}">
+                        <span class="robot-stat-label">${robot.name}</span>
+                        <span class="robot-stat-value">${robot.distance.toFixed(2)}m</span>
                     </div>
                 `).join('');
             }
 
+            // Update population summary
+            const populationSummaryContent = document.getElementById('population-summary-content');
             if (populationSummaryContent && data.statistics) {
                  populationSummaryContent.innerHTML = `
                     <div class="stat-row">
@@ -797,38 +516,6 @@ HTML_TEMPLATE = """
                     </div>
                  `;
             }
-
-            // Update detailed robot stats in the side panel
-            const robotDetails = document.getElementById('robotDetails');
-            if (robotDetails && data.robots) {
-                robotDetails.innerHTML = data.robots.slice(0, 10).map(robot => {
-                    const qUpdates = (robot.q_updates || 0);
-                    const isFocused = robot.id === focusedAgentId;
-
-                    return `
-                        <div class="robot-stat ${isFocused ? 'focused' : ''}" data-agent-id="${robot.id}">
-                            <div class="robot-name">${robot.name} (Rank #${robot.rank || 'N/A'})</div>
-                            <div class="robot-stat-row">
-                                <span class="robot-stat-label">Distance:</span>
-                                <span class="robot-stat-value" style="color: ${getRewardColor(robot.distance || 0)};">${(robot.distance || 0).toFixed(2)}</span>
-                            </div>
-                            <div class="robot-stat-row">
-                                <span class="robot-stat-label">Position:</span>
-                                <span class="robot-stat-value">(${(robot.position.x || 0).toFixed(2)}, ${(robot.position.y || 0).toFixed(2)})</span>
-                            </div>
-                            <div class="robot-stat-row">
-                                <span class="robot-stat-label">Episode Reward:</span>
-                                <span class="robot-stat-value" style="color: ${getRewardColor(robot.episode_reward || 0)};">
-                                    ${(robot.episode_reward || 0).toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-            }
-
-            // Update focus indicator text
-            updateFocusIndicator();
         }
 
         function drawWorld(data) {
