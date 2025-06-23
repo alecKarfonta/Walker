@@ -393,7 +393,7 @@ HTML_TEMPLATE = """
                 console.log(`🎯 CLIENT: Leaderboard button clicked for agent: ${agentId}`);
 
                 // Send the click to the server to select the agent
-                fetch('/click', {
+                fetch('./click', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ agent_id: agentId })
@@ -439,7 +439,7 @@ HTML_TEMPLATE = """
             console.log(`🎯 Camera: pos(${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}), zoom: ${cameraZoom}`);
             
             // Find robot at click position
-            fetch('/get_agent_at_position', {
+            fetch('./get_agent_at_position', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -485,7 +485,7 @@ HTML_TEMPLATE = """
                         const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
                         const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
                         
-                        fetch('/move_agent', {
+                        fetch('./move_agent', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -518,7 +518,7 @@ HTML_TEMPLATE = """
 
             if (!isDragging && !isDraggingRobot && timeDiff < CLICK_TIME_THRESHOLD && distance < CLICK_THRESHOLD) {
                 // This is a click, not a drag. We use the robot ID found during mousedown.
-                fetch('/click', {
+                fetch('./click', {
                      method: 'POST',
                      headers: { 'Content-Type': 'application/json' },
                      body: JSON.stringify({ agent_id: mouseDownRobotId }) // Send ID directly
@@ -563,7 +563,7 @@ HTML_TEMPLATE = """
             cameraZoom = Math.max(0.01, Math.min(20, newScale));
             
             // Send zoom update to backend (backend will track that user manually zoomed)
-            fetch('/update_zoom', {
+            fetch('./update_zoom', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ zoom: cameraZoom })
@@ -582,7 +582,7 @@ HTML_TEMPLATE = """
             cameraZoom = 1.0;
 
             // Tell backend to reset zoom preferences and focus
-            fetch('/reset_view', {
+            fetch('./reset_view', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             })
@@ -655,7 +655,7 @@ HTML_TEMPLATE = """
                 cameraZoom = data.camera.zoom_override;
                 
                 // Tell backend we've applied the zoom override
-                fetch('/clear_zoom_override', {
+                fetch('./clear_zoom_override', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 })
@@ -863,7 +863,7 @@ HTML_TEMPLATE = """
         }
 
         function fetchData() {
-            fetch('/status')
+            fetch('./status')  // Use relative path
                 .then(response => response.json())
                 .then(data => {
                     window.lastData = data; // Store latest data globally
@@ -961,7 +961,7 @@ HTML_TEMPLATE = """
             }
             
             try {
-                await fetch('/update_agent_params', {
+                await fetch('./update_agent_params', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(params)
@@ -1067,18 +1067,22 @@ class TrainingEnvironment:
         self.thread = None
         self.episode_length = 12000  # 200 seconds at 60 Hz - much longer to prevent constant resets
         
-        # Add thread safety for Box2D operations
+        # Enhanced thread safety for Box2D operations
         import threading
-        self._physics_lock = threading.Lock()
+        self._physics_lock = threading.RLock()  # Use RLock for re-entrant locking
+        self._evolution_lock = threading.Lock()  # Separate lock for evolution state
+        self._is_evolving = False  # Flag to prevent concurrent evolution
+        self._agents_pending_destruction = []  # Safe destruction queue
         
         # Statistics update timing
         self.stats_update_interval = 1.0
         self.last_stats_update = 0
         
-        # Evolution timing
+        # Evolution timing with safety
         self.evolution_interval = 180.0  # 3 minutes between generations
         self.last_evolution_time = time.time()
         self.auto_evolution_enabled = True
+        self._evolution_requested = False  # Flag for requested evolution
         
         # Settle the world
         for _ in range(10):
@@ -1128,66 +1132,213 @@ class TrainingEnvironment:
         print(f"🔧 Ground setup complete with width {ground_width} for {self.num_agents} agents.")
 
     def _update_statistics(self):
-        """Update population statistics."""
+        """Update population statistics with enhanced safety checks."""
         if not self.agents:
             return
         
         # Use agent ID as key instead of list index to avoid evolution issues
         for agent in self.agents:
+            # Skip destroyed agents or agents without bodies
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
             agent_id = agent.id
-            if agent_id not in self.robot_stats:
-                self.robot_stats[agent_id] = {
-                    'id': agent.id,
-                    'current_position': tuple(agent.body.position),
-                    'velocity': tuple(agent.body.linearVelocity),
-                    'arm_angles': {'shoulder': agent.upper_arm.angle, 'elbow': agent.lower_arm.angle},
-                    'steps_alive': 0,
-                    'total_distance': 0.0,
-                    'fitness': 0.0,
-                    'q_updates': 0,
-                    'episode_reward': 0.0,
-                    # Add any other keys you use elsewhere here
-                }
-            # Now update all stats as usual
-            self.robot_stats[agent_id]['current_position'] = tuple(agent.body.position)
-            self.robot_stats[agent_id]['velocity'] = tuple(agent.body.linearVelocity)
-            self.robot_stats[agent_id]['arm_angles']['shoulder'] = agent.upper_arm.angle
-            self.robot_stats[agent_id]['arm_angles']['elbow'] = agent.lower_arm.angle
-            self.robot_stats[agent_id]['steps_alive'] += 1
-            self.robot_stats[agent_id]['total_distance'] = agent.body.position.x - agent.initial_position[0]
-            self.robot_stats[agent_id]['fitness'] = self.robot_stats[agent_id]['total_distance']
-            self.robot_stats[agent_id]['episode_reward'] = agent.total_reward
-            self.robot_stats[agent_id]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
-            self.robot_stats[agent_id]['action_history'] = agent.action_history
+            
+            # Safety check for all body parts before accessing
+            try:
+                # Get safe positions and angles with fallbacks
+                current_position = tuple(agent.body.position) if agent.body else (0, 0)
+                current_velocity = tuple(agent.body.linearVelocity) if agent.body else (0, 0)
+                shoulder_angle = agent.upper_arm.angle if agent.upper_arm else 0.0
+                elbow_angle = agent.lower_arm.angle if agent.lower_arm else 0.0
+                total_distance = (agent.body.position.x - agent.initial_position[0]) if agent.body else 0.0
+                
+                if agent_id not in self.robot_stats:
+                    self.robot_stats[agent_id] = {
+                        'id': agent.id,
+                        'current_position': current_position,
+                        'velocity': current_velocity,
+                        'arm_angles': {'shoulder': shoulder_angle, 'elbow': elbow_angle},
+                        'steps_alive': 0,
+                        'total_distance': total_distance,
+                        'fitness': 0.0,
+                        'q_updates': 0,
+                        'episode_reward': 0.0,
+                        'action_history': []
+                    }
+                
+                # Update all stats with safety checks
+                self.robot_stats[agent_id]['current_position'] = current_position
+                self.robot_stats[agent_id]['velocity'] = current_velocity
+                self.robot_stats[agent_id]['arm_angles']['shoulder'] = shoulder_angle
+                self.robot_stats[agent_id]['arm_angles']['elbow'] = elbow_angle
+                self.robot_stats[agent_id]['steps_alive'] += 1
+                self.robot_stats[agent_id]['total_distance'] = total_distance
+                self.robot_stats[agent_id]['fitness'] = total_distance
+                self.robot_stats[agent_id]['episode_reward'] = getattr(agent, 'total_reward', 0.0)
+                self.robot_stats[agent_id]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
+                self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
+                
+            except Exception as e:
+                print(f"⚠️  Error updating stats for agent {agent_id}: {e}")
+                # Remove the problematic agent from stats
+                if agent_id in self.robot_stats:
+                    del self.robot_stats[agent_id]
         
-        # Update population statistics
+        # Update population statistics with safety checks
         if self.robot_stats:
-            distances = [stats['total_distance'] for stats in self.robot_stats.values()]
-            fitnesses = [agent.get_evolutionary_fitness() for agent in self.agents]
-            
-            # Get evolution summary
-            evolution_summary = self.evolution_engine.get_evolution_summary()
-            
-            self.population_stats = {
-                'generation': evolution_summary['generation'],
-                'best_distance': max(distances),
-                'average_distance': sum(distances) / len(distances),
-                'worst_distance': min(distances),
-                'best_fitness': max(fitnesses) if fitnesses else 0,
-                'average_fitness': sum(fitnesses) / len(fitnesses) if fitnesses else 0,
-                'diversity': evolution_summary['diversity'],
-                'total_agents': len(self.robot_stats),
-                'species_count': evolution_summary.get('species_count', 1),
-                'hall_of_fame_size': evolution_summary.get('hall_of_fame_size', 0),
-                'mutation_rate': evolution_summary['mutation_rate'],
-                'q_learning_stats': {
-                    'avg_epsilon': sum(agent.epsilon for agent in self.agents) / len(self.agents),
-                    'total_q_updates': sum(stats['q_updates'] for stats in self.robot_stats.values())
+            try:
+                distances = [stats['total_distance'] for stats in self.robot_stats.values() if 'total_distance' in stats]
+                
+                # Get fitnesses only from agents that are not destroyed and have bodies
+                valid_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False) and agent.body]
+                fitnesses = []
+                for agent in valid_agents:
+                    try:
+                        fitness = agent.get_evolutionary_fitness()
+                        fitnesses.append(fitness)
+                    except Exception as e:
+                        print(f"⚠️  Error getting fitness for agent {agent.id}: {e}")
+                
+                # Get evolution summary
+                evolution_summary = self.evolution_engine.get_evolution_summary()
+                
+                # Calculate safe statistics
+                avg_distance = sum(distances) / len(distances) if distances else 0
+                best_distance = max(distances) if distances else 0
+                worst_distance = min(distances) if distances else 0
+                
+                avg_fitness = sum(fitnesses) / len(fitnesses) if fitnesses else 0
+                best_fitness = max(fitnesses) if fitnesses else 0
+                
+                # Calculate epsilon only from valid agents
+                valid_epsilons = []
+                for agent in valid_agents:
+                    try:
+                        if hasattr(agent, 'epsilon'):
+                            valid_epsilons.append(agent.epsilon)
+                    except:
+                        pass
+                avg_epsilon = sum(valid_epsilons) / len(valid_epsilons) if valid_epsilons else 0
+                
+                self.population_stats = {
+                    'generation': evolution_summary['generation'],
+                    'best_distance': best_distance,
+                    'average_distance': avg_distance,
+                    'worst_distance': worst_distance,
+                    'best_fitness': best_fitness,
+                    'average_fitness': avg_fitness,
+                    'diversity': evolution_summary['diversity'],
+                    'total_agents': len(self.robot_stats),
+                    'species_count': evolution_summary.get('species_count', 1),
+                    'hall_of_fame_size': evolution_summary.get('hall_of_fame_size', 0),
+                    'mutation_rate': evolution_summary['mutation_rate'],
+                    'q_learning_stats': {
+                        'avg_epsilon': avg_epsilon,
+                        'total_q_updates': sum(stats.get('q_updates', 0) for stats in self.robot_stats.values())
+                    }
                 }
-            }
+                
+            except Exception as e:
+                print(f"⚠️  Error updating population statistics: {e}")
+                # Fallback to minimal stats
+                self.population_stats = {
+                    'generation': 1,
+                    'best_distance': 0,
+                    'average_distance': 0,
+                    'worst_distance': 0,
+                    'best_fitness': 0,
+                    'average_fitness': 0,
+                    'diversity': 0,
+                    'total_agents': len(self.agents),
+                    'species_count': 1,
+                    'hall_of_fame_size': 0,
+                    'mutation_rate': 0.1,
+                    'q_learning_stats': {
+                        'avg_epsilon': 0.3,
+                        'total_q_updates': 0
+                    }
+                }
+
+    def _safe_destroy_agent(self, agent):
+        """Safely destroy an agent with proper error handling."""
+        if not agent or getattr(agent, '_destroyed', False):
+            return  # Already destroyed
+            
+        try:
+            # Mark as destroyed first to prevent further operations
+            agent._destroyed = True
+            
+            # Disable all motors to prevent issues during destruction
+            if hasattr(agent, 'upper_arm_joint') and agent.upper_arm_joint:
+                try:
+                    agent.upper_arm_joint.enableMotor = False
+                    agent.upper_arm_joint.motorSpeed = 0
+                except:
+                    pass
+                    
+            if hasattr(agent, 'lower_arm_joint') and agent.lower_arm_joint:
+                try:
+                    agent.lower_arm_joint.enableMotor = False  
+                    agent.lower_arm_joint.motorSpeed = 0
+                except:
+                    pass
+            
+            # Clear all references to Box2D objects before destruction
+            bodies_to_destroy = []
+            
+            # Collect all bodies
+            if hasattr(agent, 'wheels') and agent.wheels:
+                bodies_to_destroy.extend([w for w in agent.wheels if w])
+            if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                bodies_to_destroy.append(agent.lower_arm)
+            if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                bodies_to_destroy.append(agent.upper_arm)
+            if hasattr(agent, 'body') and agent.body:
+                bodies_to_destroy.append(agent.body)
+            
+            # Destroy bodies (Box2D automatically destroys associated joints)
+            for body in bodies_to_destroy:
+                if body:
+                    try:
+                        self.world.DestroyBody(body)
+                    except Exception as e:
+                        print(f"⚠️  Error destroying body for agent {agent.id}: {e}")
+            
+            # Clear references to prevent access to destroyed objects
+            agent.wheels = []
+            agent.upper_arm = None
+            agent.lower_arm = None
+            agent.body = None
+            agent.upper_arm_joint = None
+            agent.lower_arm_joint = None
+            agent.wheel_joints = []
+            
+            print(f"✅ Successfully destroyed agent {agent.id}")
+            
+        except Exception as e:
+            print(f"❌ Critical error destroying agent {getattr(agent, 'id', 'unknown')}: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _process_destruction_queue(self):
+        """Process pending agent destructions safely."""
+        if not self._agents_pending_destruction:
+            return
+            
+        with self._physics_lock:
+            try:
+                agents_to_process = self._agents_pending_destruction.copy()
+                self._agents_pending_destruction.clear()
+                
+                for agent in agents_to_process:
+                    self._safe_destroy_agent(agent)
+                    
+            except Exception as e:
+                print(f"❌ Error processing destruction queue: {e}")
 
     def training_loop(self):
-        """Main simulation loop."""
+        """Main simulation loop with enhanced safety."""
         self.is_running = True
         
         # Timing parameters for a fixed-step loop
@@ -1211,33 +1362,58 @@ class TrainingEnvironment:
             # Add frame time to the accumulator
             accumulator += frame_time
             
-            # Fixed-step physics updates with thread safety
+            # Fixed-step physics updates with enhanced thread safety
             while accumulator >= self.dt:
-                with self._physics_lock:  # Protect Box2D operations
-                    # Step the physics world
-                    self.world.Step(self.dt, 8, 3)
-                    
-                    # Update all agents
-                    agents_to_reset = []
-                    for agent in self.agents:
-                        agent.step(self.dt)
+                with self._physics_lock:  # Protect ALL Box2D operations
+                    try:
+                        # Process any pending destructions first
+                        self._process_destruction_queue()
+                        
+                        # Step the physics world only if not evolving
+                        if not self._is_evolving:
+                            self.world.Step(self.dt, 8, 3)
+                            
+                            # Update all agents (copy list to avoid iteration issues)
+                            current_agents = self.agents.copy()
+                            agents_to_reset = []
+                            
+                            for agent in current_agents:
+                                # Skip destroyed agents or agents without bodies
+                                if getattr(agent, '_destroyed', False) or not agent.body:
+                                    continue
+                                    
+                                try:
+                                    agent.step(self.dt)
 
-                        # Check for reset conditions but don't reset immediately
-                        if agent.body.position.y < self.world_bounds_y:
-                            agents_to_reset.append(('world_bounds', agent))
-                        elif agent.steps >= self.episode_length:
-                            agents_to_reset.append(('episode_end', agent))
-                    
-                    # Process resets after physics step to avoid corruption
-                    for reset_type, agent in agents_to_reset:
-                        try:
-                            if reset_type == 'world_bounds':
-                                agent.reset_position()
-                            elif reset_type == 'episode_end':
-                                agent.reset()  # preserves Q-table
-                                agent.reset_position()
-                        except Exception as e:
-                            print(f"⚠️  Error resetting agent {agent.id}: {e}")
+                                    # Check for reset conditions but don't reset immediately
+                                    if agent.body and agent.body.position.y < self.world_bounds_y:
+                                        agents_to_reset.append(('world_bounds', agent))
+                                    elif agent.steps >= self.episode_length:
+                                        agents_to_reset.append(('episode_end', agent))
+                                except Exception as e:
+                                    print(f"⚠️  Error updating agent {agent.id}: {e}")
+                                    # Mark problematic agent as destroyed to prevent further issues
+                                    if not getattr(agent, '_destroyed', False):
+                                        agent._destroyed = True
+                            
+                            # Process resets after physics step to avoid corruption
+                            for reset_type, agent in agents_to_reset:
+                                if getattr(agent, '_destroyed', False):
+                                    continue  # Skip destroyed agents
+                                    
+                                try:
+                                    if reset_type == 'world_bounds':
+                                        agent.reset_position()
+                                    elif reset_type == 'episode_end':
+                                        agent.reset()  # preserves Q-table
+                                        agent.reset_position()
+                                except Exception as e:
+                                    print(f"⚠️  Error resetting agent {agent.id}: {e}")
+                                    
+                    except Exception as e:
+                        print(f"❌ Critical error in physics loop: {e}")
+                        import traceback
+                        traceback.print_exc()
                 
                 # Decrement accumulator
                 accumulator -= self.dt
@@ -1255,49 +1431,46 @@ class TrainingEnvironment:
                 self.perform_periodic_learning()
                 self.last_learning_time = current_time
             
-            # Check for automatic evolution
+            # Check for automatic evolution (with safety)
             if (self.auto_evolution_enabled and 
-                current_time - self.last_evolution_time >= self.evolution_interval):
-                self.trigger_evolution()
+                current_time - self.last_evolution_time >= self.evolution_interval and
+                not self._is_evolving):
+                self._evolution_requested = True
                 self.last_evolution_time = current_time
+            
+            # Process evolution request if safe
+            if self._evolution_requested and not self._is_evolving:
+                self._evolution_requested = False
+                try:
+                    self.trigger_evolution()
+                except Exception as e:
+                    print(f"❌ Evolution failed: {e}")
+                    import traceback
+                    traceback.print_exc()
             
             # Memory monitoring
             if current_time - last_debug_time > 30.0:  # Every 30 seconds
-                import psutil
-                import os
-                process = psutil.Process(os.getpid())
-                memory_mb = process.memory_info().rss / 1024 / 1024
-                print(f"🔍 Memory usage: {memory_mb:.1f} MB")
+                try:
+                    import psutil
+                    import os
+                    process = psutil.Process(os.getpid())
+                    memory_mb = process.memory_info().rss / 1024 / 1024
+                    print(f"🔍 Memory usage: {memory_mb:.1f} MB")
+                except:
+                    pass
             
             if current_time - last_debug_time > 10.0:
                 print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active")
                 if self.agents:
                     # Debug output for the first agent
-                    first_agent = self.agents[0]
-                    print(f"   Agent 0: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
-                          f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
-                          f"reward={first_agent.total_reward:.2f}")
-                    print(f"   Agent 0: action={first_agent.current_action_tuple}, "
-                          f"state={first_agent.current_state}, "
-                          f"steps={first_agent.steps}")
-                    
-                    # Add arm angle debugging
-                    shoulder_angle_deg = np.degrees(first_agent.upper_arm.angle)
-                    elbow_angle_deg = np.degrees(first_agent.lower_arm.angle)
-                    print(f"   Agent 0 Arms: shoulder={shoulder_angle_deg:.1f}°, elbow={elbow_angle_deg:.1f}°")
-                    print(f"   Agent 0 Arm positions: upper=({first_agent.upper_arm.position.x:.2f}, {first_agent.upper_arm.position.y:.2f}), "
-                          f"lower=({first_agent.lower_arm.position.x:.2f}, {first_agent.lower_arm.position.y:.2f})")
-                    
-                    # Check if we're hitting joint limits
-                    shoulder_at_limit = abs(first_agent.upper_arm.angle) >= np.pi/2 * 0.9  # Within 10% of ±90° limit
-                    elbow_at_limit = (first_agent.lower_arm.angle <= 0.1 or first_agent.lower_arm.angle >= 3*np.pi/4 * 0.9)
-                    if shoulder_at_limit or elbow_at_limit:
-                        limits = []
-                        if shoulder_at_limit:
-                            limits.append(f"shoulder (±90°)")
-                        if elbow_at_limit:
-                            limits.append(f"elbow (0-135°)")
-                        print(f"   ⚠️  Agent 0: Joint limits reached: {', '.join(limits)}")
+                    try:
+                        first_agent = self.agents[0]
+                        if not getattr(first_agent, '_destroyed', False) and first_agent.body:
+                            print(f"   Agent 0: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
+                                  f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
+                                  f"reward={first_agent.total_reward:.2f}")
+                    except Exception as e:
+                        print(f"⚠️  Error in debug output: {e}")
                         
                 last_debug_time = current_time
             
@@ -1305,155 +1478,243 @@ class TrainingEnvironment:
             time.sleep(max(0, self.dt - (time.time() - current_time)))
 
     def update_agent_params(self, params, target_agent_id=None):
-        """Update parameters for specific agent or all agents."""
+        """Update parameters for specific agent or all agents with safety checks."""
         if target_agent_id is not None:
             # Update only the focused agent
-            target_agent = next((agent for agent in self.agents if agent.id == target_agent_id), None)
+            target_agent = next((agent for agent in self.agents 
+                               if agent.id == target_agent_id and not getattr(agent, '_destroyed', False)), None)
             if not target_agent:
-                print(f"❌ Agent {target_agent_id} not found")
+                print(f"❌ Agent {target_agent_id} not found or destroyed")
                 return False
             
             agents_to_update = [target_agent]
         else:
-            # Update all agents
-            agents_to_update = self.agents
+            # Update all valid agents
+            agents_to_update = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
         
         for agent in agents_to_update:
-            for key, value in params.items():
-                # Handle special physical properties
-                if key == 'friction':
-                    for part in [agent.body, agent.upper_arm, agent.lower_arm] + agent.wheels:
-                        for fixture in part.fixtures:
-                            fixture.friction = value
-                elif key == 'density':
-                    for part in [agent.body, agent.upper_arm, agent.lower_arm] + agent.wheels:
-                        for fixture in part.fixtures:
-                            fixture.density = value
-                    # Important: must call ResetMassData after changing density
-                    agent.body.ResetMassData()
-                    agent.upper_arm.ResetMassData()
-                    agent.lower_arm.ResetMassData()
-                    for wheel in agent.wheels:
-                        wheel.ResetMassData()
-                elif key == 'linear_damping':
-                     for part in [agent.body, agent.upper_arm, agent.lower_arm] + agent.wheels:
-                        part.linearDamping = value
-                # Handle generic agent attributes
-                elif hasattr(agent, key):
-                    setattr(agent, key, value)
+            # Skip agents without bodies
+            if not agent.body:
+                continue
+                
+            try:
+                for key, value in params.items():
+                    # Handle special physical properties with safety checks
+                    if key == 'friction':
+                        # Get all valid parts
+                        parts = [p for p in [agent.body, agent.upper_arm, agent.lower_arm] + (agent.wheels or []) if p]
+                        for part in parts:
+                            try:
+                                for fixture in part.fixtures:
+                                    fixture.friction = value
+                            except Exception as e:
+                                print(f"⚠️  Error setting friction for agent {agent.id}: {e}")
+                                
+                    elif key == 'density':
+                        # Get all valid parts
+                        parts = [p for p in [agent.body, agent.upper_arm, agent.lower_arm] + (agent.wheels or []) if p]
+                        for part in parts:
+                            try:
+                                for fixture in part.fixtures:
+                                    fixture.density = value
+                            except Exception as e:
+                                print(f"⚠️  Error setting density for agent {agent.id}: {e}")
+                        
+                        # Reset mass data for all valid parts
+                        try:
+                            if agent.body:
+                                agent.body.ResetMassData()
+                            if agent.upper_arm:
+                                agent.upper_arm.ResetMassData()
+                            if agent.lower_arm:
+                                agent.lower_arm.ResetMassData()
+                            for wheel in (agent.wheels or []):
+                                if wheel:
+                                    wheel.ResetMassData()
+                        except Exception as e:
+                            print(f"⚠️  Error resetting mass data for agent {agent.id}: {e}")
+                            
+                    elif key == 'linear_damping':
+                        # Get all valid parts
+                        parts = [p for p in [agent.body, agent.upper_arm, agent.lower_arm] + (agent.wheels or []) if p]
+                        for part in parts:
+                            try:
+                                part.linearDamping = value
+                            except Exception as e:
+                                print(f"⚠️  Error setting linear damping for agent {agent.id}: {e}")
+                                
+                    # Handle generic agent attributes
+                    elif hasattr(agent, key):
+                        setattr(agent, key, value)
+                        
+            except Exception as e:
+                print(f"⚠️  Error updating parameters for agent {agent.id}: {e}")
         
         target_desc = f"agent {target_agent_id}" if target_agent_id else "all agents"
         print(f"✅ Updated {target_desc} parameters: {params}")
         return True
 
     def get_status(self):
-        """Returns the current state of the simulation for rendering."""
+        """Returns the current state of the simulation for rendering with enhanced safety."""
         if not self.is_running:
             return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
-        # 1. Get agent shapes for drawing
-        robot_shapes = []
-        for agent in self.agents:
-            body_parts = []
-            # Chassis, Arms, Wheels
-            for part in [agent.body] + agent.wheels + [agent.upper_arm, agent.lower_arm]:
-                 for fixture in part.fixtures:
-                    shape = fixture.shape
-                    if isinstance(shape, b2.b2PolygonShape):
-                        body_parts.append({
-                            'type': 'polygon',
-                            'vertices': [tuple(part.GetWorldPoint(v)) for v in shape.vertices]
-                        })
-                    elif isinstance(shape, b2.b2CircleShape):
-                         body_parts.append({
-                            'type': 'circle',
-                            'center': tuple(part.GetWorldPoint(shape.pos)),
-                            'radius': shape.radius
-                        })
-            robot_shapes.append({'id': agent.id, 'body_parts': body_parts})
+        # Use a read lock to safely access agents
+        with self._physics_lock:
+            try:
+                # Create a safe copy of agents list
+                current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
+                
+                # 1. Get agent shapes for drawing
+                robot_shapes = []
+                for agent in current_agents:
+                    try:
+                        if not agent.body:  # Skip agents without bodies
+                            continue
+                            
+                        body_parts = []
+                        # Chassis, Arms, Wheels
+                        body_list = [agent.body] + (agent.wheels or [])
+                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                            body_list.append(agent.upper_arm)
+                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                            body_list.append(agent.lower_arm)
+                            
+                        for part in body_list:
+                            if not part:  # Skip None bodies
+                                continue
+                                
+                            try:
+                                for fixture in part.fixtures:
+                                    shape = fixture.shape
+                                    if isinstance(shape, b2.b2PolygonShape):
+                                        body_parts.append({
+                                            'type': 'polygon',
+                                            'vertices': [tuple(part.GetWorldPoint(v)) for v in shape.vertices]
+                                        })
+                                    elif isinstance(shape, b2.b2CircleShape):
+                                        body_parts.append({
+                                            'type': 'circle',
+                                            'center': tuple(part.GetWorldPoint(shape.pos)),
+                                            'radius': shape.radius
+                                        })
+                            except Exception as e:
+                                print(f"⚠️  Error getting shape data for agent {agent.id}: {e}")
+                                
+                        if body_parts:  # Only add if we have valid parts
+                            robot_shapes.append({'id': agent.id, 'body_parts': body_parts})
+                            
+                    except Exception as e:
+                        print(f"⚠️  Error processing agent {agent.id} for rendering: {e}")
 
-        # 2. Get ground shapes for drawing
-        ground_shapes = []
-        for body in self.world.bodies:
-            if body.type == b2.b2_staticBody:
-                for fixture in body.fixtures:
-                    shape = fixture.shape
-                    if isinstance(shape, b2.b2PolygonShape):
-                        ground_shapes.append({
-                            'type': 'polygon',
-                            'vertices': [tuple(body.GetWorldPoint(v)) for v in shape.vertices]
-                        })
-        
-        # 3. Get leaderboard data (top 10 robots)
-        sorted_robots = sorted(self.robot_stats.values(), key=lambda r: r.get('total_distance', 0), reverse=True)
-        leaderboard_data = [
-            {'id': r['id'], 'name': f"Robot {r['id']}", 'distance': r.get('total_distance', 0)}
-            for r in sorted_robots[:10]
-        ]
-        
-        # 4. Get detailed stats for side panel (top 10)
-        robot_details = []
-        for i, r_stat in enumerate(sorted_robots[:10]):
-            # Find agent by ID instead of assuming ID matches list index
-            agent = next((a for a in self.agents if a.id == r_stat['id']), None)
-            if agent:
-                robot_details.append({
-                    'id': r_stat['id'],
-                    'name': f"Robot {r_stat['id']}",
-                    'rank': i + 1,
-                    'distance': r_stat.get('total_distance', 0),
-                    'position': r_stat.get('current_position', (0,0)),
-                    'episode_reward': r_stat.get('episode_reward', 0)
-                })
+                # 2. Get ground shapes for drawing
+                ground_shapes = []
+                try:
+                    for body in self.world.bodies:
+                        if body.type == b2.b2_staticBody:
+                            for fixture in body.fixtures:
+                                shape = fixture.shape
+                                if isinstance(shape, b2.b2PolygonShape):
+                                    ground_shapes.append({
+                                        'type': 'polygon',
+                                        'vertices': [tuple(body.GetWorldPoint(v)) for v in shape.vertices]
+                                    })
+                except Exception as e:
+                    print(f"⚠️  Error getting ground shapes: {e}")
+                
+                # 3. Get leaderboard data (top 10 robots) - safely
+                try:
+                    valid_stats = {k: v for k, v in self.robot_stats.items() 
+                                  if k in {agent.id for agent in current_agents}}
+                    sorted_robots = sorted(valid_stats.values(), 
+                                         key=lambda r: r.get('total_distance', 0), reverse=True)
+                    leaderboard_data = [
+                        {'id': r['id'], 'name': f"Robot {r['id']}", 'distance': r.get('total_distance', 0)}
+                        for r in sorted_robots[:10]
+                    ]
+                except Exception as e:
+                    print(f"⚠️  Error creating leaderboard: {e}")
+                    leaderboard_data = []
+                
+                # 4. Get detailed stats for side panel (top 10)
+                robot_details = []
+                try:
+                    for i, r_stat in enumerate(sorted_robots[:10]):
+                        # Find agent by ID instead of assuming ID matches list index
+                        agent = next((a for a in current_agents if a.id == r_stat['id']), None)
+                        if agent:
+                            robot_details.append({
+                                'id': r_stat['id'],
+                                'name': f"Robot {r_stat['id']}",
+                                'rank': i + 1,
+                                'distance': r_stat.get('total_distance', 0),
+                                'position': r_stat.get('current_position', (0,0)),
+                                'episode_reward': r_stat.get('episode_reward', 0)
+                            })
+                except Exception as e:
+                    print(f"⚠️  Error creating robot details: {e}")
+                    robot_details = []
 
-        # 5. Get full agent data for robot details panel
-        agents_data = []
-        for agent in self.agents:
-            agent_data = {
-                'id': agent.id,
-                'body': {
-                    'x': convert_numpy_types(agent.body.position.x),
-                    'y': convert_numpy_types(agent.body.position.y),
-                    'velocity': {
-                        'x': convert_numpy_types(agent.body.linearVelocity.x),
-                        'y': convert_numpy_types(agent.body.linearVelocity.y)
-                    }
-                },
-                'upper_arm': {
-                    'x': convert_numpy_types(agent.upper_arm.position.x),
-                    'y': convert_numpy_types(agent.upper_arm.position.y)
-                },
-                'lower_arm': {
-                    'x': convert_numpy_types(agent.lower_arm.position.x),
-                    'y': convert_numpy_types(agent.lower_arm.position.y)
-                },
-                'total_reward': convert_numpy_types(agent.total_reward),
-                'steps': convert_numpy_types(agent.steps),
-                'current_action': convert_numpy_types(agent.current_action_tuple),
-                'state': convert_numpy_types(agent.current_state),
-                'q_table': convert_numpy_types(agent.q_table.q_values if hasattr(agent.q_table, 'q_values') else {}),
-                'action_history': convert_numpy_types(agent.action_history),
-                'best_reward': convert_numpy_types(getattr(agent, 'best_reward_received', 0.0)),
-                'worst_reward': convert_numpy_types(getattr(agent, 'worst_reward_received', 0.0)),
-                'awake': agent.body.awake
-            }
-            agents_data.append(agent_data)
+                # 5. Get full agent data for robot details panel
+                agents_data = []
+                try:
+                    for agent in current_agents:
+                        if not agent.body:  # Skip agents without bodies
+                            continue
+                            
+                        agent_data = {
+                            'id': agent.id,
+                            'body': {
+                                'x': convert_numpy_types(agent.body.position.x),
+                                'y': convert_numpy_types(agent.body.position.y),
+                                'velocity': {
+                                    'x': convert_numpy_types(agent.body.linearVelocity.x),
+                                    'y': convert_numpy_types(agent.body.linearVelocity.y)
+                                }
+                            },
+                            'upper_arm': {
+                                'x': convert_numpy_types(agent.upper_arm.position.x) if agent.upper_arm else 0,
+                                'y': convert_numpy_types(agent.upper_arm.position.y) if agent.upper_arm else 0
+                            },
+                            'lower_arm': {
+                                'x': convert_numpy_types(agent.lower_arm.position.x) if agent.lower_arm else 0,
+                                'y': convert_numpy_types(agent.lower_arm.position.y) if agent.lower_arm else 0
+                            },
+                            'total_reward': convert_numpy_types(agent.total_reward),
+                            'steps': convert_numpy_types(agent.steps),
+                            'current_action': convert_numpy_types(agent.current_action_tuple),
+                            'state': convert_numpy_types(agent.current_state),
+                            'q_table': convert_numpy_types(agent.q_table.q_values if hasattr(agent.q_table, 'q_values') else {}),
+                            'action_history': convert_numpy_types(agent.action_history),
+                            'best_reward': convert_numpy_types(getattr(agent, 'best_reward_received', 0.0)),
+                            'worst_reward': convert_numpy_types(getattr(agent, 'worst_reward_received', 0.0)),
+                            'awake': agent.body.awake if agent.body else False
+                        }
+                        agents_data.append(agent_data)
+                except Exception as e:
+                    print(f"⚠️  Error creating agents data: {e}")
+                    agents_data = []
 
-        # 6. Get focused agent ID
-        focused_agent_id = self.focused_agent.id if self.focused_agent else None
-        
-        if self.step_count % 600 == 0: # Log every 10 seconds or so
-            print(f"DEBUG: get_status returning focused_agent_id: {focused_agent_id}")
+                # 6. Get focused agent ID safely
+                focused_agent_id = None
+                if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
+                    focused_agent_id = self.focused_agent.id
 
-        return {
-            'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
-            'leaderboard': leaderboard_data,
-            'robots': robot_details,
-            'agents': agents_data,
-            'statistics': self.population_stats,
-            'camera': self.get_camera_state(),
-            'focused_agent_id': focused_agent_id
-        }
+                return {
+                    'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
+                    'leaderboard': leaderboard_data,
+                    'robots': robot_details,
+                    'agents': agents_data,
+                    'statistics': self.population_stats,
+                    'camera': self.get_camera_state(),
+                    'focused_agent_id': focused_agent_id
+                }
+                
+            except Exception as e:
+                print(f"❌ Critical error in get_status: {e}")
+                import traceback
+                traceback.print_exc()
+                return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
     def start(self):
         """Starts the training loop in a separate thread."""
@@ -1481,7 +1742,7 @@ class TrainingEnvironment:
         return max(self.agents, key=lambda agent: agent.get_evolutionary_fitness())
     
     def find_leader(self):
-        """Find the robot with the best performance (highest distance traveled)."""
+        """Find the robot with the best performance (highest distance traveled) with safety checks."""
         if not self.agents:
             return None
         
@@ -1489,27 +1750,48 @@ class TrainingEnvironment:
         leader = None
         
         for agent in self.agents:
-            distance = agent.body.position.x - agent.initial_position[0]
-            if distance > best_distance:
-                best_distance = distance
-                leader = agent
+            # Skip destroyed agents or agents without bodies
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
+            try:
+                distance = agent.body.position.x - agent.initial_position[0]
+                if distance > best_distance:
+                    best_distance = distance
+                    leader = agent
+            except Exception as e:
+                print(f"⚠️  Error calculating distance for agent {agent.id}: {e}")
+                continue
         
         return leader
     
     def perform_periodic_learning(self):
-        """Make all robots learn from the best performing robot."""
+        """Make all robots learn from the best performing robot with safety checks."""
         leader = self.find_leader()
         if not leader:
             print("⚠️ No leader found for periodic learning")
+            return
+        
+        # Double-check leader has valid body before proceeding
+        if not leader.body:
+            print("⚠️ Leader has no body, skipping periodic learning")
             return
         
         # Count how many agents actually learned
         learning_count = 0
         
         print(f"🎓 === PERIODIC LEARNING EVENT ===")
-        print(f"🏆 Leader: Robot {leader.id} (Distance: {leader.body.position.x - leader.initial_position[0]:.2f})")
         
-        for agent in self.agents:
+        try:
+            leader_distance = leader.body.position.x - leader.initial_position[0]
+            print(f"🏆 Leader: Robot {leader.id} (Distance: {leader_distance:.2f})")
+        except Exception as e:
+            print(f"🏆 Leader: Robot {leader.id} (Distance calculation failed: {e})")
+        
+        # Only include valid agents in learning
+        valid_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
+        
+        for agent in valid_agents:
             if agent == leader:
                 continue  # Leader doesn't learn from itself
             
@@ -1529,7 +1811,14 @@ class TrainingEnvironment:
         print()  # Add spacing for readability
 
     def trigger_evolution(self):
-        """Trigger evolutionary generation advancement with robust cleanup."""
+        """Trigger evolutionary generation advancement with comprehensive safety."""
+        # Check if evolution is already in progress
+        with self._evolution_lock:
+            if self._is_evolving:
+                print("⚠️  Evolution already in progress, skipping...")
+                return
+            self._is_evolving = True
+        
         try:
             print(f"\n🧬 === EVOLUTION TRIGGER ===")
             print(f"🔄 Evolving generation {self.evolution_engine.generation} -> {self.evolution_engine.generation + 1}")
@@ -1546,50 +1835,54 @@ class TrainingEnvironment:
             
             # Use physics lock to prevent race conditions during evolution
             with self._physics_lock:
-                # Store old agents for cleanup
+                # Store old agents for safe cleanup
                 old_agents = self.agents.copy()
                 old_agent_ids = {agent.id for agent in old_agents}
                 
                 evolution_start_time = time.time()
                 
-                # Evolve to next generation
-                new_population = self.evolution_engine.evolve_generation()
-                new_agent_ids = {agent.id for agent in new_population}
+                # Clear focus if it will be invalid after evolution
+                if self.focused_agent and self.focused_agent in old_agents:
+                    self.focused_agent = None
                 
-                # Update agents list BEFORE cleanup
-                self.agents = new_population
+                try:
+                    # Evolve to next generation (returns tuple of new_population, agents_to_destroy)
+                    new_population, agents_to_destroy = self.evolution_engine.evolve_generation()
+                    
+                    # Update agents list FIRST, before any cleanup
+                    self.agents = new_population
+                    
+                    # Add agents to destruction queue instead of immediate destruction
+                    self._agents_pending_destruction.extend(agents_to_destroy)
+                    
+                    print(f"🧹 Queued {len(agents_to_destroy)} old agents for cleanup")
+                    
+                except Exception as e:
+                    print(f"❌ Error during evolution generation: {e}")
+                    # Don't let evolution failure corrupt the system
+                    import traceback
+                    traceback.print_exc()
+                    return
             
-                # Clean up old agents that are no longer in the population
-                cleanup_count = 0
-                for old_agent in old_agents:
-                    if old_agent.id not in new_agent_ids:
-                        try:
-                            # Mark agent as destroyed before cleanup
-                            if not hasattr(old_agent, '_destroyed'):
-                                old_agent.destroy()
-                                cleanup_count += 1
-                        except Exception as e:
-                            print(f"⚠️  Error cleaning up agent {old_agent.id}: {e}")
+            # Clean up robot stats - remove entries for agents that no longer exist (outside physics lock)
+            try:
+                current_agent_ids = {agent.id for agent in self.agents}
+                old_stats_keys = list(self.robot_stats.keys())
+                stats_cleaned = 0
+                for old_id in old_stats_keys:
+                    if old_id not in current_agent_ids:
+                        del self.robot_stats[old_id]
+                        stats_cleaned += 1
                 
-                print(f"🧹 Cleaned up {cleanup_count} old agents")
-            
-            # Clean up robot stats - remove entries for agents that no longer exist (outside lock)
-            old_stats_keys = list(self.robot_stats.keys())
-            stats_cleaned = 0
-            for old_id in old_stats_keys:
-                if old_id not in new_agent_ids:
-                    del self.robot_stats[old_id]
-                    stats_cleaned += 1
-            
-            print(f"📊 Cleaned up {stats_cleaned} old stat entries")
-            
-            # Reset focused agent if it no longer exists
-            if self.focused_agent and self.focused_agent.id not in new_agent_ids:
-                self.focused_agent = None
-                print("🎯 Cleared focused agent (no longer exists)")
+                print(f"📊 Cleaned up {stats_cleaned} old stat entries")
+            except Exception as e:
+                print(f"⚠️  Error cleaning up stats: {e}")
             
             # Update population stats
-            self._update_statistics()
+            try:
+                self._update_statistics()
+            except Exception as e:
+                print(f"⚠️  Error updating statistics: {e}")
             
             evolution_time = time.time() - evolution_start_time
             print(f"✅ Evolution complete! New generation has {len(self.agents)} agents")
@@ -1610,9 +1903,13 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"❌ Evolution failed: {e}")
             import traceback
-            print(traceback.format_exc())
-            # Don't let evolution failure crash the system
-    
+            traceback.print_exc()
+        
+        finally:
+            # Always release the evolution lock
+            with self._evolution_lock:
+                self._is_evolving = False
+
     def get_evolution_status(self):
         """Get current evolution status."""
         return {
@@ -1674,30 +1971,48 @@ class TrainingEnvironment:
         self.trigger_evolution()
 
     def _init_robot_stats(self):
+        """Initialize robot statistics with safety checks."""
         self.robot_stats = {}
         for agent in self.agents:
-             self.robot_stats[agent.id] = {
-                'id': agent.id,
-                'initial_position': tuple(agent.initial_position),
-                'current_position': tuple(agent.body.position),
-                'total_distance': 0,
-                'velocity': (0, 0),
-                'arm_angles': {'shoulder': 0, 'elbow': 0},
-                'fitness': 0,
-                'steps_alive': 0,
-                'last_position': tuple(agent.body.position),
-                'steps_tilted': 0,  # Track how long robot has been tilted
-                'episode_reward': 0,
-                'q_updates': 0,
-                'action_history': []  # Track last actions taken
-            }
+            # Skip destroyed agents or agents without bodies
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
+            try:
+                current_position = tuple(agent.body.position) if agent.body else (0, 0)
+                self.robot_stats[agent.id] = {
+                    'id': agent.id,
+                    'initial_position': tuple(agent.initial_position),
+                    'current_position': current_position,
+                    'total_distance': 0,
+                    'velocity': (0, 0),
+                    'arm_angles': {'shoulder': 0, 'elbow': 0},
+                    'fitness': 0,
+                    'steps_alive': 0,
+                    'last_position': current_position,
+                    'steps_tilted': 0,  # Track how long robot has been tilted
+                    'episode_reward': 0,
+                    'q_updates': 0,
+                    'action_history': []  # Track last actions taken
+                }
+            except Exception as e:
+                print(f"⚠️  Error initializing stats for agent {agent.id}: {e}")
             
     def update_camera(self, delta_time):
-        """Smoothly moves the camera towards the focused agent."""
-        if self.focused_agent:
-            self.camera_target = self.focused_agent.body.position
+        """Smoothly moves the camera towards the focused agent with safety checks."""
+        if (self.focused_agent and 
+            not getattr(self.focused_agent, '_destroyed', False) and 
+            self.focused_agent.body):
+            try:
+                self.camera_target = self.focused_agent.body.position
+            except Exception as e:
+                print(f"⚠️  Error getting focused agent position: {e}")
+                self.focused_agent = None  # Clear invalid focus
+                self.camera_target = (0, 0)
         else:
-            # If no agent is focused, smoothly return to the origin
+            # If no agent is focused or focused agent is invalid, smoothly return to the origin
+            if self.focused_agent and (getattr(self.focused_agent, '_destroyed', False) or not self.focused_agent.body):
+                self.focused_agent = None  # Clear invalid focus
             self.camera_target = (0, 0)
             
         # Smoothly interpolate camera position and zoom
@@ -1708,40 +2023,48 @@ class TrainingEnvironment:
         self.camera_zoom += (self.target_zoom - self.camera_zoom) * self.zoom_speed
 
     def focus_on_agent(self, agent):
-        """Sets the given agent as the camera focus."""
-        if agent and agent in self.agents:
-            self.focused_agent = agent
-            print(f"🎯 SERVER: Focusing on agent {agent.id}")
-            # Only set zoom if user hasn't manually adjusted it
-            if not self.user_has_manually_zoomed:
-                self.user_zoom_level = 1.5
-                self._zoom_override = 1.5  # Send zoom override to frontend
-            # If user has manually zoomed, don't override their preference
-        else:
-            self.focused_agent = None
-            print("🎯 SERVER: Camera focus cleared.")
-            # Don't change zoom when just clearing focus
+        """Sets the given agent as the camera focus with safety checks."""
+        with self._physics_lock:
+            if agent and agent in self.agents and not getattr(agent, '_destroyed', False):
+                self.focused_agent = agent
+                print(f"🎯 SERVER: Focusing on agent {agent.id}")
+                # Only set zoom if user hasn't manually adjusted it
+                if not self.user_has_manually_zoomed:
+                    self.user_zoom_level = 1.5
+                    self._zoom_override = 1.5  # Send zoom override to frontend
+                # If user has manually zoomed, don't override their preference
+            else:
+                self.focused_agent = None
+                print("🎯 SERVER: Camera focus cleared.")
+                # Don't change zoom when just clearing focus
 
     def get_agent_at_position(self, world_x, world_y):
-        """Finds an agent at a given world coordinate."""
-        for agent in self.agents:
-            # Check if click is near the agent's body
-            agent_pos = agent.body.position
-            distance = ((world_x - agent_pos.x) ** 2 + (world_y - agent_pos.y) ** 2) ** 0.5
-            if distance < 2.0:  # Click radius
-                return agent
-        return None
-
-    def move_agent(self, agent_id, x, y):
-        """Move an agent to the specified world coordinates."""
-        agent = next((a for a in self.agents if a.id == agent_id), None)
-        if not agent:
-            print(f"❌ Agent {agent_id} not found for moving")
-            return False
-        
-        # Use physics lock to prevent race conditions
+        """Finds an agent at a given world coordinate with safety checks."""
         with self._physics_lock:
             try:
+                for agent in self.agents:
+                    if getattr(agent, '_destroyed', False) or not agent.body:
+                        continue
+                        
+                    # Check if click is near the agent's body
+                    agent_pos = agent.body.position
+                    distance = ((world_x - agent_pos.x) ** 2 + (world_y - agent_pos.y) ** 2) ** 0.5
+                    if distance < 2.0:  # Click radius
+                        return agent
+                return None
+            except Exception as e:
+                print(f"❌ Error finding agent at position: {e}")
+                return None
+
+    def move_agent(self, agent_id, x, y):
+        """Move an agent to the specified world coordinates with enhanced safety."""
+        with self._physics_lock:
+            try:
+                agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+                if not agent or not agent.body:
+                    print(f"❌ Agent {agent_id} not found or destroyed for moving")
+                    return False
+                
                 # Set the agent's position
                 agent.body.position = (x, y)
                 
@@ -1751,6 +2074,7 @@ class TrainingEnvironment:
                 
                 print(f"🤖 Moved agent {agent_id} to ({x:.2f}, {y:.2f})")
                 return True
+                
             except Exception as e:
                 print(f"❌ Error moving agent {agent_id}: {e}")
                 return False
@@ -1776,11 +2100,18 @@ class TrainingEnvironment:
             return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
 
     def get_camera_state(self):
-        """Get current camera state for rendering."""
+        """Get current camera state for rendering with safety checks."""
+        # Get focused agent ID safely
+        focused_agent_id = None
+        if (self.focused_agent and 
+            not getattr(self.focused_agent, '_destroyed', False) and 
+            hasattr(self.focused_agent, 'id')):
+            focused_agent_id = self.focused_agent.id
+        
         return {
             'position': self.camera_position,
             'zoom': self.camera_zoom,
-            'focused_agent_id': self.focused_agent.id if self.focused_agent else None,
+            'focused_agent_id': focused_agent_id,
             'zoom_override': getattr(self, '_zoom_override', None)  # Only send zoom when we want to override
         }
     
