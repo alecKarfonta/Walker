@@ -247,16 +247,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             # Stationary - neutral reward
             base_reward = 0.0
         
-        # EXTREMELY GENTLE speed penalties - prevent negative accumulation
+        # NO SPEED PENALTIES - robots should not be punished for existing
         speed_penalty = 0.0
-        if abs(self.speed) < 0.2:  # Only penalize if barely moving
-            # Very tiny penalty to avoid negative accumulation
-            if abs(self.acceleration) < 0.05:  # Almost no acceleration
-                speed_penalty = -0.001  # Extremely small penalty
-        
-        # Remove negative acceleration penalty entirely - it was causing accumulation
-        # if abs(self.speed) < 0.5 and self.acceleration < -0.1:
-        #     speed_penalty -= 0.03
+        # Removed all speed penalties to prevent any negative accumulation
+        # The robot should only be rewarded for positive progress, not penalized for inactivity
         
         # Add small positive reward for any forward progress to encourage exploration
         progress_reward = 0.0
@@ -265,8 +259,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         final_reward = base_reward + speed_penalty + progress_reward
         
-        # BOUND THE FINAL REWARD to prevent extreme values - much tighter bounds
-        final_reward = np.clip(final_reward, -0.01, 0.5)  # Very small negative, moderate positive
+        # BOUND THE FINAL REWARD to prevent extreme values - allow small negatives for backwards movement
+        final_reward = np.clip(final_reward, -0.1, 0.5)  # Small negative for backwards, moderate positive
         
         # DEBUG LOGGING - enabled temporarily to monitor rewards
         if self.id == 0 and self.steps % 50 == 0:  # Only for first agent, every 50 steps
