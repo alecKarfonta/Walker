@@ -401,6 +401,11 @@ HTML_TEMPLATE = """
                 .then(data => {
                     if (data.status === 'success') {
                         focusedAgentId = data.agent_id;
+                        if (data.agent_id !== null) {
+                            // Re-enable camera tracking when selecting from leaderboard
+                            userHasManuallyPanned = false;
+                            console.log(`✅ Agent ${data.agent_id} selected from leaderboard! Camera tracking enabled.`);
+                        }
                     }
                 })
                 .catch(error => {
@@ -522,7 +527,9 @@ HTML_TEMPLATE = """
                      if (data.status === 'success') {
                          focusedAgentId = data.agent_id;
                          if (data.agent_id !== null) {
-                             console.log(`✅ Agent ${data.agent_id} selected!`);
+                             // Re-enable camera tracking when focusing on a robot
+                             userHasManuallyPanned = false;
+                             console.log(`✅ Agent ${data.agent_id} selected! Camera tracking enabled.`);
                          } else {
                              console.log(`✅ Camera focus cleared`);
                          }
