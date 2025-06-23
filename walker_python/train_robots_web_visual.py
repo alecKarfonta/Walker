@@ -937,6 +937,11 @@ class TrainingEnvironment:
         self.target_zoom = 1.0
         self.follow_speed = 0.05
         self.zoom_speed = 0.05
+        
+        # Periodic learning system - robots learn from best performers every minute
+        self.last_learning_time = time.time()
+        self.learning_interval = 60.0  # 60 seconds = 1 minute
+        self.learning_rate = 0.3  # How much to learn from the leader
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1047,6 +1052,11 @@ class TrainingEnvironment:
             if current_time - last_stats_time > 0.1:
                 self._update_statistics()
                 last_stats_time = current_time
+            
+            # Check for periodic learning (every minute)
+            if current_time - self.last_learning_time >= self.learning_interval:
+                self.perform_periodic_learning()
+                self.last_learning_time = current_time
             
             if current_time - last_debug_time > 2.0:
                 print(f"🔧 Physics step {step_count}: {len(self.agents)} agents active")
@@ -1255,6 +1265,54 @@ class TrainingEnvironment:
         if not self.agents:
             return None
         return max(self.agents, key=lambda agent: agent.get_fitness())
+    
+    def find_leader(self):
+        """Find the robot with the best performance (highest distance traveled)."""
+        if not self.agents:
+            return None
+        
+        best_distance = -float('inf')
+        leader = None
+        
+        for agent in self.agents:
+            distance = agent.body.position.x - agent.initial_position[0]
+            if distance > best_distance:
+                best_distance = distance
+                leader = agent
+        
+        return leader
+    
+    def perform_periodic_learning(self):
+        """Make all robots learn from the best performing robot."""
+        leader = self.find_leader()
+        if not leader:
+            print("⚠️ No leader found for periodic learning")
+            return
+        
+        # Count how many agents actually learned
+        learning_count = 0
+        
+        print(f"🎓 === PERIODIC LEARNING EVENT ===")
+        print(f"🏆 Leader: Robot {leader.id} (Distance: {leader.body.position.x - leader.initial_position[0]:.2f})")
+        
+        for agent in self.agents:
+            if agent == leader:
+                continue  # Leader doesn't learn from itself
+            
+            # Make agent learn from leader's Q-table
+            if hasattr(agent, 'q_table') and hasattr(leader, 'q_table'):
+                try:
+                    # Use the existing learn_from_other_table method
+                    agent.q_table.learn_from_other_table(leader.q_table, self.learning_rate)
+                    learning_count += 1
+                except Exception as e:
+                    print(f"❌ Error during learning for Agent {agent.id}: {e}")
+        
+        print(f"📚 {learning_count} robots learned from Robot {leader.id}")
+        print(f"🔄 Learning rate: {self.learning_rate:.1%}")
+        print(f"⏰ Next learning session in {self.learning_interval} seconds")
+        print(f"🎓 === LEARNING EVENT COMPLETE ===")
+        print()  # Add spacing for readability
 
     def spawn_agent(self):
         """Adds a new, random agent to the simulation."""
@@ -1549,6 +1607,8 @@ def evolution_event():
             env.clone_best_agent()
         elif event == 'evolve':
             env.evolve_population()
+        elif event == 'learn_from_leader':
+            env.perform_periodic_learning()
         else:
             return jsonify({'status': 'error', 'message': f'Unknown event: {event}'}), 400
         
