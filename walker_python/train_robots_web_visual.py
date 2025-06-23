@@ -652,6 +652,10 @@ HTML_TEMPLATE = """
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Action History:</span>
+                            <span class="detail-value">${getActionHistoryString(agent.action_history)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Total Actions:</span>
                             <span class="detail-value">${(agent.action_history || []).length}</span>
                         </div>
                         <div class="detail-row">
