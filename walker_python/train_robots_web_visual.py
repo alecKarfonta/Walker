@@ -359,13 +359,16 @@ HTML_TEMPLATE = """
         let focusedAgentId = null;
         let cameraPosition = { x: 0, y: 0 };
         let cameraZoom = 1.0;
+        let userHasManuallyPanned = false; // track manual camera pan
         let mouseDownTime = 0;
         let mouseDownX = 0;
         let mouseDownY = 0;
         let mouseDownRobotId = null;
+        let lastLeaderboardHtml = ''; // Variable to store the last state of the leaderboard HTML
+        
+        // Missing constants that were causing errors
         const CLICK_THRESHOLD = 5; // pixels
         const CLICK_TIME_THRESHOLD = 200; // milliseconds
-        let lastLeaderboardHtml = ''; // Variable to store the last state of the leaderboard HTML
 
         function resizeCanvas() {
             const wrapper = document.getElementById('canvas-wrapper');
@@ -493,6 +496,7 @@ HTML_TEMPLATE = """
                     } else {
                         // Dragging camera
                         isDragging = true;
+                        userHasManuallyPanned = true; // flag manual pan
                         cameraPosition.x -= (e.clientX - lastMouseX) / cameraZoom;
                         cameraPosition.y += (e.clientY - lastMouseY) / cameraZoom;
                         lastMouseX = e.clientX;
@@ -563,6 +567,8 @@ HTML_TEMPLATE = """
 
         document.getElementById('resetView').addEventListener('click', () => {
             focusedAgentId = null;
+            userHasManuallyPanned = false; // Reset manual pan flag
+            
             // Reset camera to default view
             cameraPosition = { x: 0, y: 0 };
             cameraZoom = 1.0;
@@ -628,26 +634,26 @@ HTML_TEMPLATE = """
             }
 
             // Update camera from backend if available and user isn't manually controlling camera
-            if (data.camera && !isDragging) {
+            if (data.camera && !isDragging && !userHasManuallyPanned) {
                 // Always update camera position when not dragging
                 if (data.camera.position && Array.isArray(data.camera.position) && data.camera.position.length === 2) {
                     cameraPosition.x = data.camera.position[0];
                     cameraPosition.y = data.camera.position[1];
                 }
+            }
+            
+            // Handle zoom override separately (can happen even during manual pan)
+            if (data.camera && data.camera.zoom_override !== undefined && data.camera.zoom_override !== null) {
+                cameraZoom = data.camera.zoom_override;
                 
-                // Only apply zoom from backend when there's an explicit override
-                if (data.camera.zoom_override !== undefined && data.camera.zoom_override !== null) {
-                    cameraZoom = data.camera.zoom_override;
-                    
-                    // Tell backend we've applied the zoom override
-                    fetch('/clear_zoom_override', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    })
-                    .catch(error => {
-                        console.error('Error clearing zoom override:', error);
-                    });
-                }
+                // Tell backend we've applied the zoom override
+                fetch('/clear_zoom_override', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                })
+                .catch(error => {
+                    console.error('Error clearing zoom override:', error);
+                });
             }
 
             // Update leaderboard only if it has changed to prevent re-rendering
@@ -1085,7 +1091,7 @@ class TrainingEnvironment:
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
         # Calculate ground width based on number of agents
-        ground_width = max(500, self.num_agents * 10)  # Ensure enough width for all agents
+        ground_width = max(500, self.num_agents * 20)  # Ensure enough width for all agents
         
         # The ground's mask is set to collide with the agent category
         ground_fixture = ground_body.CreateFixture(
