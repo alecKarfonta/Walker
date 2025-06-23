@@ -66,8 +66,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         )
         
         # Physical properties
-        self.motor_torque = 800.0
-        self.motor_speed = 10.0
+        self.motor_torque = 150.0
+        self.motor_speed = 5.0
         self.category_bits = category_bits
         self.mask_bits = mask_bits
 
@@ -138,7 +138,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.time_since_good_value = 0.0
         
         # Action interval optimization - only choose new actions every N steps
-        self.action_interval = 10  # Choose new action every 0.67 seconds (10 steps at 60fps)
+        self.action_interval = 3  # Choose new action every 0.2 seconds (3 steps at 60fps) - more responsive
         self.learning_interval = 60  # Update Q-values every 1 second (60 steps at 60fps)
         self.steps_since_last_action = 0
         self.steps_since_last_learning = 0
@@ -346,7 +346,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                   f"action={self.current_action_tuple}, reward={reward:.3f}")
         
         # Action interval optimization - only choose new actions every N steps
-        self.action_interval = 10  # Choose new action every 0.67 seconds (10 steps at 60fps)
+        self.action_interval = 3  # Choose new action every 0.2 seconds (3 steps at 60fps) - more responsive
         self.learning_interval = 60  # Update Q-values every 1 second (60 steps at 60fps)
         
         if self.steps % self.action_interval == 0:
@@ -655,7 +655,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             fixtures=[
                 b2.b2FixtureDef(
                     shape=b2.b2PolygonShape(box=(1.5, 0.75)),
-                    density=1.0,
+                    density=4.0,
                     friction=0.9,
                     filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
                 )
@@ -670,7 +670,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             fixtures=[
                 b2.b2FixtureDef(
                     shape=b2.b2PolygonShape(box=(1.0, 0.2)),
-                    density=1.0,
+                    density=0.1,
                     filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
                 )
             ]
@@ -681,7 +681,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             fixtures=[
                 b2.b2FixtureDef(
                     shape=b2.b2PolygonShape(box=(1.0, 0.2)),
-                    density=1.0,
+                    density=0.1,
                     filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
                 )
             ]
@@ -697,7 +697,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 fixtures=[
                     b2.b2FixtureDef(
                         shape=b2.b2CircleShape(radius=0.5),
-                        density=1.0,
+                        density=8.0,
                         friction=0.9,
                         filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
                     )
@@ -710,7 +710,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             bodyA=self.body,
             bodyB=self.upper_arm,
             localAnchorA=(-1.0, 1.0),
-            localAnchorB=(0, 0),
+            localAnchorB=(-1.0, 0),  # Connect to LEFT end of upper arm
             enableMotor=True,
             maxMotorTorque=self.motor_torque,
             motorSpeed=0,
@@ -721,8 +721,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.lower_arm_joint = self.world.CreateRevoluteJoint(
             bodyA=self.upper_arm,
             bodyB=self.lower_arm,
-            localAnchorA=(1.0, 0),
-            localAnchorB=(0, 0),
+            localAnchorA=(1.0, 0),    # RIGHT end of upper arm
+            localAnchorB=(-1.0, 0),   # LEFT end of lower arm
             enableMotor=True,
             maxMotorTorque=self.motor_torque,
             motorSpeed=0,
@@ -743,17 +743,26 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             self.wheel_joints.append(joint) 
 
     def apply_action(self, action: Tuple[float, float]):
-        """Apply action to the agent's arms."""
-        # Reduced motor strength for more controlled movement
-        shoulder_torque = float(np.clip(action[0], -15.0, 15.0)) * 50.0
-        elbow_torque = float(np.clip(action[1], -15.0, 15.0)) * 50.0
+        """Apply action to the agent's arms using joint motors to respect limits."""
+        # Convert action to target motor speeds (respecting joint limits)
+        shoulder_speed = float(np.clip(action[0], -1.0, 1.0)) * self.motor_speed
+        elbow_speed = float(np.clip(action[1], -1.0, 1.0)) * self.motor_speed
 
-        # Apply torque and ensure bodies are awake
-        self.upper_arm.ApplyTorque(shoulder_torque, wake=True)
-        self.lower_arm.ApplyTorque(elbow_torque, wake=True)
+        # Set motor speeds on the joints (this respects the joint limits!)
+        self.upper_arm_joint.motorSpeed = shoulder_speed
+        self.lower_arm_joint.motorSpeed = elbow_speed
         
-        # Debug: Print torques occasionally for first agent
+        # Ensure joints are enabled and awake
+        self.upper_arm_joint.enableMotor = True
+        self.lower_arm_joint.enableMotor = True
+        
+        # Wake up the bodies to ensure they respond
+        self.upper_arm.awake = True
+        self.lower_arm.awake = True
+        
+        # Debug: Print motor speeds occasionally for first agent
         if self.id == 0 and self.steps % 200 == 0:  # Every 200 steps
-            print(f"🔧 Agent {self.id}: Applied torques - shoulder: {shoulder_torque:.1f}, elbow: {elbow_torque:.1f}")
+            print(f"🔧 Agent {self.id}: Motor speeds - shoulder: {shoulder_speed:.1f}, elbow: {elbow_speed:.1f}")
+            print(f"    Joint angles: shoulder: {np.degrees(self.upper_arm.angle):.1f}°, elbow: {np.degrees(self.lower_arm.angle):.1f}°")
         
         # Removed debug print to eliminate overhead - was running 1% of the time 
