@@ -829,6 +829,19 @@ HTML_TEMPLATE = """
                             <span class="detail-label">Territories:</span>
                             <span class="detail-value">${territories.length > 0 ? territories.length + ' claimed' : 'None'}</span>
                         </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Closest Food:</span>
+                            <span class="detail-value" style="color: ${ecosystem.closest_food_distance === Infinity || ecosystem.closest_food_distance > 50 ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
+                                ${ecosystem.closest_food_distance === Infinity ? 'None available' : ecosystem.closest_food_distance.toFixed(1) + 'm'}
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Food Type:</span>
+                            <span class="detail-value" style="color: ${ecosystem.closest_food_source === 'prey' ? '#FF6B6B' : '#4CAF50'};">
+                                ${ecosystem.closest_food_type}
+                                ${ecosystem.closest_food_source === 'prey' ? ' 🎯' : ecosystem.closest_food_source === 'environment' ? ' 🌿' : ''}
+                            </span>
+                        </div>
                         ${energy < 0.4 ? `
                         <div class="detail-row" style="color: #FF8844; font-weight: bold; background: rgba(255, 136, 68, 0.1); padding: 4px; border-radius: 3px;">
                             <span class="detail-label">🍽️ Hungry:</span>
@@ -2910,6 +2923,9 @@ class TrainingEnvironment:
                         velocity = agent.body.linearVelocity
                         speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
                         
+                        # Get closest food distance for this agent's food type
+                        closest_food_info = self._get_closest_food_distance_for_agent(agent)
+                        
                         agent_data = {
                             'id': agent.id,
                             'body': {
@@ -2946,7 +2962,10 @@ class TrainingEnvironment:
                                 'speed': convert_numpy_types(speed),
                                 'speed_factor': convert_numpy_types(agent_status.get('speed_factor', 1.0)),
                                 'alliances': agent_status.get('alliances', []),
-                                'territories': agent_status.get('territories', [])
+                                'territories': agent_status.get('territories', []),
+                                'closest_food_distance': convert_numpy_types(closest_food_info['distance']),
+                                'closest_food_type': closest_food_info['food_type'],
+                                'closest_food_source': closest_food_info.get('source_type', 'environment')
                             }
                         }
                         agents_data.append(agent_data)
@@ -3544,6 +3563,110 @@ class TrainingEnvironment:
         """Clear the zoom override flag after it's been sent."""
         if hasattr(self, '_zoom_override'):
             delattr(self, '_zoom_override')
+
+    def _get_closest_food_distance_for_agent(self, agent) -> Dict[str, Any]:
+        """
+        Get distance to closest food for a specific agent based on their ecosystem role.
+        Similar to SurvivalStateProcessor._find_nearest_food but returns just distance info.
+        """
+        try:
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                return {'distance': float('inf'), 'food_type': 'unknown'}
+            
+            agent_pos = (agent.body.position.x, agent.body.position.y)
+            agent_id = str(agent.id)
+            
+            # Get agent's ecosystem role
+            agent_status = self.agent_statuses.get(agent_id, {})
+            agent_role = agent_status.get('role', 'omnivore')
+            
+            # Get all available food sources
+            food_sources = self.ecosystem_dynamics.food_sources
+            potential_food_sources = []
+            
+            # Add environmental food sources for all agents (even carnivores can eat insects)
+            for food in food_sources:
+                if food.amount > 0.1:  # Only consider food that can actually be consumed
+                    potential_food_sources.append({
+                        'position': food.position,
+                        'type': food.food_type,
+                        'source': 'environment',
+                        'amount': food.amount
+                    })
+            
+            # For carnivores and scavengers, add other agents as potential prey
+            if agent_role in ['carnivore', 'scavenger']:
+                for other_agent in self.agents:
+                    if (getattr(other_agent, '_destroyed', False) or not other_agent.body or 
+                        other_agent.id == agent.id):
+                        continue
+                    
+                    other_pos = (other_agent.body.position.x, other_agent.body.position.y)
+                    other_energy = self.agent_health.get(other_agent.id, {'energy': 1.0})['energy']
+                    
+                    # Distance check for hunting range
+                    distance = ((agent_pos[0] - other_pos[0])**2 + (agent_pos[1] - other_pos[1])**2)**0.5
+                    if distance < 20.0:  # Within hunting/perception range
+                        # For scavengers, prefer weak prey; for carnivores, target any prey
+                        prey_attractiveness = 1.0
+                        if agent_role == 'scavenger':
+                            prey_attractiveness = 2.0 if other_energy < 0.5 else 0.5
+                        elif agent_role == 'carnivore':
+                            prey_attractiveness = 1.5 if other_energy < 0.6 else 1.0
+                        
+                        potential_food_sources.append({
+                            'position': other_pos,
+                            'type': 'meat',  # Other agents provide meat
+                            'source': 'prey',
+                            'prey_id': other_agent.id,
+                            'prey_energy': other_energy,
+                            'attractiveness': prey_attractiveness
+                        })
+            
+            if not potential_food_sources:
+                return {'distance': float('inf'), 'food_type': 'none available'}
+            
+            # Find the nearest/most attractive food source for this agent type
+            best_target = None
+            best_score = float('inf')
+            
+            for target in potential_food_sources:
+                target_pos = target['position']
+                distance = ((agent_pos[0] - target_pos[0])**2 + (agent_pos[1] - target_pos[1])**2)**0.5
+                
+                # For predators, factor in prey attractiveness
+                if target.get('source') == 'prey':
+                    attractiveness = target.get('attractiveness', 1.0)
+                    # Lower score = better target (distance reduced by attractiveness)
+                    score = distance / attractiveness
+                    effective_distance = distance  # Keep actual distance for display
+                else:
+                    score = distance
+                    effective_distance = distance
+                
+                if score < best_score:
+                    best_score = score
+                    best_target = target
+                    best_distance = effective_distance
+            
+            if best_target is None:
+                return {'distance': float('inf'), 'food_type': 'none found'}
+            
+            # Determine food type description based on target
+            if best_target.get('source') == 'prey':
+                food_type_desc = f"meat (prey: {best_target.get('prey_id', 'unknown')[:8]})"
+            else:
+                food_type_desc = best_target.get('type', 'unknown')
+            
+            return {
+                'distance': best_distance,
+                'food_type': food_type_desc,
+                'source_type': best_target.get('source', 'environment')
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating closest food distance for agent {getattr(agent, 'id', 'unknown')}: {e}")
+            return {'distance': float('inf'), 'food_type': 'error calculating'}
 
 # --- Main Execution ---
 app = Flask(__name__)
