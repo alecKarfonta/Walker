@@ -224,7 +224,7 @@ class EcosystemDynamics:
                 pack_size = len(pack)
                 pack_bonus = min(0.4, pack_size * 0.08)
                 effects['fitness_multiplier'] *= (1 + pack_bonus)
-                print(f"🐺 Pack bonus {pack_bonus:.2f} for {agent_id[:8]}")
+                # Pack bonus applied silently
                 break
         
         # Territory effects
@@ -283,8 +283,7 @@ class EcosystemDynamics:
         self.food_sources = [food for food in self.food_sources if food.amount > depletion_threshold]
         removed_count = initial_count - len(self.food_sources)
         
-        if removed_count > 0:
-            print(f"🗑️ Removed {removed_count} depleted food sources")
+        # Silently remove depleted food sources
         
         # Maintain minimum food population - ensure adequate resources for survival
         min_food_sources = max(15, int(self.carrying_capacity * 0.2))  # At least 15 or 20% of carrying capacity
@@ -297,7 +296,6 @@ class EcosystemDynamics:
         if current_food_count < min_food_sources:
             shortage_factor = (min_food_sources - current_food_count) / min_food_sources
             food_spawn_chance += shortage_factor * 0.3  # Up to 30% additional chance when short
-            print(f"🍃 Food shortage detected! {current_food_count}/{min_food_sources} - Boosting generation")
         
         # Add new food sources based on need and season
         if random.random() < food_spawn_chance:
@@ -322,7 +320,6 @@ class EcosystemDynamics:
                 max_capacity=max_capacity
             )
             self.food_sources.append(food_source)
-            print(f"🌱 Generated {food_type} at ({position[0]:.1f}, {position[1]:.1f}) - Amount: {amount:.1f}")
         
         # Emergency food generation if critically low
         if current_food_count < min_food_sources // 2:  # Less than half minimum
@@ -340,8 +337,6 @@ class EcosystemDynamics:
                 )
                 self.food_sources.append(food_source)
                 print(f"🚨 Emergency food spawn: {food_type} at ({position[0]:.1f}, {position[1]:.1f})")
-        
-        print(f"🍽️ Food sources: {len(self.food_sources)} (min: {min_food_sources})")
     
     def generate_resources_between_agents(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
         """Generate resources strategically between agents"""
@@ -380,7 +375,6 @@ class EcosystemDynamics:
                     max_capacity=random.uniform(25, 60)
                 )
                 self.food_sources.append(food_source)
-                print(f"🍃 Generated {food_type} resource at ({mid_x:.1f}, {mid_y:.1f})")
     
     def _determine_resource_type(self, role1: EcosystemRole, role2: EcosystemRole) -> str:
         """Determine resource type based on nearby agent roles"""
@@ -429,8 +423,7 @@ class EcosystemDynamics:
                 # Energy gained (substantial restoration from eating)
                 energy_gained += consumed * consumption_efficiency * 0.2  # Doubled base energy gain
                 
-                if consumed > 0:
-                    print(f"🍽️ {agent_id[:8]} consumed {consumed:.1f} {food.food_type} (energy +{energy_gained:.2f})")
+                # Consumption happens silently
                 
                 # Break after consuming from one resource per frame
                 break
@@ -488,7 +481,7 @@ class EcosystemDynamics:
                 energy_gained = self._calculate_predation_energy_gain(predator_role, prey_role_enum, prey_energy)
                 victim_id = prey_id
                 
-                print(f"🦁 PREDATION! {predator_id[:8]} ({predator_role.value}) hunted {prey_id[:8]} ({prey_role_enum.value}) - Energy +{energy_gained:.2f}")
+                print(f"🦁 {predator_id[:8]} hunted {prey_id[:8]}")
                 break
                 
         return energy_gained, victim_id

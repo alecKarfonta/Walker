@@ -191,6 +191,10 @@ class SparseQTable:
         self.q_values = {}  # state -> action_values
         self.visit_counts = {}  # state -> action_counts
         self.update_count = 0
+        
+        # Compatibility attributes for enhanced functionality
+        self.confidence_threshold = 10  # Default confidence threshold
+        self.exploration_bonus = 0.0    # No exploration bonus for basic Q-table
     
     def _get_state_key(self, state: Tuple[int, ...]) -> str:
         """Convert state tuple to string key."""
@@ -311,13 +315,6 @@ class SparseQTable:
             'update_count': self.update_count,
         }
     
-    def get_best_q_values_for_all_states(self) -> Dict[str, float]:
-        """Get the best Q-value for each state in the table."""
-        best_values = {}
-        for state_key, action_values in self.q_values.items():
-            best_values[state_key] = float(max(action_values))
-        return best_values
-    
     def save(self, filename: str):
         """Save Q-table to file."""
         with open(filename, 'wb') as f:
@@ -338,6 +335,129 @@ class SparseQTable:
         self.action_count = data['action_count']
         self.default_value = data['default_value']
         self.update_count = data.get('update_count', 0)
+    
+    def confidence_based_action(self, state: Tuple[int, ...], 
+                              min_confidence: int = 10) -> Tuple[int, float, bool]:
+        """
+        Compatibility method for SparseQTable (simplified version).
+        
+        Args:
+            state: Current state
+            min_confidence: Minimum visits required for confidence
+            
+        Returns:
+            Tuple of (action, q_value, is_confident)
+        """
+        state_key = self._get_state_key(state)
+        
+        if state_key not in self.q_values:
+            # New state - not confident, return random action
+            return random.randint(0, self.action_count - 1), self.default_value, False
+        
+        action_values = self.q_values[state_key]
+        visit_counts = self.visit_counts[state_key]
+        
+        # Find actions with sufficient confidence
+        confident_actions = [i for i, count in enumerate(visit_counts) if count >= min_confidence]
+        
+        if confident_actions:
+            # Choose best action among confident ones
+            best_confident_action = max(confident_actions, key=lambda a: action_values[a])
+            return best_confident_action, action_values[best_confident_action], True
+        else:
+            # No confident actions - return best action but mark as not confident
+            best_action = max(range(self.action_count), key=lambda a: action_values[a])
+            return best_action, action_values[best_action], False
+    
+    def enhanced_epsilon_greedy(self, state: Tuple[int, ...], epsilon: float,
+                              use_exploration_bonus: bool = False) -> int:
+        """
+        Compatibility method for SparseQTable (simplified version).
+        
+        Args:
+            state: Current state
+            epsilon: Probability of random exploration
+            use_exploration_bonus: Ignored for basic compatibility
+            
+        Returns:
+            Chosen action index
+        """
+        return self.epsilon_greedy_action(state, epsilon)
+    
+    def _get_best_action_with_bonus(self, state: Tuple[int, ...]) -> int:
+        """
+        Compatibility method for SparseQTable (simplified version).
+        """
+        return self.get_best_action(state)[0]
+    
+    def update_q_value_enhanced(self, state: Tuple[int, ...], action: int, reward: float, 
+                              next_state: Tuple[int, ...], base_learning_rate: float, 
+                              discount_factor: float, use_adaptive_lr: bool = False):
+        """
+        Compatibility method for SparseQTable (simplified version of enhanced update).
+        
+        Args:
+            state: Current state
+            action: Action taken
+            reward: Reward received
+            next_state: Next state
+            base_learning_rate: Learning rate
+            discount_factor: Discount factor
+            use_adaptive_lr: Ignored for basic compatibility
+        """
+        # Use the standard Q-learning update method
+        self.update_q_value(state, action, reward, next_state, base_learning_rate, discount_factor)
+    
+    def learn_from_other_table(self, other_table: 'SparseQTable', learning_rate: float = 0.1):
+        """
+        Compatibility method for knowledge transfer from another Q-table.
+        
+        Args:
+            other_table: Another SparseQTable to learn from
+            learning_rate: Rate of learning from other table
+        """
+        try:
+            # Transfer Q-values from other table
+            for state_key, other_action_values in other_table.q_values.items():
+                # Ensure this state exists in our table
+                if state_key not in self.q_values:
+                    self.q_values[state_key] = [self.default_value] * self.action_count
+                    self.visit_counts[state_key] = [0] * self.action_count
+                
+                # Update Q-values using weighted average
+                for action in range(min(self.action_count, len(other_action_values))):
+                    current_q = self.q_values[state_key][action]
+                    other_q = other_action_values[action]
+                    
+                    # Weight by visit count - trust more visited states more
+                    other_visits = other_table.visit_counts.get(state_key, [0] * len(other_action_values))[action]
+                    weight = min(learning_rate, learning_rate * (other_visits / 10.0))  # Scale by visits
+                    
+                    # Update Q-value with bounds checking
+                    new_q = (1 - weight) * current_q + weight * other_q
+                    self.q_values[state_key][action] = np.clip(new_q, -10.0, 10.0)
+                    
+        except Exception as e:
+            print(f"⚠️ Error in SparseQTable.learn_from_other_table: {e}")
+            # Fall back to simple Q-value copying
+            for state_key, other_action_values in other_table.q_values.items():
+                if state_key not in self.q_values:
+                    self.q_values[state_key] = [v * learning_rate for v in other_action_values]
+                    self.visit_counts[state_key] = [1] * len(other_action_values)
+
+    def copy(self) -> 'SparseQTable':
+        """Create a copy of this Q-table."""
+        new_table = SparseQTable(
+            action_count=self.action_count,
+            default_value=self.default_value
+        )
+        
+        # Deep copy all data structures
+        new_table.q_values = {k: v.copy() for k, v in self.q_values.items()}
+        new_table.visit_counts = {k: v.copy() for k, v in self.visit_counts.items()}
+        new_table.update_count = self.update_count
+        
+        return new_table
 
 
 class EnhancedQTable(SparseQTable):

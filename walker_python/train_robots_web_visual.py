@@ -33,11 +33,28 @@ from src.evaluation.dashboard_exporter import DashboardExporter
 from src.ecosystem_dynamics import EcosystemDynamics, EcosystemRole
 from src.environment_challenges import EnvironmentalSystem
 
+# Import survival Q-learning integration
+from src.agents.ecosystem_interface import EcosystemInterface
+from src.agents.survival_q_integration_patch import upgrade_agent_to_survival_learning
+from src.agents.learning_manager import LearningManager, LearningApproach
+
 # Import elite robot management
 from src.persistence import EliteManager
 
+# Configure logging - set debug level for Deep Q-Learning GPU training logs
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+
 # Suppress Flask logging for status endpoint
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
 
 # HTML template with Canvas rendering
 HTML_TEMPLATE = """
@@ -319,7 +336,7 @@ HTML_TEMPLATE = """
         <div id="bottom-bar">
             <!-- Section 1: Leaderboard -->
             <div id="leaderboard-panel" class="bottom-bar-section">
-                <div class="panel-title">🏆 Leaderboard</div>
+                <div class="panel-title">🏆 Leaderboard (Food)</div>
                 <div id="leaderboard-content"></div>
             </div>
 
@@ -409,7 +426,7 @@ HTML_TEMPLATE = """
         let ecosystemData = null;
         let environmentData = null;
         let predationEvents = [];
-        let agentTrails = new Map(); // Store movement trails for agents
+        // Animation trails disabled for performance optimization
 
         function resizeCanvas() {
             const wrapper = document.getElementById('canvas-wrapper');
@@ -713,7 +730,7 @@ HTML_TEMPLATE = """
                     return `
                         <div class="robot-stat-row${focusedClass}" data-agent-id="${robot.id}" title="Click to focus on Robot ${robot.id}">
                             <span class="robot-stat-label">${robot.name}${isFocused ? ' 🎯' : ''}</span>
-                            <span class="robot-stat-value">${robot.distance.toFixed(2)}m</span>
+                            <span class="robot-stat-value">🍽️ ${robot.food_consumed.toFixed(2)}</span>
                         </div>
                     `;
                 }).join('');
@@ -728,15 +745,58 @@ HTML_TEMPLATE = """
             // Update population summary
             const populationSummaryContent = document.getElementById('population-summary-content');
             if (populationSummaryContent && data.statistics) {
+                // Calculate role distribution
+                const roleDistribution = {};
+                let totalAgents = 0;
+                
+                if (data.agents) {
+                    data.agents.forEach(agent => {
+                        const role = agent.ecosystem?.role || 'omnivore';
+                        roleDistribution[role] = (roleDistribution[role] || 0) + 1;
+                        totalAgents++;
+                    });
+                }
+                
+                // Role icons
+                const roleIcons = {
+                    'carnivore': '🦁',
+                    'herbivore': '🐰', 
+                    'omnivore': '🐻',
+                    'scavenger': '🦅',
+                    'symbiont': '🐠'
+                };
+                
+                // Create role distribution display
+                let roleHtml = '';
+                Object.entries(roleDistribution).forEach(([role, count]) => {
+                    const icon = roleIcons[role] || '🤖';
+                    const percentage = totalAgents > 0 ? ((count / totalAgents) * 100).toFixed(0) : 0;
+                    roleHtml += `
+                        <div class="stat-row">
+                            <span class="stat-label">${icon} ${role.charAt(0).toUpperCase() + role.slice(1)}:</span>
+                            <span class="stat-value">${count} (${percentage}%)</span>
+                        </div>
+                    `;
+                });
+                
                  populationSummaryContent.innerHTML = `
                     <div class="stat-row">
                         <span class="stat-label">Generation:</span>
                         <span class="stat-value">${data.statistics.generation || 1}</span>
                     </div>
                     <div class="stat-row">
+                        <span class="stat-label">Population:</span>
+                        <span class="stat-value">${totalAgents} agents</span>
+                    </div>
+                    <div class="stat-row">
                         <span class="stat-label">Avg Distance:</span>
                         <span class="stat-value">${(data.statistics.average_distance || 0).toFixed(2)}m</span>
                     </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Food Consumed:</span>
+                        <span class="stat-value">🍽️ ${(data.statistics.total_food_consumed || 0).toFixed(1)}</span>
+                    </div>
+                    ${roleHtml}
                  `;
             }
 
@@ -838,8 +898,14 @@ HTML_TEMPLATE = """
                         <div class="detail-row">
                             <span class="detail-label">Food Type:</span>
                             <span class="detail-value" style="color: ${ecosystem.closest_food_source === 'prey' ? '#FF6B6B' : '#4CAF50'};">
-                                ${ecosystem.closest_food_type}
+                                ${ecosystem.closest_food_type || 'Unknown'}
                                 ${ecosystem.closest_food_source === 'prey' ? ' 🎯' : ecosystem.closest_food_source === 'environment' ? ' 🌿' : ''}
+                            </span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Food Source:</span>
+                            <span class="detail-value" style="color: ${ecosystem.closest_food_source === 'prey' ? '#FF6B6B' : '#4CAF50'};">
+                                ${ecosystem.closest_food_source || 'Unknown'}
                             </span>
                         </div>
                         ${energy < 0.4 ? `
@@ -930,6 +996,31 @@ HTML_TEMPLATE = """
                         <div class="detail-row">
                             <span class="detail-label">Awake:</span>
                             <span class="detail-value">${agent.awake ? 'Yes' : 'No'}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <div style="margin-bottom: 6px; font-weight: bold; color: #3498db;">Learning Approach Controls</div>
+                        <div style="display: flex; flex-direction: column; gap: 3px;">
+                            <button onclick="switchLearningApproach('${agent.id}', 'basic_q_learning')" 
+                                    style="background: #27ae60; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
+                                Basic Q-Learning
+                            </button>
+                            <button onclick="switchLearningApproach('${agent.id}', 'enhanced_survival_q')" 
+                                    style="background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
+                                Enhanced Survival Q
+                            </button>
+                            <button onclick="switchLearningApproach('${agent.id}', 'deep_survival_q')" 
+                                    style="background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
+                                Deep Survival Q (GPU)
+                            </button>
+                            <button onclick="switchLearningApproach('${agent.id}', 'auto_advanced')" 
+                                    style="background: #f39c12; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
+                                Auto Advanced Learning
+                            </button>
+                        </div>
+                        <div style="font-size: 9px; color: #95a5a6; margin-top: 4px;">
+                            Current: ${agent.learning_approach || 'basic_q_learning'}
                         </div>
                     </div>
                 </div>
@@ -1203,10 +1294,7 @@ HTML_TEMPLATE = """
                 const agentPos = [agent.body.x, agent.body.y];
                 drawAgentStatusIndicators(agentPos, role, status, health, energy, speed, isFocused);
                 
-                // Draw movement trail for fast-moving agents
-                if (speed > 1.0) {
-                    drawMovementTrail(robot.id, agentPos, speed);
-                }
+                // Movement trails disabled for performance optimization
                 
                 // Draw alliance connections
                 if (ecosystem.alliances && ecosystem.alliances.length > 0) {
@@ -1308,34 +1396,7 @@ HTML_TEMPLATE = """
                 }
         }
         
-        function drawMovementTrail(agentId, position, speed) {
-            // Update agent trail
-            if (!agentTrails.has(agentId)) {
-                agentTrails.set(agentId, []);
-            }
-            
-            const trail = agentTrails.get(agentId);
-            trail.push({ x: position[0], y: position[1], time: Date.now() });
-            
-            // Keep only recent trail points (last 3 seconds)
-            const now = Date.now();
-            const filteredTrail = trail.filter(point => now - point.time < 3000);
-            agentTrails.set(agentId, filteredTrail);
-            
-            // Draw trail
-            if (filteredTrail.length > 1) {
-                ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.8, speed / 3.0)})`;
-                ctx.lineWidth = 0.1;
-                ctx.beginPath();
-                ctx.moveTo(filteredTrail[0].x, filteredTrail[0].y);
-                
-                for (let i = 1; i < filteredTrail.length; i++) {
-                    const alpha = i / filteredTrail.length; // Fade over time
-                    ctx.lineTo(filteredTrail[i].x, filteredTrail[i].y);
-                }
-                ctx.stroke();
-            }
-        }
+        // Movement trail function removed for performance optimization
         
         function drawAllianceConnections(agentId, position, alliances, allAgents) {
             alliances.forEach(allyId => {
@@ -1538,6 +1599,29 @@ HTML_TEMPLATE = """
                 console.log('Agent parameters updated:', params);
             } catch (err) {
                 console.error('Error updating agent parameters:', err);
+            }
+        }
+
+        // Learning approach switching function
+        async function switchLearningApproach(agentId, approach) {
+            try {
+                const response = await fetch('./switch_learning_approach', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        agent_id: agentId, 
+                        approach: approach 
+                    })
+                });
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    console.log(`✅ Switched agent ${agentId} to ${approach} learning approach`);
+                } else {
+                    console.error(`❌ Failed to switch learning approach: ${result.message}`);
+                }
+            } catch (err) {
+                console.error('Error switching learning approach:', err);
             }
         }
 
@@ -1747,6 +1831,16 @@ class TrainingEnvironment:
         
         # Flag to track if we should restore elites on startup
         self.restore_elites_on_start = True
+
+        # Initialize Learning Manager for advanced learning approaches
+        try:
+            self.learning_manager = LearningManager(
+                ecosystem_interface=EcosystemInterface(self)
+            )
+            print("🧠 Learning Manager initialized successfully")
+        except Exception as e:
+            print(f"⚠️ Learning Manager initialization failed: {e}")
+            self.learning_manager = None
 
         print(f"🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
@@ -2007,13 +2101,63 @@ class TrainingEnvironment:
                 # Sort agents by x position for systematic resource placement
                 agent_positions.sort(key=lambda x: x[1][0])
                 
-                # Generate resources between agents using ecosystem dynamics
+                # Generate resources between agents using ecosystem dynamics with enhanced parameters
                 self.ecosystem_dynamics.generate_resources_between_agents(agent_positions)
                 
-                print(f"🌱 Resource generation cycle completed. Total resources: {len(self.ecosystem_dynamics.food_sources)}")
+                # Post-process resources to ensure they're consumable (within 3.0m of agents)
+                self._validate_resource_positions(agent_positions)
+                
+                # Only log occasionally to reduce spam
+                if len(self.ecosystem_dynamics.food_sources) % 10 == 0:  # Log every 10th resource milestone
+                    print(f"🌱 Resource generation cycle completed. Total resources: {len(self.ecosystem_dynamics.food_sources)}")
         
         except Exception as e:
             print(f"⚠️ Error generating resources: {e}")
+    
+    def _validate_resource_positions(self, agent_positions):
+        """Validate that resources are within reasonable consumption distance of agents."""
+        try:
+            consumption_distance = 3.0  # Match the consumption distance from ecosystem_dynamics
+            resources_to_remove = []
+            resources_moved = 0
+            
+            for food_source in self.ecosystem_dynamics.food_sources:
+                food_pos = food_source.position
+                
+                # Find closest agent to this resource
+                closest_distance = float('inf')
+                closest_agent_pos = None
+                
+                for agent_id, agent_pos in agent_positions:
+                    distance = ((food_pos[0] - agent_pos[0])**2 + (food_pos[1] - agent_pos[1])**2)**0.5
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_agent_pos = agent_pos
+                
+                # If resource is too far from all agents, move it closer to the nearest agent
+                if closest_distance > consumption_distance * 2.0 and closest_agent_pos:  # Allow 2x consumption distance
+                    # Move resource to within consumption distance of nearest agent
+                    direction_x = food_pos[0] - closest_agent_pos[0]
+                    direction_y = food_pos[1] - closest_agent_pos[1]
+                    
+                    # Normalize direction
+                    distance = (direction_x**2 + direction_y**2)**0.5
+                    if distance > 0:
+                        direction_x /= distance
+                        direction_y /= distance
+                        
+                        # Place resource at consumption distance from agent
+                        new_x = closest_agent_pos[0] + direction_x * (consumption_distance - 0.5)
+                        new_y = max(2.0, closest_agent_pos[1] + direction_y * (consumption_distance - 0.5))
+                        
+                        food_source.position = (new_x, new_y)
+                        resources_moved += 1
+            
+            if resources_moved > 5:  # Only log if many resources needed repositioning
+                print(f"🔧 Repositioned {resources_moved} resources for better agent access")
+                
+        except Exception as e:
+            print(f"⚠️ Error validating resource positions: {e}")
     
     def _update_resource_consumption(self):
         """Update agent energy levels through resource consumption and handle death."""
@@ -2058,6 +2202,16 @@ class TrainingEnvironment:
                 boosted_energy_gain = energy_gain * 15.0  # 15x energy gain from resources!
                 current_energy = min(1.0, current_energy + boosted_energy_gain)
                 
+                # Track food consumption for leaderboard
+                if energy_gain > 0 and agent_id in self.robot_stats:
+                    if 'food_consumed' not in self.robot_stats[agent_id]:
+                        self.robot_stats[agent_id]['food_consumed'] = 0.0
+                    self.robot_stats[agent_id]['food_consumed'] += energy_gain
+                
+                # Log significant consumption events (keep minimal logging)
+                if energy_gain > 0.1:  # Only log substantial energy gains
+                    print(f"🍽️ Agent {agent_id[:8]} consumed energy: +{boosted_energy_gain:.2f}")
+                
                 # Carnivores and omnivores can also hunt other robots for energy
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
                 if role in ['carnivore', 'omnivore'] and current_energy < 0.7:  # Only hunt when moderately hungry
@@ -2080,6 +2234,12 @@ class TrainingEnvironment:
                         if victim_id and predation_energy > 0:
                             # Successful predation!
                             current_energy = min(1.0, current_energy + predation_energy)
+                            
+                            # Track predation for leaderboard (counts as food consumption)
+                            if agent_id in self.robot_stats:
+                                if 'food_consumed' not in self.robot_stats[agent_id]:
+                                    self.robot_stats[agent_id]['food_consumed'] = 0.0
+                                self.robot_stats[agent_id]['food_consumed'] += predation_energy
                             
                             # Record predation event for visualization  
                             predation_event = {
@@ -2155,13 +2315,9 @@ class TrainingEnvironment:
             current_time = time.time()
             agent_position = (agent.body.position.x, agent.body.position.y) if agent.body else (0, 0)
             
-            print(f"🔍 DEBUG: Recording death event for agent {agent.id}")
-            print(f"🔍 DEBUG: survival_stats keys: {list(self.survival_stats.keys())}")
-            
             # Calculate lifespan
             birth_time = self.survival_stats['agent_birth_times'].get(agent.id, current_time)
             lifespan = current_time - birth_time
-            print(f"🔍 DEBUG: Calculated lifespan: {lifespan}")
             
             # Record death event for visualization
             self.death_events.append({
@@ -2184,9 +2340,6 @@ class TrainingEnvironment:
                 if events_with_lifespan:
                     total_lifespan = sum(event['lifespan'] for event in events_with_lifespan)
                     self.survival_stats['average_lifespan'] = total_lifespan / len(events_with_lifespan)
-                    print(f"🔍 DEBUG: Calculated average lifespan from {len(events_with_lifespan)} events: {self.survival_stats['average_lifespan']:.2f}")
-                else:
-                    print(f"🔍 DEBUG: No events with lifespan data found")
                 
                 # Clean up old tracking data
                 if agent.id in self.survival_stats['agent_birth_times']:
@@ -2399,6 +2552,9 @@ class TrainingEnvironment:
                         pass
                 avg_epsilon = sum(valid_epsilons) / len(valid_epsilons) if valid_epsilons else 0
                 
+                # Calculate total food consumed
+                total_food_consumed = sum(stats.get('food_consumed', 0) for stats in self.robot_stats.values())
+                
                 self.population_stats = {
                     'generation': evolution_summary['generation'],
                     'best_distance': best_distance,
@@ -2408,6 +2564,7 @@ class TrainingEnvironment:
                     'average_fitness': avg_fitness,
                     'diversity': evolution_summary['diversity'],
                     'total_agents': len(self.robot_stats),
+                    'total_food_consumed': total_food_consumed,
                     'species_count': evolution_summary.get('species_count', 1),
                     'hall_of_fame_size': evolution_summary.get('hall_of_fame_size', 0),
                     'mutation_rate': evolution_summary['mutation_rate'],
@@ -2873,16 +3030,31 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️  Error getting ground shapes: {e}")
                 
-                # 3. Get leaderboard data (top 10 robots) - safely
+                # 3. Get leaderboard data (top 10 robots) - safely sorted by food consumption
                 try:
                     valid_stats = {k: v for k, v in self.robot_stats.items() 
                                   if k in {agent.id for agent in current_agents}}
                     sorted_robots = sorted(valid_stats.values(), 
-                                         key=lambda r: r.get('total_distance', 0), reverse=True)
-                    leaderboard_data = [
-                        {'id': r['id'], 'name': f"Robot {r['id']}", 'distance': r.get('total_distance', 0)}
-                        for r in sorted_robots[:10]
-                    ]
+                                         key=lambda r: r.get('food_consumed', 0), reverse=True)
+                    leaderboard_data = []
+                    for r in sorted_robots[:10]:
+                        # Get learning approach icon for visual indication
+                        approach_name = self._get_agent_learning_approach_name(r['id'])
+                        approach_icon = '⚡'  # Default
+                        if 'basic' in approach_name.lower():
+                            approach_icon = '🔤'
+                        elif 'enhanced' in approach_name.lower():
+                            approach_icon = '⚡'
+                        elif 'survival' in approach_name.lower():
+                            approach_icon = '🍃'
+                        elif 'deep' in approach_name.lower():
+                            approach_icon = '🧠'
+                        
+                        leaderboard_data.append({
+                            'id': r['id'], 
+                            'name': f"{approach_icon} Robot {r['id']}", 
+                            'food_consumed': r.get('food_consumed', 0)
+                        })
                 except Exception as e:
                     print(f"⚠️  Error creating leaderboard: {e}")
                     leaderboard_data = []
@@ -2953,6 +3125,7 @@ class TrainingEnvironment:
                             'best_reward': convert_numpy_types(getattr(agent, 'best_reward_received', 0.0)),
                             'worst_reward': convert_numpy_types(getattr(agent, 'worst_reward_received', 0.0)),
                             'awake': agent.body.awake if agent.body else False,
+                            'learning_approach': getattr(agent, 'learning_approach', 'basic_q_learning'),
                             # Enhanced visualization data
                             'ecosystem': {
                                 'role': agent_status.get('role', 'omnivore'),
@@ -3423,7 +3596,8 @@ class TrainingEnvironment:
                     'steps_tilted': 0,  # Track how long robot has been tilted
                     'episode_reward': 0,
                     'q_updates': 0,
-                    'action_history': []  # Track last actions taken
+                    'action_history': [],  # Track last actions taken
+                    'food_consumed': 0.0  # Track total food consumed for leaderboard
                 }
             except Exception as e:
                 print(f"⚠️  Error initializing stats for agent {agent.id}: {e}")
@@ -3564,6 +3738,61 @@ class TrainingEnvironment:
         if hasattr(self, '_zoom_override'):
             delattr(self, '_zoom_override')
 
+    def switch_agent_learning_approach(self, agent_id: str, approach: str) -> bool:
+        """
+        Switch a specific agent to a new learning approach.
+        
+        Args:
+            agent_id: ID of the agent to switch
+            approach: Learning approach name ('basic_q_learning', 'enhanced_survival_q', etc.)
+            
+        Returns:
+            bool: True if switch was successful, False otherwise
+        """
+        if not self.learning_manager:
+            print(f"❌ Learning Manager not available for agent {agent_id}")
+            return False
+        
+        # Find the agent by ID
+        agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+        if not agent:
+            print(f"❌ Agent {agent_id} not found or destroyed")
+            return False
+        
+        # Map string approach to enum
+        from src.agents.learning_manager import LearningApproach
+        approach_mapping = {
+            'basic_q_learning': LearningApproach.BASIC_Q_LEARNING,
+            'enhanced_survival_q': LearningApproach.SURVIVAL_Q_LEARNING,
+            'deep_survival_q': LearningApproach.DEEP_Q_LEARNING,
+            'auto_advanced': LearningApproach.ENHANCED_Q_LEARNING  # Fallback for auto-advanced
+        }
+        
+        learning_approach = approach_mapping.get(approach)
+        if not learning_approach:
+            print(f"❌ Unknown learning approach: {approach}")
+            return False
+        
+        # Perform the switch
+        success = self.learning_manager.set_agent_approach(agent, learning_approach)
+        
+        if success:
+            # Update agent data to include learning approach for frontend
+            setattr(agent, 'learning_approach', approach)
+            
+            print(f"✅ Agent {agent_id} switched to {approach}")
+        else:
+            print(f"❌ Failed to switch agent {agent_id} to {approach}")
+        
+        return success
+
+    def _get_agent_learning_approach_name(self, agent_id: str) -> str:
+        """Get the learning approach name for an agent."""
+        agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+        if agent:
+            return getattr(agent, 'learning_approach', 'basic_q_learning')
+        return 'basic_q_learning'
+    
     def _get_closest_food_distance_for_agent(self, agent) -> Dict[str, Any]:
         """
         Get distance to closest food for a specific agent based on their ecosystem role.
@@ -3571,7 +3800,7 @@ class TrainingEnvironment:
         """
         try:
             if getattr(agent, '_destroyed', False) or not agent.body:
-                return {'distance': float('inf'), 'food_type': 'unknown'}
+                return {'distance': float('inf'), 'food_type': 'unknown', 'source_type': 'none'}
             
             agent_pos = (agent.body.position.x, agent.body.position.y)
             agent_id = str(agent.id)
@@ -3624,7 +3853,7 @@ class TrainingEnvironment:
                         })
             
             if not potential_food_sources:
-                return {'distance': float('inf'), 'food_type': 'none available'}
+                return {'distance': float('inf'), 'food_type': 'none available', 'source_type': 'none'}
             
             # Find the nearest/most attractive food source for this agent type
             best_target = None
@@ -3650,7 +3879,7 @@ class TrainingEnvironment:
                     best_distance = effective_distance
             
             if best_target is None:
-                return {'distance': float('inf'), 'food_type': 'none found'}
+                return {'distance': float('inf'), 'food_type': 'none found', 'source_type': 'none'}
             
             # Determine food type description based on target
             if best_target.get('source') == 'prey':
@@ -3790,6 +4019,23 @@ def reset_view():
 def clear_zoom_override():
     env.clear_zoom_override()
     return jsonify({'status': 'success'})
+
+@app.route('/switch_learning_approach', methods=['POST'])
+def switch_learning_approach():
+    """Switch an agent's learning approach."""
+    data = request.get_json()
+    if not data or 'agent_id' not in data or 'approach' not in data:
+        return jsonify({'status': 'error', 'message': 'Missing agent_id or approach'}), 400
+    
+    agent_id = data['agent_id']
+    approach = data['approach']
+    
+    success = env.switch_agent_learning_approach(agent_id, approach)
+    
+    if success:
+        return jsonify({'status': 'success', 'agent_id': agent_id, 'approach': approach})
+    else:
+        return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'}), 500
 
 @app.route('/evolution_event', methods=['POST'])
 def evolution_event():

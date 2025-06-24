@@ -14,6 +14,19 @@ User Requests
 
 - [x] ✅ When calculating a robots distance to the nearest food it should only consider food that is not depleted.
 
+- [ ] Move some operations to other thread to avoid blocking the ui
+
+- [ ] After an evolutionary event all robots become omnivores! The evolution step each robot should maintain the type of their parents. 
+
+- [ ] The random obstacles are not interacting with the robots because of their masking bits.
+
+
+- [ ] Whole ui still occasionally locks up, not sure what process is causing that. Could be something about resources. Look for ways you can improve the consistency and performance of the physics engine and frontend. 
+
+- [ ] Remove the meat food source from the world. Only allow carnivores to eat other robots. Also add herbivores that can only eat plants. 
+
+
+
 **FIXED**: Updated nearest food calculation to only consider resources with >0.1 amount (matching consumption threshold) 
 
 **COMPLETELY FIXED**: 
