@@ -25,6 +25,8 @@ User Requests
 
 - [ ] Every agent is using basic q learning instead instiantiate a random set of learning policies for the robots. 
 
+- [ ] Distance to food should be positive or negative depending on which direction it is in. Will this mess with any of the training alogorithms? 
+
 - [x] ✅ Remove the meat food source from the world. Only allow carnivores to eat other robots. Also add herbivores that can only eat plants.
 
 **COMPLETELY FIXED**: Ecosystem dietary restrictions implemented

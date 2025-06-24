@@ -1873,11 +1873,15 @@ class TrainingEnvironment:
         """Initialize ecosystem roles for all agents based on their characteristics."""
         for agent in self.agents:
             if not getattr(agent, '_destroyed', False):
-                # Extract fitness traits from agent's physical parameters
+                # Extract and properly normalize fitness traits from agent's physical parameters
+                motor_speed = getattr(agent.physical_params, 'motor_speed', 5.0)
+                motor_torque = getattr(agent.physical_params, 'motor_torque', 50.0)
+                learning_rate = getattr(agent.physical_params, 'learning_rate', 0.1)
+                
                 fitness_traits = {
-                    'speed': getattr(agent.physical_params, 'motor_speed', 5.0) / 10.0,  # Normalize to 0-1
-                    'strength': getattr(agent.physical_params, 'motor_torque', 50.0) / 100.0,  # Normalize to 0-1
-                    'cooperation': min(1.0, getattr(agent.physical_params, 'learning_rate', 0.1) * 10.0)  # Higher learning rate = more cooperative
+                    'speed': min(1.0, motor_speed / 15.0),  # Normalize motor_speed (typically 3-12) to 0-1
+                    'strength': min(1.0, motor_torque / 200.0),  # Normalize motor_torque (typically 30-180) to 0-1  
+                    'cooperation': min(1.0, learning_rate * 50.0)  # Boost learning_rate (typically 0.005-0.02) to meaningful range
                 }
                 
                 # Assign ecosystem role
@@ -2426,11 +2430,15 @@ class TrainingEnvironment:
         try:
             agent_id = agent.id
             
-            # Extract fitness traits from agent's physical parameters
+            # Extract and properly normalize fitness traits from agent's physical parameters
+            motor_speed = getattr(agent.physical_params, 'motor_speed', 5.0)
+            motor_torque = getattr(agent.physical_params, 'motor_torque', 50.0)
+            learning_rate = getattr(agent.physical_params, 'learning_rate', 0.1)
+            
             fitness_traits = {
-                'speed': getattr(agent.physical_params, 'motor_speed', 5.0) / 10.0,
-                'strength': getattr(agent.physical_params, 'motor_torque', 50.0) / 100.0,
-                'cooperation': min(1.0, getattr(agent.physical_params, 'learning_rate', 0.1) * 10.0)
+                'speed': min(1.0, motor_speed / 15.0),  # Normalize motor_speed (typically 3-12) to 0-1
+                'strength': min(1.0, motor_torque / 200.0),  # Normalize motor_torque (typically 30-180) to 0-1  
+                'cooperation': min(1.0, learning_rate * 50.0)  # Boost learning_rate (typically 0.005-0.02) to meaningful range
             }
             
             # Assign ecosystem role

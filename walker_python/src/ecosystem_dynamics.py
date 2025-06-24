@@ -107,16 +107,17 @@ class EcosystemDynamics:
         strength = fitness_traits.get('strength', 0.5) 
         cooperation = fitness_traits.get('cooperation', 0.5)
         
+        # Balanced role distribution with proper variety
         role_weights = {
-            EcosystemRole.HERBIVORE: 0.3 + cooperation * 0.3,
-            EcosystemRole.CARNIVORE: 0.2 + speed * 0.4 + strength * 0.2,
-            EcosystemRole.OMNIVORE: 0.4 + (speed + strength + cooperation) * 0.1,
-            EcosystemRole.SCAVENGER: 0.1 + (1 - speed) * 0.2,
-            EcosystemRole.SYMBIONT: cooperation * 0.5
+            EcosystemRole.HERBIVORE: 0.25 + cooperation * 0.4 + (1 - speed) * 0.2,  # Cooperative, peaceful = herbivore
+            EcosystemRole.CARNIVORE: 0.20 + speed * 0.3 + strength * 0.3,  # High speed+strength = carnivore
+            EcosystemRole.OMNIVORE: 0.30 + (speed + strength + cooperation) * 0.1,  # Balanced traits = omnivore (most common)
+            EcosystemRole.SCAVENGER: 0.15 + (1 - speed) * 0.2 + (1 - cooperation) * 0.2,  # Low speed/cooperation = scavenger
+            EcosystemRole.SYMBIONT: 0.10 + cooperation * 0.5  # High cooperation = symbiont
         }
         
-        # Select role based on weights
-        role = max(role_weights.keys(), key=lambda r: role_weights[r] + random.uniform(-0.1, 0.1))
+        # Select role based on weights with randomness
+        role = max(role_weights.keys(), key=lambda r: role_weights[r] + random.uniform(-0.15, 0.15))
         self.agent_roles[agent_id] = role
         
         print(f"🦎 Agent {agent_id[:8]} assigned role: {role.value}")
