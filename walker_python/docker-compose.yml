@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # Walker Training Application
-  walker-app:
+  walker-training-app:
     build:
       context: .
       dockerfile: Dockerfile
@@ -22,8 +22,8 @@ services:
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_metrics
       - GRAFANA_URL=http://walker-grafana:3000
     depends_on:
-      - mlflow
-      - prometheus
+      - walker-mlflow
+      - walker-prometheus
     networks:
       - walker-network
     restart: unless-stopped
@@ -34,7 +34,7 @@ services:
       retries: 3
 
   # MLflow Tracking Server
-  mlflow:
+  walker-mlflow:
     image: ghcr.io/mlflow/mlflow:latest
     container_name: walker-mlflow
     hostname: walker-mlflow
@@ -63,7 +63,7 @@ services:
       retries: 3
 
   # Prometheus Metrics Collection
-  prometheus:
+  walker-prometheus:
     image: prom/prometheus:v2.45.0
     container_name: walker-prometheus
     hostname: walker-prometheus
@@ -90,7 +90,7 @@ services:
       retries: 3
 
   # Grafana Visualization
-  grafana:
+  walker-grafana:
     image: grafana/grafana:10.2.0
     container_name: walker-grafana
     hostname: walker-grafana
@@ -108,7 +108,7 @@ services:
       - GF_SERVER_ROOT_URL=http://localhost:3001
       - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
     depends_on:
-      - prometheus
+      - walker-prometheus
     networks:
       - walker-network
     restart: unless-stopped
@@ -138,7 +138,7 @@ services:
       retries: 3
 
   # PostgreSQL for advanced metrics storage (optional)
-  postgres:
+  walker-postgres:
     image: postgres:15-alpine
     container_name: walker-postgres
     hostname: walker-postgres
