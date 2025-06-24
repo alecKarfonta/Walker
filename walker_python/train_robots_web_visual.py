@@ -13,6 +13,7 @@ import threading
 import time
 import json
 import logging
+import random
 from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
@@ -27,6 +28,10 @@ from typing import List
 # Import evaluation framework
 from src.evaluation.metrics_collector import MetricsCollector
 from src.evaluation.dashboard_exporter import DashboardExporter
+
+# Import ecosystem dynamics for enhanced visualization
+from src.ecosystem_dynamics import EcosystemDynamics, EcosystemRole
+from src.environment_challenges import EnvironmentalSystem
 
 # Suppress Flask logging for status endpoint
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -377,6 +382,31 @@ HTML_TEMPLATE = """
         // Missing constants that were causing errors
         const CLICK_THRESHOLD = 5; // pixels
         const CLICK_TIME_THRESHOLD = 200; // milliseconds
+        
+        // Enhanced visualization constants
+        const ECOSYSTEM_COLORS = {
+            'carnivore': '#FF4444',    // Red for predators
+            'herbivore': '#44AA44',    // Green for prey
+            'omnivore': '#FF8844',     // Orange for omnivores
+            'scavenger': '#8844AA',    // Purple for scavengers
+            'symbiont': '#4488FF'      // Blue for symbionts
+        };
+        
+        const STATUS_COLORS = {
+            'hunting': '#FF0000',      // Bright red
+            'feeding': '#00FF00',      // Bright green
+            'fleeing': '#FFFF00',      // Yellow
+            'territorial': '#FF8800',  // Orange
+            'idle': '#CCCCCC',         // Gray
+            'moving': '#FFFFFF',       // White
+            'active': '#88DDFF'        // Light blue
+        };
+        
+        // Visualization state
+        let ecosystemData = null;
+        let environmentData = null;
+        let predationEvents = [];
+        let agentTrails = new Map(); // Store movement trails for agents
 
         function resizeCanvas() {
             const wrapper = document.getElementById('canvas-wrapper');
@@ -734,10 +764,70 @@ HTML_TEMPLATE = """
             const shoulderAngle = Math.atan2(agent.upper_arm.y - agent.body.y, agent.upper_arm.x - agent.body.x);
             const elbowAngle = Math.atan2(agent.lower_arm.y - agent.upper_arm.y, agent.lower_arm.x - agent.upper_arm.x);
             
+            // Get ecosystem data
+            const ecosystem = agent.ecosystem || {};
+            const role = ecosystem.role || 'omnivore';
+            const status = ecosystem.status || 'idle';
+            const health = ecosystem.health || 1.0;
+            const energy = ecosystem.energy || 1.0;
+            const speed = ecosystem.speed || 0.0;
+            const alliances = ecosystem.alliances || [];
+            const territories = ecosystem.territories || [];
+            
+            // Role symbols and colors
+            const roleSymbols = {
+                'carnivore': '🦁',
+                'herbivore': '🐰',
+                'omnivore': '🐻',
+                'scavenger': '🦅',
+                'symbiont': '🐠'
+            };
+            
+            const statusSymbols = {
+                'hunting': '🎯',
+                'feeding': '🍃',
+                'fleeing': '💨',
+                'territorial': '🛡️',
+                'idle': '😴',
+                'moving': '➡️',
+                'active': '⚡'
+            };
+            
             // Format the details
             const details = `
                 <div class="robot-details-title">🤖 Robot ${agent.id}</div>
                 <div class="robot-details-content">
+                    <div class="detail-section">
+                        <div class="detail-row">
+                            <span class="detail-label">Ecosystem Role:</span>
+                            <span class="detail-value" style="color: ${ECOSYSTEM_COLORS[role] || '#888888'};">${roleSymbols[role] || '🤖'} ${role.charAt(0).toUpperCase() + role.slice(1)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Status:</span>
+                            <span class="detail-value" style="color: ${STATUS_COLORS[status] || '#FFFFFF'};">${statusSymbols[status] || '●'} ${status.charAt(0).toUpperCase() + status.slice(1)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Health:</span>
+                            <span class="detail-value" style="color: ${health > 0.5 ? '#4CAF50' : health > 0.25 ? '#FF9800' : '#F44336'};">${(health * 100).toFixed(1)}%</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Energy:</span>
+                            <span class="detail-value" style="color: ${energy > 0.5 ? '#2196F3' : energy > 0.25 ? '#FF9800' : '#F44336'};">${(energy * 100).toFixed(1)}%</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Speed:</span>
+                            <span class="detail-value">${speed.toFixed(2)} m/s</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Alliances:</span>
+                            <span class="detail-value">${alliances.length > 0 ? alliances.length + ' allies' : 'None'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Territories:</span>
+                            <span class="detail-value">${territories.length > 0 ? territories.length + ' claimed' : 'None'}</span>
+                        </div>
+                    </div>
+                    
                     <div class="detail-section">
                         <div class="detail-row">
                             <span class="detail-label">Position:</span>
@@ -815,6 +905,13 @@ HTML_TEMPLATE = """
         function drawWorld(data) {
             if (!ctx) return;
 
+            // Store ecosystem and environment data for enhanced rendering
+            if (data.ecosystem) ecosystemData = data.ecosystem;
+            if (data.environment) environmentData = data.environment;
+            if (data.ecosystem && data.ecosystem.predation_events) {
+                predationEvents = data.ecosystem.predation_events;
+            }
+
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -823,6 +920,12 @@ HTML_TEMPLATE = """
             ctx.translate(canvas.width / 2, canvas.height / 2); // Center of canvas
             ctx.scale(cameraZoom, -cameraZoom); // Zoom and flip Y-axis
             ctx.translate(-cameraPosition.x, -cameraPosition.y); // Pan
+
+            // Draw environmental elements first (background layer)
+            drawEnvironmentalElements(data);
+            
+            // Draw ecosystem elements
+            drawEcosystemElements(data);
 
             // Draw ground
             if (data.shapes && data.shapes.ground) {
@@ -841,32 +944,334 @@ HTML_TEMPLATE = """
                 });
             }
 
-            // Draw robots
-            if (data.shapes && data.shapes.robots) {
-                data.shapes.robots.forEach(robot => {
-                    const isFocused = (robot.id === focusedAgentId);
-                    ctx.strokeStyle = isFocused ? '#e74c3c' : '#3498db'; // Highlight focused robot
-                    ctx.fillStyle = isFocused ? 'rgba(231, 76, 60, 0.4)' : 'rgba(52, 152, 219, 0.4)';
-                    ctx.lineWidth = isFocused ? 0.2 : 0.1;
-
-                    robot.body_parts.forEach(part => {
-                        ctx.beginPath();
-                        if (part.type === 'polygon' && part.vertices.length > 1) {
-                            ctx.moveTo(part.vertices[0][0], part.vertices[0][1]);
-                            for (let i = 1; i < part.vertices.length; i++) {
-                                ctx.lineTo(part.vertices[i][0], part.vertices[i][1]);
-                            }
-                            ctx.closePath();
-                        } else if (part.type === 'circle') {
-                            ctx.arc(part.center[0], part.center[1], part.radius, 0, 2 * Math.PI);
-                        }
-                        ctx.fill();
-                        ctx.stroke();
-                    });
-                });
-            }
+            // Draw enhanced robots with ecosystem roles
+            drawEnhancedRobots(data);
+            
+            // Draw predation events and effects
+            drawPredationEvents();
 
             ctx.restore(); // Restore to pre-camera transform state
+        }
+        
+        function drawEnvironmentalElements(data) {
+            if (!environmentData || !environmentData.obstacles) return;
+            
+            // Draw environmental obstacles
+            environmentData.obstacles.forEach(obstacle => {
+                const dangerLevel = obstacle.danger_level || 0;
+                const [x, y] = obstacle.position;
+                const size = obstacle.size;
+                
+                // Color based on danger level
+                const red = Math.floor(100 + (dangerLevel * 155));
+                const green = Math.floor(150 - (dangerLevel * 100));
+                const blue = Math.floor(100 - (dangerLevel * 50));
+                
+                ctx.fillStyle = `rgba(${red}, ${green}, ${blue}, 0.6)`;
+                ctx.strokeStyle = `rgb(${red}, ${green}, ${blue})`;
+                ctx.lineWidth = 0.1;
+                
+                // Draw obstacle based on type
+                ctx.beginPath();
+                if (obstacle.type === 'boulder' || obstacle.type === 'wall') {
+                    ctx.rect(x - size/2, y - size/2, size, size);
+                } else {
+                    ctx.arc(x, y, size/2, 0, 2 * Math.PI);
+                }
+                ctx.fill();
+                ctx.stroke();
+                
+                // Add danger indicator for high-danger obstacles
+                if (dangerLevel > 0.5) {
+                    ctx.fillStyle = '#FF0000';
+                    ctx.font = `${size/3}px Arial`;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('⚠', x, y + size/6);
+                }
+            });
+        }
+        
+        function drawEcosystemElements(data) {
+            if (!ecosystemData) return;
+            
+            // Draw territories
+            if (ecosystemData.territories) {
+                ecosystemData.territories.forEach(territory => {
+                    const [x, y] = territory.position;
+                    const size = territory.size;
+                    const contested = territory.contested;
+                    
+                    // Territory color based on type and resource value
+                    const alpha = Math.min(0.3, territory.resource_value * 0.2);
+                    let territoryColor = '#4CAF50'; // Default green
+                    
+                    switch (territory.type) {
+                        case 'feeding_ground': territoryColor = '#8BC34A'; break;
+                        case 'nesting_area': territoryColor = '#FF9800'; break;
+                        case 'water_source': territoryColor = '#2196F3'; break;
+                        case 'shelter': territoryColor = '#9C27B0'; break;
+                    }
+                    
+                    ctx.strokeStyle = contested ? '#FF0000' : territoryColor;
+                    ctx.lineWidth = contested ? 0.3 : 0.15;
+                    ctx.setLineDash(contested ? [0.5, 0.5] : []);
+                    
+                    // Draw territory boundary
+                    ctx.beginPath();
+                    ctx.arc(x, y, size/2, 0, 2 * Math.PI);
+                    ctx.stroke();
+                    
+                    ctx.setLineDash([]); // Reset line dash
+                });
+            }
+            
+            // Draw food sources
+            if (ecosystemData.food_sources) {
+                ecosystemData.food_sources.forEach(food => {
+                    const [x, y] = food.position;
+                    const amount = food.amount;
+                    const maxCapacity = food.max_capacity;
+                    const ratio = amount / maxCapacity;
+                    
+                    // Food color based on type
+                    let foodColor = '#4CAF50'; // Default green for plants
+                    switch (food.type) {
+                        case 'plants': foodColor = '#4CAF50'; break;
+                        case 'meat': foodColor = '#F44336'; break;
+                        case 'insects': foodColor = '#795548'; break;
+                        case 'seeds': foodColor = '#FF9800'; break;
+                    }
+                    
+                    const radius = 0.5 + (ratio * 1.5); // Size based on remaining amount
+                    const alpha = 0.4 + (ratio * 0.4); // Transparency based on amount
+                    
+                    ctx.fillStyle = foodColor + Math.floor(alpha * 255).toString(16).padStart(2, '0');
+                    ctx.strokeStyle = foodColor;
+                    ctx.lineWidth = 0.1;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    // Add depletion animation if amount is low
+                    if (ratio < 0.3) {
+                        const time = Date.now() / 1000;
+                        const pulse = 0.5 + 0.5 * Math.sin(time * 4);
+                        ctx.strokeStyle = `rgba(255, 255, 0, ${pulse})`;
+                        ctx.lineWidth = 0.2;
+                        ctx.beginPath();
+                        ctx.arc(x, y, radius + 0.3, 0, 2 * Math.PI);
+                        ctx.stroke();
+                    }
+                });
+            }
+        }
+        
+        function drawEnhancedRobots(data) {
+            if (!data.shapes || !data.shapes.robots || !data.agents) return;
+            
+            data.shapes.robots.forEach(robot => {
+                // Find corresponding agent data for ecosystem info
+                const agent = data.agents.find(a => a.id === robot.id);
+                if (!agent) return;
+                
+                const isFocused = (robot.id === focusedAgentId);
+                const ecosystem = agent.ecosystem || {};
+                const role = ecosystem.role || 'omnivore';
+                const status = ecosystem.status || 'idle';
+                const health = ecosystem.health || 1.0;
+                const energy = ecosystem.energy || 1.0;
+                const speed = ecosystem.speed || 0.0;
+                
+                // Get role-based color
+                const baseColor = ECOSYSTEM_COLORS[role] || '#888888';
+                const statusColor = STATUS_COLORS[status] || baseColor;
+                
+                // Apply focus highlighting
+                const strokeColor = isFocused ? '#FFD700' : baseColor; // Gold for focused
+                const fillColor = isFocused ? `${baseColor}88` : `${baseColor}66`; // More transparent
+                
+                ctx.strokeStyle = strokeColor;
+                ctx.fillStyle = fillColor;
+                ctx.lineWidth = isFocused ? 0.25 : 0.15;
+                
+                // Draw agent body parts
+                robot.body_parts.forEach(part => {
+                    ctx.beginPath();
+                    if (part.type === 'polygon' && part.vertices.length > 1) {
+                        ctx.moveTo(part.vertices[0][0], part.vertices[0][1]);
+                        for (let i = 1; i < part.vertices.length; i++) {
+                            ctx.lineTo(part.vertices[i][0], part.vertices[i][1]);
+                        }
+                        ctx.closePath();
+                    } else if (part.type === 'circle') {
+                        ctx.arc(part.center[0], part.center[1], part.radius, 0, 2 * Math.PI);
+                    }
+                    ctx.fill();
+                    ctx.stroke();
+                });
+                
+                // Draw status indicators above agent
+                const agentPos = [agent.body.x, agent.body.y];
+                drawAgentStatusIndicators(agentPos, role, status, health, energy, speed, isFocused);
+                
+                // Draw movement trail for fast-moving agents
+                if (speed > 1.0) {
+                    drawMovementTrail(robot.id, agentPos, speed);
+                }
+                
+                // Draw alliance connections
+                if (ecosystem.alliances && ecosystem.alliances.length > 0) {
+                    drawAllianceConnections(robot.id, agentPos, ecosystem.alliances, data.agents);
+                }
+            });
+        }
+        
+        function drawAgentStatusIndicators(position, role, status, health, energy, speed, isFocused) {
+            const [x, y] = position;
+            const barWidth = 2.0;
+            const barHeight = 0.3;
+            const barSpacing = 0.4;
+            const baseY = y + 3.0; // Position above agent
+            
+            // Health bar
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(x - barWidth/2, baseY, barWidth, barHeight);
+            ctx.fillStyle = health > 0.5 ? '#4CAF50' : health > 0.25 ? '#FF9800' : '#F44336';
+            ctx.fillRect(x - barWidth/2, baseY, barWidth * health, barHeight);
+            
+            // Energy bar
+            ctx.fillStyle = '#333333';
+            ctx.fillRect(x - barWidth/2, baseY + barSpacing, barWidth, barHeight);
+            ctx.fillStyle = energy > 0.5 ? '#2196F3' : energy > 0.25 ? '#FF9800' : '#F44336';
+            ctx.fillRect(x - barWidth/2, baseY + barSpacing, barWidth * energy, barHeight);
+            
+            // Role indicator
+            const roleSymbols = {
+                'carnivore': '🦁',
+                'herbivore': '🐰',
+                'omnivore': '🐻',
+                'scavenger': '🦅',
+                'symbiont': '🐠'
+            };
+            
+            if (isFocused || speed > 0.5) {
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '1px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(roleSymbols[role] || '🤖', x, baseY + barSpacing * 2 + 0.8);
+            }
+            
+            // Status indicator for active agents
+            if (status !== 'idle' && speed > 0.1) {
+                const statusSymbols = {
+                    'hunting': '🎯',
+                    'feeding': '🍃',
+                    'fleeing': '💨',
+                    'territorial': '🛡️',
+                    'moving': '➡️',
+                    'active': '⚡'
+                };
+                
+                ctx.fillStyle = STATUS_COLORS[status] || '#FFFFFF';
+                ctx.font = '0.8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(statusSymbols[status] || '●', x + 1.5, y + 2.0);
+            }
+        }
+        
+        function drawMovementTrail(agentId, position, speed) {
+            // Update agent trail
+            if (!agentTrails.has(agentId)) {
+                agentTrails.set(agentId, []);
+            }
+            
+            const trail = agentTrails.get(agentId);
+            trail.push({ x: position[0], y: position[1], time: Date.now() });
+            
+            // Keep only recent trail points (last 3 seconds)
+            const now = Date.now();
+            const filteredTrail = trail.filter(point => now - point.time < 3000);
+            agentTrails.set(agentId, filteredTrail);
+            
+            // Draw trail
+            if (filteredTrail.length > 1) {
+                ctx.strokeStyle = `rgba(255, 255, 255, ${Math.min(0.8, speed / 3.0)})`;
+                ctx.lineWidth = 0.1;
+                ctx.beginPath();
+                ctx.moveTo(filteredTrail[0].x, filteredTrail[0].y);
+                
+                for (let i = 1; i < filteredTrail.length; i++) {
+                    const alpha = i / filteredTrail.length; // Fade over time
+                    ctx.lineTo(filteredTrail[i].x, filteredTrail[i].y);
+                }
+                ctx.stroke();
+            }
+        }
+        
+        function drawAllianceConnections(agentId, position, alliances, allAgents) {
+            alliances.forEach(allyId => {
+                const ally = allAgents.find(a => a.id === allyId);
+                if (ally && ally.body) {
+                    const allyPos = [ally.body.x, ally.body.y];
+                    const distance = Math.sqrt((position[0] - allyPos[0])**2 + (position[1] - allyPos[1])**2);
+                    
+                    // Only draw connection if agents are close
+                    if (distance < 10.0) {
+                        ctx.strokeStyle = 'rgba(100, 200, 255, 0.3)';
+                        ctx.lineWidth = 0.1;
+                        ctx.setLineDash([0.3, 0.3]);
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(position[0], position[1]);
+                        ctx.lineTo(allyPos[0], allyPos[1]);
+                        ctx.stroke();
+                        
+                        ctx.setLineDash([]); // Reset line dash
+                    }
+                }
+            });
+        }
+        
+        function drawPredationEvents() {
+            if (!predationEvents || predationEvents.length === 0) return;
+            
+            const now = Date.now() / 1000;
+            
+            predationEvents.forEach(event => {
+                if (event.age > 5.0) return; // Don't draw old events
+                
+                const [x, y] = event.position;
+                const alpha = Math.max(0, 1.0 - (event.age / 5.0)); // Fade over 5 seconds
+                
+                if (event.success) {
+                    // Successful predation - red burst
+                    ctx.fillStyle = `rgba(255, 0, 0, ${alpha * 0.6})`;
+                    ctx.strokeStyle = `rgba(255, 100, 100, ${alpha})`;
+                    ctx.lineWidth = 0.2;
+                    
+                    const radius = 1.0 + (event.age * 0.5); // Expanding circle
+                    ctx.beginPath();
+                    ctx.arc(x, y, radius, 0, 2 * Math.PI);
+                    ctx.fill();
+                    ctx.stroke();
+                    
+                    // Add particles effect
+                    const particleCount = 8;
+                    for (let i = 0; i < particleCount; i++) {
+                        const angle = (i / particleCount) * 2 * Math.PI;
+                        const particleRadius = radius + (event.age * 0.8);
+                        const px = x + Math.cos(angle) * particleRadius;
+                        const py = y + Math.sin(angle) * particleRadius;
+                        
+                        ctx.fillStyle = `rgba(255, 50, 50, ${alpha * 0.8})`;
+                        ctx.beginPath();
+                        ctx.arc(px, py, 0.1, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                }
+            });
         }
 
         function fetchData() {
@@ -1147,11 +1552,24 @@ class TrainingEnvironment:
         self.learning_interval = 90.0  # 1.5 minutes between learning events
         self.learning_rate = 0.3
 
+        # Enhanced visualization systems
+        self.ecosystem_dynamics = EcosystemDynamics()
+        self.environmental_system = EnvironmentalSystem()
+        self.agent_health = {}  # Track agent health/energy for visualization
+        self.agent_statuses = {}  # Track agent statuses (hunting, feeding, etc.)
+        self.predation_events = []  # Track recent predation events for visualization
+        self.last_ecosystem_update = time.time()
+        self.ecosystem_update_interval = 30.0  # Update ecosystem every 30 seconds
+        
+        # Initialize ecosystem roles for existing agents
+        self._initialize_ecosystem_roles()
+
         print(f"🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
         print(f"   Evolution: {self.evolution_config.population_size} agents, {self.evolution_config.elite_size} elite")
         print(f"   Diversity target: {self.evolution_config.target_diversity}")
         print(f"   Auto-evolution every {self.evolution_interval}s")
+        print(f"🌿 Ecosystem dynamics and visualization systems active")
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1171,6 +1589,213 @@ class TrainingEnvironment:
             )
         )
         print(f"🔧 Ground setup complete with width {ground_width} for {self.num_agents} agents.")
+
+    def _initialize_ecosystem_roles(self):
+        """Initialize ecosystem roles for all agents based on their characteristics."""
+        for agent in self.agents:
+            if not getattr(agent, '_destroyed', False):
+                # Extract fitness traits from agent's physical parameters
+                fitness_traits = {
+                    'speed': getattr(agent.physical_params, 'motor_speed', 5.0) / 10.0,  # Normalize to 0-1
+                    'strength': getattr(agent.physical_params, 'motor_torque', 50.0) / 100.0,  # Normalize to 0-1
+                    'cooperation': min(1.0, getattr(agent.physical_params, 'learning_rate', 0.1) * 10.0)  # Higher learning rate = more cooperative
+                }
+                
+                # Assign ecosystem role
+                role = self.ecosystem_dynamics.assign_ecosystem_role(agent.id, fitness_traits)
+                
+                # Initialize agent status tracking
+                self.agent_statuses[agent.id] = {
+                    'role': role.value,
+                    'status': 'idle',  # idle, hunting, feeding, fleeing, territorial
+                    'last_status_change': time.time(),
+                    'energy': 1.0,  # 0.0 to 1.0
+                    'speed_factor': 1.0,
+                    'alliances': [],
+                    'territories': []
+                }
+                
+                self.agent_health[agent.id] = {
+                    'health': 1.0,  # 0.0 to 1.0
+                    'energy': 1.0,  # 0.0 to 1.0
+                    'last_updated': time.time()
+                }
+        
+        print(f"🦎 Initialized ecosystem roles for {len(self.agents)} agents")
+
+    def _update_ecosystem_dynamics(self):
+        """Update ecosystem dynamics including agent interactions, territories, and predation."""
+        try:
+            current_time = time.time()
+            
+            # Update ecosystem state
+            self.ecosystem_dynamics.update_ecosystem(
+                generation=self.evolution_engine.generation,
+                population_size=len([a for a in self.agents if not getattr(a, '_destroyed', False)])
+            )
+            
+            # Update environmental challenges
+            self.environmental_system.update_environment(self.evolution_engine.generation)
+            
+            # Update agent health and energy based on ecosystem effects
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False) or not agent.body:
+                    continue
+                    
+                agent_id = agent.id
+                position = (agent.body.position.x, agent.body.position.y)
+                
+                # Get ecosystem effects for this agent
+                ecosystem_effects = self.ecosystem_dynamics.get_ecosystem_effects(agent_id, position)
+                environmental_effects = self.environmental_system.get_effects(position)
+                
+                # Update agent health/energy
+                if agent_id in self.agent_health:
+                    health_data = self.agent_health[agent_id]
+                    
+                    # Energy decreases over time, affected by environmental factors
+                    energy_drain = 0.01 + environmental_effects.get('energy_cost', 0.0)
+                    health_data['energy'] = max(0.0, health_data['energy'] - energy_drain)
+                    
+                    # Resource access affects energy recovery
+                    resource_access = ecosystem_effects.get('resource_access', 1.0)
+                    if resource_access > 1.0:
+                        health_data['energy'] = min(1.0, health_data['energy'] + 0.005)
+                    
+                    # Health is affected by territory bonuses and competition
+                    territory_bonus = ecosystem_effects.get('territory_bonus', 0.0)
+                    competition_penalty = ecosystem_effects.get('competition_penalty', 0.0)
+                    
+                    health_change = (territory_bonus - competition_penalty) * 0.01
+                    health_data['health'] = max(0.0, min(1.0, health_data['health'] + health_change))
+                    
+                    health_data['last_updated'] = current_time
+            
+            # Update agent statuses based on their behaviors and interactions
+            self._update_agent_statuses()
+            
+            # Simulate predation events (visual only)
+            self._simulate_predation_events()
+            
+            # Clean up old predation events (keep only last 10 seconds)
+            self.predation_events = [
+                event for event in self.predation_events 
+                if current_time - event['timestamp'] < 10.0
+            ]
+            
+        except Exception as e:
+            print(f"⚠️ Error updating ecosystem dynamics: {e}")
+    
+    def _update_agent_statuses(self):
+        """Update agent statuses based on their current behaviors and ecosystem role."""
+        current_time = time.time()
+        
+        for agent in self.agents:
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
+            agent_id = agent.id
+            if agent_id not in self.agent_statuses:
+                continue
+                
+            status_data = self.agent_statuses[agent_id]
+            role = status_data['role']
+            
+            # Update speed factor based on velocity
+            velocity = agent.body.linearVelocity
+            speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
+            status_data['speed_factor'] = min(2.0, speed / 2.0)  # Normalize and cap at 2x
+            
+            # Update status based on role and behavior
+            if role == 'carnivore':
+                # Carnivores hunt when they have energy
+                if self.agent_health[agent_id]['energy'] > 0.3 and speed > 1.0:
+                    status_data['status'] = 'hunting'
+                elif speed < 0.5:
+                    status_data['status'] = 'idle'
+                else:
+                    status_data['status'] = 'moving'
+            elif role == 'herbivore':
+                # Herbivores feed or flee
+                if speed > 2.0:
+                    status_data['status'] = 'fleeing'
+                elif speed < 0.5:
+                    status_data['status'] = 'feeding'
+                else:
+                    status_data['status'] = 'moving'
+            else:
+                # Other roles have simpler status updates
+                if speed > 1.5:
+                    status_data['status'] = 'moving'
+                elif speed < 0.5:
+                    status_data['status'] = 'idle'
+                else:
+                    status_data['status'] = 'active'
+            
+            # Update alliances and territories from ecosystem
+            status_data['alliances'] = list(self.ecosystem_dynamics.alliances.get(agent_id, set()))
+            status_data['territories'] = [
+                {'type': t.territory_type.value, 'position': t.position, 'size': t.size}
+                for t in self.ecosystem_dynamics.territories if t.owner_id == agent_id
+            ]
+    
+    def _simulate_predation_events(self):
+        """Simulate predation events for visualization purposes."""
+        current_time = time.time()
+        
+        # Find carnivores and herbivores
+        carnivores = []
+        herbivores = []
+        
+        for agent in self.agents:
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
+            agent_id = agent.id
+            if agent_id in self.agent_statuses:
+                role = self.agent_statuses[agent_id]['role']
+                if role == 'carnivore':
+                    carnivores.append(agent)
+                elif role == 'herbivore':
+                    herbivores.append(agent)
+        
+        # Simulate predation attempts
+        for predator in carnivores:
+            if self.agent_statuses[predator.id]['status'] != 'hunting':
+                continue
+                
+            # Find nearby prey
+            for prey in herbivores:
+                distance = ((predator.body.position.x - prey.body.position.x) ** 2 + 
+                           (predator.body.position.y - prey.body.position.y) ** 2) ** 0.5
+                
+                if distance < 5.0:  # Within hunting range
+                    # Predation attempt based on relative speeds/fitness
+                    predator_fitness = predator.get_evolutionary_fitness()
+                    prey_fitness = prey.get_evolutionary_fitness()
+                    
+                    success_chance = min(0.3, predator_fitness / (prey_fitness + 1.0))
+                    
+                    if random.random() < success_chance:
+                        # Successful predation event
+                        self.predation_events.append({
+                            'predator_id': predator.id,
+                            'prey_id': prey.id,
+                            'position': (predator.body.position.x, predator.body.position.y),
+                            'timestamp': current_time,
+                            'success': True
+                        })
+                        
+                        # Update prey status
+                        if prey.id in self.agent_statuses:
+                            self.agent_statuses[prey.id]['status'] = 'fleeing'
+                        
+                        # Update predator energy
+                        if predator.id in self.agent_health:
+                            self.agent_health[predator.id]['energy'] = min(1.0, 
+                                self.agent_health[predator.id]['energy'] + 0.2)
+                        
+                        break  # One predation per predator per update
 
     def _update_statistics(self):
         """Update population statistics with enhanced safety checks."""
@@ -1465,6 +2090,11 @@ class TrainingEnvironment:
             # Update camera and statistics (can be done once per frame)
             self.update_camera(frame_time)
             
+            # Update ecosystem dynamics periodically
+            if current_time - self.last_ecosystem_update > self.ecosystem_update_interval:
+                self._update_ecosystem_dynamics()
+                self.last_ecosystem_update = current_time
+            
             # Health check logging every 30 seconds
             if current_time - last_health_check > 30.0:
                 try:
@@ -1754,13 +2384,23 @@ class TrainingEnvironment:
                     print(f"⚠️  Error creating robot details: {e}")
                     robot_details = []
 
-                # 5. Get full agent data for robot details panel
+                # 5. Get full agent data for robot details panel with enhanced visualization data
                 agents_data = []
                 try:
                     for agent in current_agents:
                         if not agent.body:  # Skip agents without bodies
                             continue
                             
+                        agent_id = agent.id
+                        
+                        # Get ecosystem and health data
+                        agent_status = self.agent_statuses.get(agent_id, {})
+                        agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
+                        
+                        # Calculate speed for visualization
+                        velocity = agent.body.linearVelocity
+                        speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
+                        
                         agent_data = {
                             'id': agent.id,
                             'body': {
@@ -1787,7 +2427,18 @@ class TrainingEnvironment:
                             'action_history': convert_numpy_types(agent.action_history),
                             'best_reward': convert_numpy_types(getattr(agent, 'best_reward_received', 0.0)),
                             'worst_reward': convert_numpy_types(getattr(agent, 'worst_reward_received', 0.0)),
-                            'awake': agent.body.awake if agent.body else False
+                            'awake': agent.body.awake if agent.body else False,
+                            # Enhanced visualization data
+                            'ecosystem': {
+                                'role': agent_status.get('role', 'omnivore'),
+                                'status': agent_status.get('status', 'idle'),
+                                'health': convert_numpy_types(agent_health['health']),
+                                'energy': convert_numpy_types(agent_health['energy']),
+                                'speed': convert_numpy_types(speed),
+                                'speed_factor': convert_numpy_types(agent_status.get('speed_factor', 1.0)),
+                                'alliances': agent_status.get('alliances', []),
+                                'territories': agent_status.get('territories', [])
+                            }
                         }
                         agents_data.append(agent_data)
                 except Exception as e:
@@ -1799,6 +2450,22 @@ class TrainingEnvironment:
                 if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
                     focused_agent_id = self.focused_agent.id
 
+                # 7. Get ecosystem and environmental data
+                ecosystem_status = self.ecosystem_dynamics.get_ecosystem_status()
+                environmental_status = self.environmental_system.get_status()
+                
+                # 8. Get recent predation events for visualization
+                recent_predation_events = [
+                    {
+                        'predator_id': event['predator_id'],
+                        'prey_id': event['prey_id'],
+                        'position': event['position'],
+                        'age': time.time() - event['timestamp'],
+                        'success': event['success']
+                    }
+                    for event in self.predation_events[-10:]  # Last 10 events
+                ]
+
                 return {
                     'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
                     'leaderboard': leaderboard_data,
@@ -1806,7 +2473,44 @@ class TrainingEnvironment:
                     'agents': agents_data,
                     'statistics': self.population_stats,
                     'camera': self.get_camera_state(),
-                    'focused_agent_id': focused_agent_id
+                    'focused_agent_id': focused_agent_id,
+                    # Enhanced visualization data
+                    'ecosystem': {
+                        'status': ecosystem_status,
+                        'territories': [
+                            {
+                                'type': t.territory_type.value,
+                                'position': t.position,
+                                'size': t.size,
+                                'resource_value': t.resource_value,
+                                'owner_id': t.owner_id,
+                                'contested': t.contested
+                            }
+                            for t in self.ecosystem_dynamics.territories
+                        ],
+                        'food_sources': [
+                            {
+                                'position': f.position,
+                                'type': f.food_type,
+                                'amount': f.amount,
+                                'max_capacity': f.max_capacity
+                            }
+                            for f in self.ecosystem_dynamics.food_sources
+                        ],
+                        'predation_events': recent_predation_events
+                    },
+                    'environment': {
+                        'status': environmental_status,
+                        'obstacles': [
+                            {
+                                'type': obs.type.value,
+                                'position': obs.position,
+                                'size': obs.size,
+                                'danger_level': obs.danger_level
+                            }
+                            for obs in self.environmental_system.obstacles
+                        ]
+                    }
                 }
                 
             except Exception as e:
