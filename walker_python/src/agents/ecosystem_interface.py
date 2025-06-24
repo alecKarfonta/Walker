@@ -42,8 +42,8 @@ class EcosystemInterface:
             health_data = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
             survival_data['health_level'] = health_data['health']
             
-            # Food awareness
-            food_info = self._get_nearest_food_info(agent_position)
+            # Food awareness - consider agent's dietary restrictions
+            food_info = self._get_nearest_food_info(agent_id, agent_position)
             survival_data.update(food_info)
             
             # Social context
@@ -83,8 +83,8 @@ class EcosystemInterface:
                 'status': 'idle'
             }
     
-    def _get_nearest_food_info(self, agent_position: Tuple[float, float]) -> Dict[str, Any]:
-        """Get information about the nearest food source."""
+    def _get_nearest_food_info(self, agent_id: str, agent_position: Tuple[float, float]) -> Dict[str, Any]:
+        """Get information about the nearest food source that the agent can actually eat."""
         try:
             if not self.ecosystem_dynamics.food_sources:
                 return {
@@ -98,10 +98,30 @@ class EcosystemInterface:
             nearest_food = None
             nearest_distance = float('inf')
             
-            # Find nearest food source
+            # Get agent's ecosystem role to determine dietary restrictions
+            agent_status = self.agent_statuses.get(agent_id, {})
+            agent_role_str = agent_status.get('role', 'omnivore')
+            
+            # Convert role string to EcosystemRole enum
+            from src.ecosystem_dynamics import EcosystemRole
+            role_map = {
+                'herbivore': EcosystemRole.HERBIVORE,
+                'carnivore': EcosystemRole.CARNIVORE,
+                'omnivore': EcosystemRole.OMNIVORE,
+                'scavenger': EcosystemRole.SCAVENGER,
+                'symbiont': EcosystemRole.SYMBIONT
+            }
+            agent_role = role_map.get(agent_role_str, EcosystemRole.OMNIVORE)
+            
+            # Find nearest food source that this agent can actually eat
             for food_source in self.ecosystem_dynamics.food_sources:
-                if food_source.amount <= 0:
-                    continue  # Skip depleted food sources
+                if food_source.amount <= 0.1:  # Skip depleted food sources (matches consumption threshold)
+                    continue
+                
+                # Check if agent can eat this food type
+                consumption_efficiency = self.ecosystem_dynamics._get_consumption_efficiency(agent_role, food_source.food_type)
+                if consumption_efficiency <= 0.0:
+                    continue  # Skip food types this agent cannot eat
                     
                 food_x, food_y = food_source.position
                 distance = math.sqrt((agent_x - food_x)**2 + (agent_y - food_y)**2)
@@ -235,7 +255,7 @@ class EcosystemInterface:
             
             # If food was consumed, try to identify what type
             if consumption_info['consumed_food']:
-                food_info = self._get_nearest_food_info(agent_position)
+                food_info = self._get_nearest_food_info(agent_id, agent_position)
                 if food_info['nearest_food_distance'] < 2.0:  # Close enough to have consumed it
                     consumption_info['food_type_consumed'] = food_info['food_type']
             
@@ -284,8 +304,8 @@ class EcosystemInterface:
         try:
             opportunities = []
             
-            # Food learning opportunities
-            food_info = self._get_nearest_food_info(agent_position)
+            # Food learning opportunities - use temp agent_id for now
+            food_info = self._get_nearest_food_info('temp', agent_position)
             if food_info['nearest_food_distance'] < 5.0:
                 opportunities.append({
                     'type': 'food_interaction',

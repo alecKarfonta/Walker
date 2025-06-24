@@ -271,6 +271,9 @@ class EcosystemDynamics:
     def _update_food_sources(self):
         """Update food source availability"""
         
+        # Clean up existing meat food sources - carnivores must hunt robots instead
+        self.food_sources = [food for food in self.food_sources if food.food_type != "meat"]
+        
         # Regenerate existing food sources
         for food in self.food_sources:
             if food.amount < food.max_capacity:
@@ -300,7 +303,7 @@ class EcosystemDynamics:
         # Add new food sources based on need and season
         if random.random() < food_spawn_chance:
             position = (random.uniform(-60, 60), random.uniform(-5, 35))
-            food_type = random.choice(["plants", "insects", "seeds", "meat"])
+            food_type = random.choice(["plants", "insects", "seeds"])  # Removed meat - carnivores must hunt other robots
             
             # Generate more substantial food sources when population is low
             if current_food_count < min_food_sources:
@@ -380,9 +383,9 @@ class EcosystemDynamics:
         """Determine resource type based on nearby agent roles"""
         role_preferences = {
             EcosystemRole.HERBIVORE: ["plants", "seeds"],
-            EcosystemRole.CARNIVORE: ["meat", "insects"],
+            EcosystemRole.CARNIVORE: ["insects"],  # Removed meat - carnivores must hunt for meat
             EcosystemRole.OMNIVORE: ["plants", "insects", "seeds"],
-            EcosystemRole.SCAVENGER: ["meat", "insects"],
+            EcosystemRole.SCAVENGER: ["insects"],  # Removed meat - scavengers must find robot remains
             EcosystemRole.SYMBIONT: ["plants", "seeds"]
         }
         
@@ -548,11 +551,11 @@ class EcosystemDynamics:
     def _get_consumption_efficiency(self, role: EcosystemRole, food_type: str) -> float:
         """Get consumption efficiency based on agent role and food type"""
         efficiency_matrix = {
-            EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.8, "insects": 0.2, "meat": 0.1},
-            EcosystemRole.CARNIVORE: {"meat": 1.0, "insects": 0.7, "plants": 0.2, "seeds": 0.1},
-            EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.7},
-            EcosystemRole.SCAVENGER: {"meat": 0.9, "insects": 0.8, "plants": 0.3, "seeds": 0.2},
-            EcosystemRole.SYMBIONT: {"plants": 0.9, "seeds": 0.8, "insects": 0.5, "meat": 0.3}
+            EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.8, "insects": 0.0, "meat": 0.0},  # Herbivores can ONLY eat plants and seeds
+            EcosystemRole.CARNIVORE: {"meat": 0.0, "insects": 0.7, "plants": 0.0, "seeds": 0.0},  # Carnivores can't eat environmental meat - must hunt robots
+            EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.0},  # Omnivores can't eat environmental meat either
+            EcosystemRole.SCAVENGER: {"meat": 0.0, "insects": 0.8, "plants": 0.3, "seeds": 0.2},  # Scavengers can't eat environmental meat
+            EcosystemRole.SYMBIONT: {"plants": 0.9, "seeds": 0.8, "insects": 0.5, "meat": 0.0}   # Symbionts can't eat meat
         }
         
         return efficiency_matrix.get(role, {}).get(food_type, 0.5)

@@ -1165,7 +1165,7 @@ HTML_TEMPLATE = """
                     let foodColor = '#4CAF50'; // Default green for plants
                     switch (food.type) {
                         case 'plants': foodColor = '#4CAF50'; break;
-                        case 'meat': foodColor = '#F44336'; break;
+                        // meat removed - carnivores hunt robots instead
                         case 'insects': foodColor = '#795548'; break;
                         case 'seeds': foodColor = '#FF9800'; break;
                     }
@@ -1190,7 +1190,7 @@ HTML_TEMPLATE = """
                     ctx.textAlign = 'center';
                     const typeIcons = {
                         'plants': '🌿',
-                        'meat': '🥩',
+                        // meat removed - carnivores hunt robots instead
                         'insects': '🐛',
                         'seeds': '🌰'
                     };
