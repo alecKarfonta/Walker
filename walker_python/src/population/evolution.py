@@ -283,6 +283,9 @@ class EvolutionEngine:
             
             new_population.append(child)
         
+        # No need to reassign IDs - agents already have unique IDs from cloning/crossover
+        # Reassigning breaks leaderboard button references after evolution
+
         return new_population
     
     def _tournament_selection(self, ranked_agents: List[AgentRecord]) -> BaseAgent:

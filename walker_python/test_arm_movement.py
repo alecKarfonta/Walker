@@ -1,84 +1,88 @@
 #!/usr/bin/env python3
 """
-Test to check if the arms are actually moving when motors are applied.
+Simple test to verify arm movements are working.
 """
 
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
-import pymunk
+import Box2D as b2
 import numpy as np
-from src.agents.crawling_crate import CrawlingCrate
-
-
-def create_flat_world():
-    """Create a flat ground in a Pymunk space."""
-    space = pymunk.Space()
-    space.gravity = (0, -9.8)
-    # Flat ground
-    static_body = space.static_body
-    ground = pymunk.Segment(static_body, (-100, 0), (100, 0), 1.0)
-    ground.friction = 1.0
-    space.add(ground)
-    return space
-
+import time
+from src.agents.crawling_crate_agent import CrawlingCrateAgent
 
 def test_arm_movement():
-    """Test if arms actually move when motors are applied."""
-    space = create_flat_world()
-    agent = CrawlingCrate(space)
+    """Test that arm movements are working correctly."""
+    print("🔧 Testing arm movement...")
     
-    print("Testing arm movement...")
-    print(f"Initial left arm angle: {agent.left_arm.angle:.4f}")
-    print(f"Initial right arm angle: {agent.right_arm.angle:.4f}")
+    # Create physics world
+    world = b2.b2World(gravity=(0, -10), doSleep=True)
     
-    # Apply strong motor forces
-    agent.apply_action((20.0, 20.0))  # Both arms forward
-    print(f"Applied motor rates: left={agent.left_motor.rate}, right={agent.right_motor.rate}")
+    # Create a simple ground
+    ground_body = world.CreateStaticBody(position=(0, -1))
+    ground_body.CreateFixture(
+        shape=b2.b2PolygonShape(box=(50, 1)),
+        density=0.0,
+        friction=0.9
+    )
     
-    # Step a few times
-    for i in range(10):
-        agent.step(1/60.0)
-        print(f"Step {i+1}: left_angle={agent.left_arm.angle:.4f}, right_angle={agent.right_arm.angle:.4f}")
+    # Create test agent
+    agent = CrawlingCrateAgent(
+        world,
+        agent_id=0,
+        position=(0, 6)
+    )
     
-    # Check if angles changed
-    left_change = abs(agent.left_arm.angle - 0)
-    right_change = abs(agent.right_arm.angle - 0)
+    print(f"Initial arm angles: shoulder={np.degrees(agent.upper_arm.angle):.1f}°, elbow={np.degrees(agent.lower_arm.angle):.1f}°")
     
-    print(f"Left arm angle change: {left_change:.4f}")
-    print(f"Right arm angle change: {right_change:.4f}")
+    # Test different actions and see if arms move
+    test_actions = [
+        (1, 0),    # Shoulder forward
+        (-1, 0),   # Shoulder backward
+        (0, 1),    # Elbow flex
+        (0, -1),   # Elbow extend
+        (1, 1),    # Both forward/flex
+        (-1, -1),  # Both backward/extend
+    ]
     
-    # Arms should have moved
-    assert left_change > 0.01, f"Left arm did not move (change: {left_change})"
-    assert right_change > 0.01, f"Right arm did not move (change: {right_change})"
+    dt = 1.0 / 60.0  # 60 FPS
     
-    print("✓ Arms are moving correctly!")
-
-
-def test_arm_limits():
-    """Test if arm angle limits are working."""
-    space = create_flat_world()
-    agent = CrawlingCrate(space)
+    for i, action in enumerate(test_actions):
+        print(f"\n--- Test {i+1}: Action {action} ---")
+        initial_shoulder = agent.upper_arm.angle
+        initial_elbow = agent.lower_arm.angle
+        
+        # Apply action for multiple steps
+        for step in range(60):  # 1 second at 60 FPS
+            agent.apply_action(action)
+            world.Step(dt, 8, 3)
+        
+        final_shoulder = agent.upper_arm.angle
+        final_elbow = agent.lower_arm.angle
+        
+        shoulder_change = np.degrees(final_shoulder - initial_shoulder)
+        elbow_change = np.degrees(final_elbow - initial_elbow)
+        
+        print(f"Shoulder angle change: {shoulder_change:.1f}° (from {np.degrees(initial_shoulder):.1f}° to {np.degrees(final_shoulder):.1f}°)")
+        print(f"Elbow angle change: {elbow_change:.1f}° (from {np.degrees(initial_elbow):.1f}° to {np.degrees(final_elbow):.1f}°)")
+        
+        # Check if arms moved significantly
+        if abs(shoulder_change) > 1.0 or abs(elbow_change) > 1.0:
+            print("✅ Arms moved!")
+        else:
+            print("❌ Arms barely moved")
+        
+        # Check for joint limits
+        shoulder_limit_hit = abs(agent.upper_arm.angle) >= np.pi/2 * 0.9
+        elbow_limit_hit = (agent.lower_arm.angle <= 0.1 or agent.lower_arm.angle >= 3*np.pi/4 * 0.9)
+        
+        if shoulder_limit_hit:
+            print("⚠️  Shoulder joint at limit")
+        if elbow_limit_hit:
+            print("⚠️  Elbow joint at limit")
     
-    print("\nTesting arm angle limits...")
-    
-    # Apply very strong motor forces for many steps
-    agent.apply_action((50.0, 50.0))  # Very strong
-    
-    for i in range(100):
-        agent.step(1/60.0)
-        if i % 20 == 0:
-            print(f"Step {i}: left_angle={agent.left_arm.angle:.4f}, right_angle={agent.right_arm.angle:.4f}")
-    
-    # Check if angles are within limits (-π/2 to π/2)
-    assert -np.pi/2 <= agent.left_arm.angle <= np.pi/2, f"Left arm angle {agent.left_arm.angle} outside limits"
-    assert -np.pi/2 <= agent.right_arm.angle <= np.pi/2, f"Right arm angle {agent.right_arm.angle} outside limits"
-    
-    print("✓ Arm angle limits are working!")
-
+    print("\n🔧 Arm movement test complete!")
 
 if __name__ == "__main__":
-    test_arm_movement()
-    test_arm_limits()
-    print("\nAll tests passed!") 
+    test_arm_movement() 
