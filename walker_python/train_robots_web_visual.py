@@ -2503,12 +2503,12 @@ class TrainingEnvironment:
                         'status': environmental_status,
                         'obstacles': [
                             {
-                                'type': obs.type.value,
-                                'position': obs.position,
-                                'size': obs.size,
-                                'danger_level': obs.danger_level
+                                'type': obs.get('type', 'unknown'),
+                                'position': obs.get('position', [0, 0]),
+                                'size': obs.get('size', 2.0),  # Default size for simple obstacles
+                                'danger_level': obs.get('danger_level', 0.3)  # Default danger level
                             }
-                            for obs in self.environmental_system.obstacles
+                            for obs in self.environmental_system.obstacles if obs and isinstance(obs, dict)
                         ]
                     }
                 }
