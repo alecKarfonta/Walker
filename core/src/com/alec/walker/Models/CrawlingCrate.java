@@ -241,7 +241,7 @@ public class CrawlingCrate extends BasicAgent {
 		this.legSpread = legSpread;
 		this.wheelRadius = wheelRadius;
 		this.impatience = GamePreferences.instance.impatience;
-		this.precision = 0.1f;
+		this.precision = 1.0f / 10.0f; // 10-degree increments (1.0 / 10.0 = 0.1)
 
 		// Calculate body shape
 		bodyShape = new float[] { -((width / 2) * .95f), -height / 2, // bottom left
@@ -269,8 +269,8 @@ public class CrawlingCrate extends BasicAgent {
 		this.speed = 0;
 		this.speedDecay = 0.8f;
 		acceleration = 0;
-		state = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, };
-		previousState = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, };
+		state = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		previousState = new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 
 
 		initLearning();
@@ -446,7 +446,7 @@ public class CrawlingCrate extends BasicAgent {
 	public void initLearning() {
 		// System.out.println("initLearning()");
 		age = new Duration(0);
-		actionCount = 6;
+		actionCount = 4; // Reduced from 6 to 4 - removed "none" actions
 
 		previousAction = 0;
 		previousValue = 0;
@@ -460,8 +460,9 @@ public class CrawlingCrate extends BasicAgent {
 		// System.out.println("initLearning() : armRange = " + armRange);
 		// System.out.println("initLearning(): wristRange = " + wristRange);
 
-		int QArmRange = (int) ((armRange + 1) * precision) + 1;
-		int QWristRange = (int) ((wristRange + 1) * precision) + 1;
+		// Calculate bucket ranges for 10-degree increments
+		int QArmRange = (armRange / 10) + 1;  // 60/10 + 1 = 7 buckets (0-6)
+		int QWristRange = (wristRange / 10) + 1;  // 180/10 + 1 = 19 buckets (0-18)
 
 		// System.out.println("initLearning() : QArmRange = " + QArmRange);
 		// System.out.println("initLearning(): QWristRange = " + QWristRange);
@@ -523,16 +524,6 @@ public class CrawlingCrate extends BasicAgent {
 				armJoint.enableMotor(true);
 				armJoint.setMotorSpeed(-armSpeed);
 				break;
-			case 4:
-				armJoint.enableMotor(true);
-				armJoint.setMotorSpeed(0);
-				break;
-			case 5:
-				// move arm down
-				wristJoint.enableMotor(true);
-				wristJoint.setMotorSpeed(0);
-				break;
-
 		}
 
 		// Save as previous action for next timestep
@@ -575,12 +566,13 @@ public class CrawlingCrate extends BasicAgent {
 				);
 		wristAngle = MathUtils.clamp(wristAngle, 0, wristRange);
 
-		// Reduce precision of angles
-		armAngle = (int) (armAngle * precision);
-		wristAngle = (int) (wristAngle * precision);
+		// Use 10-degree bucket discretization
+		// If arm is at 17 degrees, it goes into bucket 2 (10-19 degrees)
+		armAngle = armAngle / 10;  // Integer division creates 10-degree buckets
+		wristAngle = wristAngle / 10;  // Integer division creates 10-degree buckets
 
 		// Store state vector, where the action is represented by a one-hot
-		state = new float[] { armAngle, wristAngle, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+		state = new float[] { armAngle, wristAngle, 0.0f, 0.0f, 0.0f, 0.0f };
 		// Set previous action index
 		state[previousAction + 2] = 1;
 
@@ -653,9 +645,10 @@ public class CrawlingCrate extends BasicAgent {
 				);
 		wristAngle = MathUtils.clamp(wristAngle, 0, wristRange);
 
-		// Reduce precision of angles
-		armAngle = (int) (armAngle * precision);
-		wristAngle = (int) (wristAngle * precision);
+		// Use 10-degree bucket discretization
+		// If arm is at 17 degrees, it goes into bucket 2 (10-19 degrees)
+		armAngle = armAngle / 10;  // Integer division creates 10-degree buckets
+		wristAngle = wristAngle / 10;  // Integer division creates 10-degree buckets
 
 		// Find the max value action
 		// Init to a random action

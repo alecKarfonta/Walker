@@ -1,0 +1,36 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    version: 1
+    editable: true
+    jsonData:
+      httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: 2.45.0
+      cacheLevel: 'High'
+      disableMetricsLookup: false
+      incrementalQuery: false
+      intervalFactor: 2
+      timeInterval: "5s"
+    secureJsonData: {}
+
+  - name: Walker-Metrics-DB
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: walker_metrics
+    user: walker_user
+    secureJsonData:
+      password: walker_secure_2024
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 10
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    version: 1
+    editable: true 

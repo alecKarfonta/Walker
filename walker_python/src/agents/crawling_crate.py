@@ -40,7 +40,7 @@ class CrawlingCrate(BaseAgent):
         
         # Main chassis fixture
         chassis_shape = b2.b2PolygonShape(box=(1.5, 0.75))
-        chassis_fixture = self.body.CreateFixture(shape=chassis_shape, density=2.0, friction=0.8)
+        chassis_fixture = self.body.CreateFixture(shape=chassis_shape, density=4.0, friction=0.8)
         chassis_fixture.filterData = self.filter
 
         # Wheels
@@ -53,7 +53,7 @@ class CrawlingCrate(BaseAgent):
                 angularDamping=0.05  # Reduced damping
             )
             wheel = self.world.CreateBody(wheel_def)
-            wheel_fixture = wheel.CreateFixture(shape=b2.b2CircleShape(radius=0.5), density=5.0, friction=0.9)
+            wheel_fixture = wheel.CreateFixture(shape=b2.b2CircleShape(radius=0.5), density=8.0, friction=0.9)
             wheel_fixture.filterData = self.filter
             self.wheels.append(wheel)
 
@@ -77,7 +77,7 @@ class CrawlingCrate(BaseAgent):
         self.upper_arm = self.world.CreateBody(upper_arm_def)
         upper_arm_fixture = self.upper_arm.CreateFixture(
             shape=b2.b2PolygonShape(box=(1.25, 0.1)), 
-            density=0.5,  # Reduced density for lighter arms
+            density=0.1,  # Very light arms for better control
             friction=0.5
         )
         upper_arm_fixture.filterData = self.filter
@@ -92,7 +92,7 @@ class CrawlingCrate(BaseAgent):
         self.lower_arm = self.world.CreateBody(lower_arm_def)
         lower_arm_fixture = self.lower_arm.CreateFixture(
             shape=b2.b2PolygonShape(box=(1.25, 0.1)), 
-            density=0.5,  # Reduced density for lighter arms
+            density=0.1,  # Very light arms for better control
             friction=0.5  # Reduced friction to prevent sticking
         )
         lower_arm_fixture.filterData = self.filter
@@ -102,22 +102,28 @@ class CrawlingCrate(BaseAgent):
             bodyA=self.body, 
             bodyB=self.upper_arm, 
             localAnchorA=(0,0.75), 
-            localAnchorB=(-1.25, 0)
+            localAnchorB=(-1.25, 0)  # Connect to LEFT end of upper arm
         )
         shoulder_joint_def.enableLimit = True
-        shoulder_joint_def.lowerAngle = 0  # 0 degrees (arm pointing forward)
-        shoulder_joint_def.upperAngle = 360   # +180 degrees (arm pointing backward)
+        shoulder_joint_def.lowerAngle = -np.pi/2  # -90 degrees (arm pointing backward)
+        shoulder_joint_def.upperAngle = np.pi/2   # +90 degrees (arm pointing forward)
+        shoulder_joint_def.enableMotor = True
+        shoulder_joint_def.maxMotorTorque = 5.0
+        shoulder_joint_def.motorSpeed = 0
         self.shoulder_joint = self.world.CreateJoint(shoulder_joint_def)
         
         elbow_joint_def = b2.b2RevoluteJointDef(
             bodyA=self.upper_arm, 
             bodyB=self.lower_arm, 
-            localAnchorA=(1.25,0), 
-            localAnchorB=(-1.25, 0)
+            localAnchorA=(1.25,0),   # RIGHT end of upper arm
+            localAnchorB=(-1.25, 0)  # LEFT end of lower arm
         )
         elbow_joint_def.enableLimit = True
         elbow_joint_def.lowerAngle = 0           # 0 degrees (fully extended)
         elbow_joint_def.upperAngle = 3*np.pi/4    # +135 degrees
+        elbow_joint_def.enableMotor = True
+        elbow_joint_def.maxMotorTorque = 5.0
+        elbow_joint_def.motorSpeed = 0
         self.elbow_joint = self.world.CreateJoint(elbow_joint_def)
 
     def reset(self):
@@ -140,13 +146,21 @@ class CrawlingCrate(BaseAgent):
         self.lower_arm.angle = np.pi / 3   # More upward angle to create a crawling stance
 
     def apply_action(self, action: Tuple[float, float]):
-        # Reduced motor strength for more controlled movement
-        shoulder_torque = float(np.clip(action[0], -15.0, 15.0)) * 50.0
-        elbow_torque = float(np.clip(action[1], -15.0, 15.0)) * 50.0
+        # Convert action to target motor speeds (respecting joint limits)
+        shoulder_speed = float(np.clip(action[0], -1.0, 1.0)) * 10.0  # motor_speed
+        elbow_speed = float(np.clip(action[1], -1.0, 1.0)) * 10.0     # motor_speed
 
-        # Apply torque and ensure bodies are awake
-        self.upper_arm.ApplyTorque(shoulder_torque, wake=True)
-        self.lower_arm.ApplyTorque(elbow_torque, wake=True)
+        # Set motor speeds on the joints (this respects the joint limits!)
+        self.shoulder_joint.motorSpeed = shoulder_speed
+        self.elbow_joint.motorSpeed = elbow_speed
+        
+        # Ensure joints are enabled and awake
+        self.shoulder_joint.enableMotor = True
+        self.elbow_joint.enableMotor = True
+        
+        # Wake up the bodies to ensure they respond
+        self.upper_arm.awake = True
+        self.lower_arm.awake = True
         
         # Removed debug print to eliminate overhead - was running 1% of the time
 
