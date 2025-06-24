@@ -33,6 +33,9 @@ from src.evaluation.dashboard_exporter import DashboardExporter
 from src.ecosystem_dynamics import EcosystemDynamics, EcosystemRole
 from src.environment_challenges import EnvironmentalSystem
 
+# Import elite robot management
+from src.persistence import EliteManager
+
 # Suppress Flask logging for status endpoint
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
@@ -1391,62 +1394,26 @@ HTML_TEMPLATE = """
             const deathEvents = window.lastData.ecosystem.death_events;
             
             deathEvents.forEach(event => {
-                if (event.age > 15.0) return; // Don't draw old events
+                if (event.age > 3.0) return; // Much shorter duration - only 3 seconds
                 
                 const [x, y] = event.position;
-                const alpha = Math.max(0, 1.0 - (event.age / 15.0)); // Fade over 15 seconds
+                const alpha = Math.max(0, 1.0 - (event.age / 3.0)); // Quick fade over 3 seconds
                 
                 if (event.cause === 'starvation') {
-                    // Death by starvation - dark purple/black effect
-                    const radius = 1.5 + (event.age * 0.3); // Slow expanding circle
+                    // Simple small cross mark - very lightweight
+                    const size = 0.8; // Small fixed size
+                    const lineWidth = 0.1;
                     
-                    // Dark energy burst
-                    ctx.fillStyle = `rgba(75, 0, 130, ${alpha * 0.4})`;
-                    ctx.strokeStyle = `rgba(138, 43, 226, ${alpha * 0.8})`;
-                    ctx.lineWidth = 0.15;
+                    ctx.strokeStyle = `rgba(200, 100, 100, ${alpha * 0.8})`;
+                    ctx.lineWidth = lineWidth;
                     
+                    // Draw simple "X" mark
                     ctx.beginPath();
-                    ctx.arc(x, y, radius, 0, 2 * Math.PI);
-                    ctx.fill();
+                    ctx.moveTo(x - size, y - size);
+                    ctx.lineTo(x + size, y + size);
+                    ctx.moveTo(x + size, y - size);
+                    ctx.lineTo(x - size, y + size);
                     ctx.stroke();
-                    
-                    // Add soul particles rising upward
-                    const particleCount = 6;
-                    for (let i = 0; i < particleCount; i++) {
-                        const angle = (i / particleCount) * 2 * Math.PI + event.age;
-                        const particleRadius = 0.8 + (event.age * 0.4);
-                        const px = x + Math.cos(angle) * particleRadius;
-                        const py = y + Math.sin(angle) * particleRadius - (event.age * 0.5); // Rise upward
-                        
-                        ctx.fillStyle = `rgba(200, 200, 255, ${alpha * 0.6})`;
-                        ctx.beginPath();
-                        ctx.arc(px, py, 0.08, 0, 2 * Math.PI);
-                        ctx.fill();
-                    }
-                    
-                    // Role-based death symbol
-                    if (event.age < 8.0) { // Show symbol for first 8 seconds
-                        const deathSymbols = {
-                            'carnivore': '💀',
-                            'herbivore': '🥀',
-                            'omnivore': '⚰️',
-                            'scavenger': '👻',
-                            'symbiont': '💫'
-                        };
-                        
-                        ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-                        ctx.font = '1.2px Arial';
-                        ctx.textAlign = 'center';
-                        ctx.fillText(deathSymbols[event.role] || '💀', x, y + 2.5);
-                    }
-                    
-                    // Add "STARVED" text for first few seconds
-                    if (event.age < 3.0) {
-                        ctx.fillStyle = `rgba(255, 100, 100, ${alpha})`;
-                        ctx.font = '0.6px Arial';
-                        ctx.textAlign = 'center';
-                        ctx.fillText('STARVED', x, y - 2.0);
-                    }
                 }
             });
         }
@@ -1740,7 +1707,7 @@ class TrainingEnvironment:
         
         # Resource generation system  
         self.last_resource_generation = time.time()
-        self.resource_generation_interval = 5.0  # Generate resources very frequently to ensure abundance
+        self.resource_generation_interval = 3.0  # Generate resources extremely frequently for abundant food
         self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
         
         # Death and survival system
@@ -1750,11 +1717,23 @@ class TrainingEnvironment:
             'total_deaths': 0,
             'deaths_by_starvation': 0,
             'average_lifespan': 0,
+            'lifespan': 0,  # Add missing lifespan key
             'agent_birth_times': {}  # Track when each agent was born/created
         }
         
         # Initialize ecosystem roles for existing agents
         self._initialize_ecosystem_roles()
+
+        # Initialize elite robot management system
+        self.elite_manager = EliteManager(
+            storage_directory="robot_storage",
+            elite_per_generation=3,  # Preserve top 3 robots each generation
+            max_elite_storage=150,   # Maximum 150 elite robots in storage
+            min_fitness_threshold=1.0  # Only preserve robots with fitness > 1.0
+        )
+        
+        # Flag to track if we should restore elites on startup
+        self.restore_elites_on_start = True
 
         print(f"🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
@@ -1762,6 +1741,7 @@ class TrainingEnvironment:
         print(f"   Diversity target: {self.evolution_config.target_diversity}")
         print(f"   Auto-evolution every {self.evolution_interval}s")
         print(f"🌿 Ecosystem dynamics and visualization systems active")
+        print(f"🏆 Elite preservation: {self.elite_manager.elite_per_generation} per generation, max {self.elite_manager.max_elite_storage} stored")
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1881,10 +1861,10 @@ class TrainingEnvironment:
                 if current_time - event['timestamp'] < 10.0
             ]
             
-            # Clean up old death events (keep only last 30 seconds for visualization)
+            # Clean up old death events (keep only last 5 seconds - shorter since animations are now brief)
             self.death_events = [
                 event for event in self.death_events 
-                if current_time - event['timestamp'] < 30.0
+                if current_time - event['timestamp'] < 5.0
             ]
             
         except Exception as e:
@@ -2038,7 +2018,7 @@ class TrainingEnvironment:
                 current_energy = self.agent_energy_levels.get(agent_id, 1.0)
                 
                 # Very gentle energy decay over time - realistic survival pressure
-                base_decay = 0.00001  
+                base_decay = 0.0001  
                 
                 # Minimal additional decay based on movement 
                 velocity = agent.body.linearVelocity
@@ -2059,20 +2039,74 @@ class TrainingEnvironment:
                 total_decay = (base_decay + movement_cost) * role_multiplier
                 current_energy = max(0.0, current_energy - total_decay)
                 
-                # Try to consume nearby resources (with significantly boosted energy gain)
+                # Try to consume nearby resources (with massive energy restoration)
                 energy_gain = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
-                # Major boost to energy gain to ensure resources are very valuable
-                boosted_energy_gain = energy_gain * 5.0  # 5x energy gain from resources!
+                # Massive boost to energy gain - eating should rapidly restore energy
+                boosted_energy_gain = energy_gain * 15.0  # 15x energy gain from resources!
                 current_energy = min(1.0, current_energy + boosted_energy_gain)
+                
+                # Carnivores and omnivores can also hunt other robots for energy
+                role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
+                if role in ['carnivore', 'omnivore'] and current_energy < 0.7:  # Only hunt when moderately hungry
+                    # Prepare list of potential prey (other agents)
+                    available_agents = []
+                    for other_agent in self.agents:
+                        if (not getattr(other_agent, '_destroyed', False) and other_agent.body and 
+                            other_agent.id != agent_id):  # Don't hunt yourself
+                            other_position = (other_agent.body.position.x, other_agent.body.position.y)
+                            other_role = self.agent_statuses.get(other_agent.id, {}).get('role', 'omnivore')
+                            other_energy = self.agent_energy_levels.get(other_agent.id, 1.0)
+                            available_agents.append((other_agent.id, other_position, other_role, other_energy))
+                    
+                    if available_agents:
+                        # Attempt predation
+                        predation_energy, victim_id = self.ecosystem_dynamics.attempt_predation(
+                            agent_id, agent_position, available_agents
+                        )
+                        
+                        if victim_id and predation_energy > 0:
+                            # Successful predation!
+                            current_energy = min(1.0, current_energy + predation_energy)
+                            
+                            # Record predation event for visualization  
+                            predation_event = {
+                                'predator_id': agent_id,
+                                'prey_id': victim_id,  # Changed from victim_id to prey_id to match status endpoint
+                                'position': agent_position,
+                                'energy_gained': predation_energy,
+                                'timestamp': time.time(),
+                                'success': True
+                            }
+                            self.predation_events.append(predation_event)
+                            
+                            # Kill the victim - set energy to 0 to trigger death
+                            self.agent_energy_levels[victim_id] = 0.0
+                            
+                            # Record death event for visualization
+                            death_event = {
+                                'agent_id': victim_id,
+                                'position': agent_position,
+                                'cause': 'predation',
+                                'role': self.agent_statuses.get(victim_id, {}).get('role', 'unknown'),
+                                'timestamp': time.time()
+                            }
+                            self.death_events.append(death_event)
+                            
+                            # Update survival statistics
+                            self.survival_stats['total_deaths'] += 1
                 
                 # Update energy level
                 self.agent_energy_levels[agent_id] = current_energy
                 
                 # Check for death by starvation
                 if current_energy <= 0.0:
-                    print(f"💀 Agent {agent_id} died from starvation! (Role: {role})")
-                    agents_to_replace.append(agent)
-                    self._record_death_event(agent, 'starvation')
+                    # Only process death once per agent
+                    if agent not in agents_to_replace:
+                        print(f"💀 Agent {agent_id} died from starvation! (Role: {role})")
+                        agents_to_replace.append(agent)
+                        self._record_death_event(agent, 'starvation')
+                        # Mark agent as destroyed to prevent further processing
+                        setattr(agent, '_destroyed', True)
                     continue
                 
                 # Update agent health data for visualization
@@ -2099,46 +2133,62 @@ class TrainingEnvironment:
         
         except Exception as e:
             print(f"⚠️ Error updating resource consumption: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _record_death_event(self, agent, cause='starvation'):
         """Record a death event for visualization and statistics."""
-        current_time = time.time()
-        agent_position = (agent.body.position.x, agent.body.position.y) if agent.body else (0, 0)
+        try:
+            current_time = time.time()
+            agent_position = (agent.body.position.x, agent.body.position.y) if agent.body else (0, 0)
+            
+            print(f"🔍 DEBUG: Recording death event for agent {agent.id}")
+            print(f"🔍 DEBUG: survival_stats keys: {list(self.survival_stats.keys())}")
+            
+            # Calculate lifespan
+            birth_time = self.survival_stats['agent_birth_times'].get(agent.id, current_time)
+            lifespan = current_time - birth_time
+            print(f"🔍 DEBUG: Calculated lifespan: {lifespan}")
+            
+            # Record death event for visualization
+            self.death_events.append({
+                'agent_id': agent.id,
+                'position': agent_position,
+                'timestamp': current_time,
+                'cause': cause,
+                'lifespan': lifespan,
+                'role': self.agent_statuses.get(agent.id, {}).get('role', 'unknown')
+            })
+            
+            # Update survival statistics
+            self.survival_stats['total_deaths'] += 1
+            if cause == 'starvation':
+                self.survival_stats['deaths_by_starvation'] += 1
+            
+                            # Calculate average lifespan (only for events that have lifespan data)
+            if self.survival_stats['total_deaths'] > 0:
+                events_with_lifespan = [event for event in self.death_events[-100:] if 'lifespan' in event]
+                if events_with_lifespan:
+                    total_lifespan = sum(event['lifespan'] for event in events_with_lifespan)
+                    self.survival_stats['average_lifespan'] = total_lifespan / len(events_with_lifespan)
+                    print(f"🔍 DEBUG: Calculated average lifespan from {len(events_with_lifespan)} events: {self.survival_stats['average_lifespan']:.2f}")
+                else:
+                    print(f"🔍 DEBUG: No events with lifespan data found")
+                
+                # Clean up old tracking data
+                if agent.id in self.survival_stats['agent_birth_times']:
+                    del self.survival_stats['agent_birth_times'][agent.id]
+                if agent.id in self.agent_energy_levels:
+                    del self.agent_energy_levels[agent.id]
+                if agent.id in self.agent_health:
+                    del self.agent_health[agent.id]
+                if agent.id in self.agent_statuses:
+                    del self.agent_statuses[agent.id]
         
-        # Calculate lifespan
-        birth_time = self.survival_stats['agent_birth_times'].get(agent.id, current_time)
-        lifespan = current_time - birth_time
-        
-        # Record death event for visualization
-        self.death_events.append({
-            'agent_id': agent.id,
-            'position': agent_position,
-            'timestamp': current_time,
-            'cause': cause,
-            'lifespan': lifespan,
-            'role': self.agent_statuses.get(agent.id, {}).get('role', 'unknown')
-        })
-        
-        # Update survival statistics
-        self.survival_stats['total_deaths'] += 1
-        if cause == 'starvation':
-            self.survival_stats['deaths_by_starvation'] += 1
-        
-        # Calculate average lifespan
-        if self.survival_stats['total_deaths'] > 0:
-            total_lifespan = sum(event['lifespan'] for event in self.death_events[-100:])  # Last 100 deaths
-            recent_deaths = min(len(self.death_events), 100)
-            self.survival_stats['average_lifespan'] = total_lifespan / recent_deaths
-        
-        # Clean up old tracking data
-        if agent.id in self.survival_stats['agent_birth_times']:
-            del self.survival_stats['agent_birth_times'][agent.id]
-        if agent.id in self.agent_energy_levels:
-            del self.agent_energy_levels[agent.id]
-        if agent.id in self.agent_health:
-            del self.agent_health[agent.id]
-        if agent.id in self.agent_statuses:
-            del self.agent_statuses[agent.id]
+        except Exception as e:
+            print(f"🔍 DEBUG: Error in _record_death_event: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _replace_dead_agents(self, dead_agents):
         """Replace dead agents with new randomly generated agents."""
@@ -2965,7 +3015,7 @@ class TrainingEnvironment:
                                 'role': d['role'],
                                 'age': current_time - d['timestamp']
                             }
-                            for d in self.death_events if current_time - d['timestamp'] < 15.0  # Show deaths for 15 seconds
+                            for d in self.death_events if current_time - d['timestamp'] < 3.0  # Show deaths for 3 seconds only
                         ],
                         'survival_stats': {
                             'total_deaths': self.survival_stats['total_deaths'],
@@ -3196,6 +3246,17 @@ class TrainingEnvironment:
                     self.focused_agent = None
                 
                 try:
+                    # Preserve elite robots BEFORE evolution
+                    current_generation = self.evolution_engine.generation
+                    elite_preservation_result = self.elite_manager.preserve_generation_elites(
+                        old_agents, current_generation
+                    )
+                    
+                    if elite_preservation_result['success']:
+                        print(f"🏆 Preserved {elite_preservation_result['elites_preserved']} elite robots from generation {current_generation}")
+                    else:
+                        print(f"⚠️  Elite preservation failed: {elite_preservation_result.get('error', 'Unknown error')}")
+                    
                     # Evolve to next generation (returns tuple of new_population, agents_to_destroy)
                     new_population, agents_to_destroy = self.evolution_engine.evolve_generation()
                     
