@@ -53,7 +53,6 @@ class EcosystemDynamics:
         self.alliances: Dict[str, Set[str]] = {}  # agent_id -> set of ally ids
         self.rivalries: Dict[str, Set[str]] = {}  # agent_id -> set of rival ids
         self.pack_formations: List[Set[str]] = []  # Groups of cooperating agents
-        self.predation_events: List[Dict[str, Any]] = []  # Track predation events
         
         # Ecosystem parameters
         self.carrying_capacity = 100
@@ -109,47 +108,18 @@ class EcosystemDynamics:
         cooperation = fitness_traits.get('cooperation', 0.5)
         
         role_weights = {
-            EcosystemRole.HERBIVORE: 0.4 + cooperation * 0.4,  # Increased base and cooperation weight
-            EcosystemRole.CARNIVORE: 0.3 + speed * 0.3 + strength * 0.2,  # Reduced speed bonus
-            EcosystemRole.OMNIVORE: 0.35 + (speed + strength + cooperation) * 0.08,  # Reduced base and bonus
-            EcosystemRole.SCAVENGER: 0.2 + (1 - speed) * 0.3,  # Increased weight for slow agents
-            EcosystemRole.SYMBIONT: 0.1 + cooperation * 0.6  # Increased cooperation dependency
+            EcosystemRole.HERBIVORE: 0.3 + cooperation * 0.3,
+            EcosystemRole.CARNIVORE: 0.2 + speed * 0.4 + strength * 0.2,
+            EcosystemRole.OMNIVORE: 0.4 + (speed + strength + cooperation) * 0.1,
+            EcosystemRole.SCAVENGER: 0.1 + (1 - speed) * 0.2,
+            EcosystemRole.SYMBIONT: cooperation * 0.5
         }
         
-        # Ensure balanced distribution with some forced diversity
-        role_counts = {}
-        for r in EcosystemRole:
-            role_counts[r] = len([x for x in self.agent_roles.values() if x == r])
-        
-        total_agents = len(self.agent_roles)
-        
-        # Force minimum representation of each role (at least 15% of population)
-        min_per_role = max(1, total_agents // 6)  # About 16% minimum per role
-        
-        # Check if any role is underrepresented
-        underrepresented_roles = [r for r, count in role_counts.items() if count < min_per_role]
-        
-        if underrepresented_roles and total_agents >= 5:
-            # Force assign one of the underrepresented roles
-            role = random.choice(underrepresented_roles)
-            print(f"🎯 Force-assigned {role.value} for diversity (currently {role_counts[role]} of {total_agents})")
-        else:
-            # Normal weighted selection with reduced randomness
-            role = max(role_weights.keys(), key=lambda r: role_weights[r] + random.uniform(-0.05, 0.05))
-        
+        # Select role based on weights
+        role = max(role_weights.keys(), key=lambda r: role_weights[r] + random.uniform(-0.1, 0.1))
         self.agent_roles[agent_id] = role
         
-        # Enhanced logging with weight details
-        final_weight = role_weights[role]
-        print(f"🦎 Agent {agent_id[:8]} assigned role: {role.value} (weight: {final_weight:.2f})")
-        
-        # Log role distribution periodically
-        if len(self.agent_roles) % 5 == 0:
-            updated_counts = {}
-            for r in EcosystemRole:
-                updated_counts[r.value] = len([x for x in self.agent_roles.values() if x == r])
-            print(f"📊 Current role distribution: {updated_counts}")
-        
+        print(f"🦎 Agent {agent_id[:8]} assigned role: {role.value}")
         return role
     
     def form_alliance(self, agent1_id: str, agent2_id: str, cooperation_score: float):
@@ -299,57 +269,88 @@ class EcosystemDynamics:
             self.territories.append(unclaimed_territory)
     
     def _update_food_sources(self):
-        """Update food source availability - no regeneration, spawn new when depleted"""
+        """Update food source availability"""
         
-        # Remove depleted food sources (anything below consumption threshold)
+        # Regenerate existing food sources
+        for food in self.food_sources:
+            if food.amount < food.max_capacity:
+                food.amount = min(food.max_capacity, 
+                                food.amount + food.regeneration_rate * self.seasonal_resource_modifier)
+        
+        # Remove effectively depleted food sources (using small threshold for floating point precision)
+        depletion_threshold = 0.05  # Food sources with less than 0.05 are considered depleted
         initial_count = len(self.food_sources)
-        depleted_sources = [food for food in self.food_sources if food.amount <= 0.15]
-        self.food_sources = [food for food in self.food_sources if food.amount > 0.15]
+        self.food_sources = [food for food in self.food_sources if food.amount > depletion_threshold]
         removed_count = initial_count - len(self.food_sources)
         
         if removed_count > 0:
-            print(f"🗑️ Removed {removed_count} depleted food sources, {len(self.food_sources)} remaining")
-            
-            # Only replace some depleted resources to prevent resource explosion
-            replacement_count = min(removed_count, max(1, removed_count // 2))  # Replace at most half
-            for _ in range(replacement_count):
-                if len(self.food_sources) < 25:  # Cap total resources at 25
-                    self._spawn_new_food_source()
+            print(f"🗑️ Removed {removed_count} depleted food sources")
         
-        # Only spawn new resources if we're low on total resources (reduced frequency)
-        if len(self.food_sources) < 20 and random.random() < 0.05:  # Much lower spawn rate, higher target
-            self._spawn_new_food_source()
-    
-    def _spawn_new_food_source(self):
-        """Spawn a new food source in a fresh location"""
-        # Find a location away from existing resources
-        max_attempts = 10
-        for _ in range(max_attempts):
+        # Maintain minimum food population - ensure adequate resources for survival
+        min_food_sources = max(15, int(self.carrying_capacity * 0.2))  # At least 15 or 20% of carrying capacity
+        current_food_count = len(self.food_sources)
+        
+        # Enhanced food generation to maintain minimum population
+        food_spawn_chance = 0.15 * self.seasonal_resource_modifier
+        
+        # Increase spawn chance if below minimum threshold
+        if current_food_count < min_food_sources:
+            shortage_factor = (min_food_sources - current_food_count) / min_food_sources
+            food_spawn_chance += shortage_factor * 0.3  # Up to 30% additional chance when short
+            print(f"🍃 Food shortage detected! {current_food_count}/{min_food_sources} - Boosting generation")
+        
+        # Add new food sources based on need and season
+        if random.random() < food_spawn_chance:
             position = (random.uniform(-60, 60), random.uniform(-5, 35))
+            food_type = random.choice(["plants", "insects", "seeds", "meat"])
             
-            # Check if location is far enough from existing resources
-            if not self._resource_nearby(position, min_distance=8.0):
-                food_type = random.choice(["plants", "insects", "seeds"])  # No meat spawns
+            # Generate more substantial food sources when population is low
+            if current_food_count < min_food_sources:
+                amount = random.uniform(20, 60)  # Larger food sources when needed
+                max_capacity = random.uniform(30, 100)
+                regeneration_rate = random.uniform(0.8, 2.5)  # Faster regeneration
+            else:
+                amount = random.uniform(10, 50)
+                max_capacity = random.uniform(20, 80)
+                regeneration_rate = random.uniform(0.5, 2.0)
+            
+            food_source = FoodSource(
+                position=position,
+                food_type=food_type,
+                amount=amount,
+                regeneration_rate=regeneration_rate,
+                max_capacity=max_capacity
+            )
+            self.food_sources.append(food_source)
+            print(f"🌱 Generated {food_type} at ({position[0]:.1f}, {position[1]:.1f}) - Amount: {amount:.1f}")
+        
+        # Emergency food generation if critically low
+        if current_food_count < min_food_sources // 2:  # Less than half minimum
+            emergency_spawns = min(3, min_food_sources - current_food_count)  # Spawn up to 3 at once
+            for _ in range(emergency_spawns):
+                position = (random.uniform(-50, 50), random.uniform(-5, 30))
+                food_type = random.choice(["plants", "insects", "seeds"])  # Prefer easier food types
                 
                 food_source = FoodSource(
                     position=position,
                     food_type=food_type,
-                    amount=random.uniform(10, 25),  # Fresh resources start with good amounts
-                    regeneration_rate=0.0,  # No regeneration - when it's gone, it's gone
-                    max_capacity=random.uniform(15, 40)
+                    amount=random.uniform(25, 70),  # Generous emergency food
+                    regeneration_rate=random.uniform(1.0, 3.0),  # Fast regeneration
+                    max_capacity=random.uniform(40, 120)
                 )
                 self.food_sources.append(food_source)
-                print(f"🍃 Spawned new {food_type} resource at ({position[0]:.1f}, {position[1]:.1f})")
-                break
+                print(f"🚨 Emergency food spawn: {food_type} at ({position[0]:.1f}, {position[1]:.1f})")
+        
+        print(f"🍽️ Food sources: {len(self.food_sources)} (min: {min_food_sources})")
     
     def generate_resources_between_agents(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
         """Generate resources strategically between agents"""
         if len(agent_positions) < 2:
             return
         
-        # Limit total resources to prevent performance issues
-        if len(self.food_sources) > 25:  # Cap at 25 total resources
-            return  # Don't generate more if we're at the limit
+        # Clear existing food sources to regenerate fresh ones
+        if len(self.food_sources) > 50:  # Don't let resources accumulate too much
+            self.food_sources = self.food_sources[-30:]  # Keep only 30 most recent
         
         # Generate resources between adjacent agents
         for i in range(len(agent_positions) - 1):
@@ -374,20 +375,20 @@ class EcosystemDynamics:
                 food_source = FoodSource(
                     position=(mid_x, mid_y),
                     food_type=food_type,
-                    amount=random.uniform(12, 25),  # Good starting amounts
-                    regeneration_rate=0.0,  # No regeneration
-                    max_capacity=random.uniform(15, 35)
+                    amount=random.uniform(15, 40),
+                    regeneration_rate=random.uniform(0.3, 1.5),
+                    max_capacity=random.uniform(25, 60)
                 )
                 self.food_sources.append(food_source)
                 print(f"🍃 Generated {food_type} resource at ({mid_x:.1f}, {mid_y:.1f})")
     
     def _determine_resource_type(self, role1: EcosystemRole, role2: EcosystemRole) -> str:
-        """Determine resource type based on nearby agent roles (NO MEAT - carnivores hunt)"""
+        """Determine resource type based on nearby agent roles"""
         role_preferences = {
             EcosystemRole.HERBIVORE: ["plants", "seeds"],
-            EcosystemRole.CARNIVORE: ["insects"],  # Carnivores only get insects from environment, must hunt for meat
+            EcosystemRole.CARNIVORE: ["meat", "insects"],
             EcosystemRole.OMNIVORE: ["plants", "insects", "seeds"],
-            EcosystemRole.SCAVENGER: ["insects"],  # Scavengers eat insects and hunt weak agents
+            EcosystemRole.SCAVENGER: ["meat", "insects"],
             EcosystemRole.SYMBIONT: ["plants", "seeds"]
         }
         
@@ -407,65 +408,158 @@ class EcosystemDynamics:
                 return True
         return False
     
-    def consume_resource(self, agent_id: str, agent_position: Tuple[float, float], consumption_rate: float = 0.1) -> Dict[str, Any]:
+    def consume_resource(self, agent_id: str, agent_position: Tuple[float, float], consumption_rate: float = 4.0) -> float:
         """Agent consumes nearby resources and gains energy"""
-        consumption_result = {
-            'energy_gained': 0.0,
-            'consumed': False,
-            'food_type': None,
-            'food_position': None,
-            'amount_consumed': 0.0
-        }
-        
-        consumption_distance = 8.0  # Distance within which agent can consume resources (increased for testing)
+        energy_gained = 0.0
+        consumption_distance = 3.0  # Distance within which agent can consume resources
         
         for food in self.food_sources:
             distance = math.sqrt((agent_position[0] - food.position[0])**2 + 
                                (agent_position[1] - food.position[1])**2)
             
-            if distance <= consumption_distance and food.amount > 0.1:  # Stricter check - don't consume from nearly empty resources
+            if distance <= consumption_distance and food.amount > 0:
                 # Calculate consumption based on agent role and food type
                 agent_role = self.agent_roles.get(agent_id, EcosystemRole.OMNIVORE)
                 consumption_efficiency = self._get_consumption_efficiency(agent_role, food.food_type)
                 
-                # Special handling for herbivores encountering non-plant foods
-                if agent_role == EcosystemRole.HERBIVORE and food.food_type in ["insects", "meat"]:
-                    # Herbivores cannot consume insects or meat at all
-                    continue
-                
                 # Amount consumed this frame
-                consumed = min(food.amount, consumption_rate * consumption_efficiency * 0.25)
+                consumed = min(food.amount, consumption_rate * consumption_efficiency)
                 food.amount -= consumed
                 
-                # Energy gained (with better balance for slower consumption rate)
-                energy_gained = consumed * consumption_efficiency * 0.2
-                
-                #if consumed > 0:
-                #    print(f"🍽️ {agent_id[:8]} consumed {consumed:.1f} {food.food_type} (energy +{energy_gained:.2f}) at ({food.position[0]:.1f}, {food.position[1]:.1f})")
+                # Energy gained (substantial restoration from eating)
+                energy_gained += consumed * consumption_efficiency * 0.2  # Doubled base energy gain
                 
                 if consumed > 0:
-                    # Update consumption result
-                    consumption_result.update({
-                        'energy_gained': min(energy_gained, 0.5),  # Cap energy gain per frame
-                        'consumed': True,
-                        'food_type': food.food_type,
-                        'food_position': food.position,
-                        'amount_consumed': consumed
-                    })
+                    print(f"🍽️ {agent_id[:8]} consumed {consumed:.1f} {food.food_type} (energy +{energy_gained:.2f})")
                 
                 # Break after consuming from one resource per frame
                 break
         
-        return consumption_result
+        return min(energy_gained, 1.0)  # Allow full energy restoration from eating
+    
+    def attempt_predation(self, predator_id: str, predator_position: Tuple[float, float], 
+                         available_agents: List[Tuple[str, Tuple[float, float], str, float]]) -> Tuple[float, Optional[str]]:
+        """Carnivore attempts to hunt and consume another agent for energy.
+        
+        Args:
+            predator_id: ID of the hunting agent
+            predator_position: Position of the predator
+            available_agents: List of (agent_id, position, role, energy) tuples for potential prey
+            
+        Returns:
+            Tuple of (energy_gained, victim_id) - victim_id is None if no successful predation
+        """
+        predator_role = self.agent_roles.get(predator_id, EcosystemRole.OMNIVORE)
+        
+        # Only carnivores and omnivores can hunt
+        if predator_role not in [EcosystemRole.CARNIVORE, EcosystemRole.OMNIVORE]:
+            return 0.0, None
+            
+        hunting_range = 5.0  # Distance within which predation can occur
+        energy_gained = 0.0
+        victim_id = None
+        
+        # Find potential prey within hunting range
+        potential_prey = []
+        for agent_id, position, role, energy in available_agents:
+            if agent_id == predator_id:  # Can't hunt yourself
+                continue
+                
+            distance = math.sqrt((predator_position[0] - position[0])**2 + 
+                               (predator_position[1] - position[1])**2)
+            
+            if distance <= hunting_range:
+                # Calculate hunting success probability  
+                prey_role_enum = self.agent_roles.get(agent_id, EcosystemRole.OMNIVORE)
+                success_probability = self._calculate_hunting_success(predator_role, prey_role_enum, energy, distance)
+                potential_prey.append((agent_id, role, energy, distance, success_probability))
+        
+        if not potential_prey:
+            return 0.0, None
+            
+        # Sort by hunting success probability (highest first)
+        potential_prey.sort(key=lambda x: x[4], reverse=True)
+        
+        # Attempt to hunt the most viable prey
+        for prey_id, prey_role, prey_energy, distance, success_prob in potential_prey:
+            if random.random() < success_prob:
+                # Successful predation!
+                prey_role_enum = self.agent_roles.get(prey_id, EcosystemRole.OMNIVORE)
+                energy_gained = self._calculate_predation_energy_gain(predator_role, prey_role_enum, prey_energy)
+                victim_id = prey_id
+                
+                print(f"🦁 PREDATION! {predator_id[:8]} ({predator_role.value}) hunted {prey_id[:8]} ({prey_role_enum.value}) - Energy +{energy_gained:.2f}")
+                break
+                
+        return energy_gained, victim_id
+    
+    def _calculate_hunting_success(self, predator_role: EcosystemRole, prey_role: EcosystemRole, 
+                                  prey_energy: float, distance: float) -> float:
+        """Calculate the probability of successful predation"""
+        
+        # Base hunting success rates by predator role
+        base_success = {
+            EcosystemRole.CARNIVORE: 0.3,  # 30% base success for specialists
+            EcosystemRole.OMNIVORE: 0.15,  # 15% base success for generalists
+        }.get(predator_role, 0.0)
+        
+        # Prey vulnerability by role
+        prey_vulnerability = {
+            EcosystemRole.HERBIVORE: 1.0,   # Most vulnerable
+            EcosystemRole.OMNIVORE: 0.7,    # Moderately vulnerable  
+            EcosystemRole.SYMBIONT: 0.8,    # Somewhat vulnerable
+            EcosystemRole.SCAVENGER: 0.5,   # Less vulnerable (cautious)
+            EcosystemRole.CARNIVORE: 0.2,   # Very difficult to hunt
+        }.get(prey_role, 0.5)
+        
+        # Distance factor (closer = higher success)
+        distance_factor = max(0.1, 1.0 - (distance / 5.0))
+        
+        # Energy factor (weaker prey easier to catch)
+        energy_factor = max(0.5, 2.0 - prey_energy * 2.0)  # Lower energy = higher vulnerability
+        
+        # Calculate final success probability
+        success_probability = base_success * prey_vulnerability * distance_factor * energy_factor
+        
+        return min(0.8, success_probability)  # Cap at 80% max success rate
+    
+    def _calculate_predation_energy_gain(self, predator_role: EcosystemRole, prey_role: EcosystemRole, 
+                                       prey_energy: float) -> float:
+        """Calculate energy gained from successful predation"""
+        
+        # Base energy gain from consuming another robot
+        base_energy_gain = 0.4  # Substantial energy from predation
+        
+        # Predator efficiency
+        predator_efficiency = {
+            EcosystemRole.CARNIVORE: 1.2,  # Carnivores are efficient hunters
+            EcosystemRole.OMNIVORE: 0.9,   # Omnivores are less efficient
+        }.get(predator_role, 0.5)
+        
+        # Prey nutritional value
+        prey_nutrition = {
+            EcosystemRole.HERBIVORE: 1.0,   # Standard nutrition
+            EcosystemRole.OMNIVORE: 1.1,    # Slightly more nutritious
+            EcosystemRole.SYMBIONT: 0.9,    # Slightly less nutritious
+            EcosystemRole.SCAVENGER: 0.8,   # Less nutritious
+            EcosystemRole.CARNIVORE: 1.3,   # Most nutritious but hardest to catch
+        }.get(prey_role, 1.0)
+        
+        # Energy factor (healthier prey = more energy gain)
+        energy_multiplier = 0.5 + prey_energy * 0.5  # 0.5 to 1.0 multiplier
+        
+        total_energy_gain = base_energy_gain * predator_efficiency * prey_nutrition * energy_multiplier
+        
+        return min(1.0, total_energy_gain)  # Cap at full energy restoration
     
     def _get_consumption_efficiency(self, role: EcosystemRole, food_type: str) -> float:
-        """Get consumption efficiency based on agent role and food type (NO ENVIRONMENTAL MEAT)"""
+        """Get consumption efficiency based on agent role and food type"""
         efficiency_matrix = {
-            EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.8, "insects": 0.0, "meat": 0.0},
-            EcosystemRole.CARNIVORE: {"plants": 0.1, "seeds": 0.05, "insects": 0.6, "meat": 0.0},  # No environmental meat
-            EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.0},    # No environmental meat
-            EcosystemRole.SCAVENGER: {"plants": 0.2, "seeds": 0.1, "insects": 0.7, "meat": 0.0},   # No environmental meat
-            EcosystemRole.SYMBIONT: {"plants": 0.9, "seeds": 0.8, "insects": 0.5, "meat": 0.0}
+            EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.8, "insects": 0.2, "meat": 0.1},
+            EcosystemRole.CARNIVORE: {"meat": 1.0, "insects": 0.7, "plants": 0.2, "seeds": 0.1},
+            EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.7},
+            EcosystemRole.SCAVENGER: {"meat": 0.9, "insects": 0.8, "plants": 0.3, "seeds": 0.2},
+            EcosystemRole.SYMBIONT: {"plants": 0.9, "seeds": 0.8, "insects": 0.5, "meat": 0.3}
         }
         
         return efficiency_matrix.get(role, {}).get(food_type, 0.5)
@@ -486,80 +580,6 @@ class EcosystemDynamics:
                     'regeneration_rate': food.regeneration_rate
                 })
         return nearby
-    
-    def attempt_predation(self, predator_id: str, predator_position: Tuple[float, float], 
-                         potential_prey: List[Tuple[str, Tuple[float, float], float]]) -> Dict[str, Any]:
-        """Carnivores/scavengers attempt to hunt other agents for meat"""
-        predation_result = {
-            'energy_gained': 0.0,
-            'consumed': False,
-            'prey_id': None,
-            'hunt_successful': False
-        }
-        
-        predator_role = self.agent_roles.get(predator_id, EcosystemRole.OMNIVORE)
-        
-        # Only carnivores and scavengers can hunt
-        if predator_role not in [EcosystemRole.CARNIVORE, EcosystemRole.SCAVENGER]:
-            return predation_result
-        
-        hunting_distance = 6.0  # Distance within which predation can occur
-        
-        for prey_id, prey_position, prey_energy in potential_prey:
-            if prey_id == predator_id:  # Can't hunt yourself
-                continue
-                
-            distance = math.sqrt((predator_position[0] - prey_position[0])**2 + 
-                               (predator_position[1] - prey_position[1])**2)
-            
-            if distance <= hunting_distance:
-                prey_role = self.agent_roles.get(prey_id, EcosystemRole.OMNIVORE)
-                
-                # Calculate hunting success probability
-                base_success_rate = 0.15  # Base 15% success rate per attempt
-                
-                # Scavengers prefer weak prey, carnivores hunt any prey
-                if predator_role == EcosystemRole.SCAVENGER:
-                    # Scavengers more likely to succeed against weak prey
-                    if prey_energy < 0.3:  # Very weak prey
-                        success_rate = base_success_rate * 3.0  # 45% chance
-                    elif prey_energy < 0.5:  # Somewhat weak prey
-                        success_rate = base_success_rate * 2.0  # 30% chance
-                    else:
-                        success_rate = base_success_rate * 0.5  # Only 7.5% chance against healthy prey
-                else:  # Carnivore
-                    # Carnivores have consistent hunting ability
-                    success_rate = base_success_rate * 1.5  # 22.5% base chance
-                    
-                    # Bonus against herbivores (natural prey)
-                    if prey_role == EcosystemRole.HERBIVORE:
-                        success_rate *= 1.4  # 31.5% chance
-                
-                # Attempt the hunt
-                if random.random() < success_rate:
-                    # Hunt successful! 
-                    meat_gained = min(prey_energy * 0.6, 0.4)  # Gain up to 40% energy, based on prey health
-                    
-                    predation_result.update({
-                        'energy_gained': meat_gained,
-                        'consumed': True,
-                        'prey_id': prey_id,
-                        'hunt_successful': True
-                    })
-                    
-                    print(f"🥩 {predator_role.value.title()} {predator_id[:8]} hunted {prey_role.value} {prey_id[:8]} (+{meat_gained:.2f} energy)")
-                    
-                    # Track predation event for ecosystem dynamics
-                    self.predation_events.append({
-                        'predator_id': predator_id,
-                        'prey_id': prey_id,
-                        'timestamp': time.time(),
-                        'energy_transferred': meat_gained
-                    })
-                    
-                    return predation_result  # Only one successful hunt per frame
-        
-        return predation_result
     
     def _manage_territorial_conflicts(self):
         """Resolve territorial conflicts"""

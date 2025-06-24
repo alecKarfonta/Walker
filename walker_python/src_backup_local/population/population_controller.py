@@ -308,4 +308,39 @@ class PopulationController:
         if max_possible_variance == 0:
             return 0.0
         
-        return float(min(variance / max_possible_variance, 1.0)) 
+        return float(min(variance / max_possible_variance, 1.0))
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """
+        Get comprehensive statistics about the population.
+        
+        Returns:
+            Dictionary with population statistics
+        """
+        if not self.agents:
+            return {
+                'population_size': 0,
+                'active_agents': 0,
+                'completed_agents': 0,
+                'best_fitness': 0.0,
+                'average_fitness': 0.0,
+                'fitness_std': 0.0,
+                'diversity': 0.0,
+                'generation': self.current_generation,
+                'evolution_progress': 0.0
+            }
+        
+        fitness_stats = self.get_fitness_statistics()
+        best_agent = self.get_best_agent()
+        
+        return {
+            'population_size': len(self.agents),
+            'active_agents': len(self.get_active_agents()),
+            'completed_agents': len(self.get_agents_by_status(AgentStatus.COMPLETED)),
+            'best_fitness': best_agent.fitness if best_agent else 0.0,
+            'average_fitness': fitness_stats['mean'],
+            'fitness_std': fitness_stats['std'],
+            'diversity': self.get_population_diversity(),
+            'generation': self.current_generation,
+            'evolution_progress': len(self.generation_stats) / self.max_generations
+        } 

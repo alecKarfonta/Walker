@@ -369,9 +369,6 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         # Initialize crawling-specific tracking
         self.recent_displacements = []
         self.action_sequence = []
-        
-        # Learning approach inheritance for evolution (can be None or LearningApproach)
-        self._inherited_learning_approach = None  # Type: Optional[LearningApproach]
     
     def get_evolutionary_reward(self, prev_x: float) -> float:
         """
@@ -447,17 +444,10 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         if len(self.q_table.q_values) > 10 and len(other.q_table.q_values) > 10:
             child.q_table = self.q_table.copy()
             child.q_table.learn_from_other_table(other.q_table, learning_rate=0.3)
-            # Offspring inherits learning approach from parent with more Q-table data
-            primary_parent = self if len(self.q_table.q_values) >= len(other.q_table.q_values) else other
-            child._inherited_learning_approach = getattr(primary_parent, '_inherited_learning_approach', None)
         elif len(self.q_table.q_values) > len(other.q_table.q_values):
             child.q_table = self.q_table.copy()
-            # Offspring inherits learning approach from parent with Q-table data
-            child._inherited_learning_approach = getattr(self, '_inherited_learning_approach', None)
         else:
             child.q_table = other.q_table.copy()
-            # Offspring inherits learning approach from parent with Q-table data
-            child._inherited_learning_approach = getattr(other, '_inherited_learning_approach', None)
         
         child.crossover_count = 1
         return child
@@ -489,9 +479,8 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             parent_lineage=child_lineage
         )
         
-        # Copy Q-table and learning approach inheritance
+        # Copy Q-table
         clone.q_table = self.q_table.copy()
-        clone._inherited_learning_approach = getattr(self, '_inherited_learning_approach', None)
         clone.mutation_count = self.mutation_count + 1
         
         return clone
