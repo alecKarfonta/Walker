@@ -1033,9 +1033,17 @@ class TrainingEnvironment:
         self.enable_evaluation = enable_evaluation
         self.metrics_collector = None
         self.dashboard_exporter = None
+        self.mlflow_integration = None
         
         if enable_evaluation:
             try:
+                # Initialize MLflow integration first
+                from src.evaluation.mlflow_integration import MLflowIntegration
+                self.mlflow_integration = MLflowIntegration(
+                    tracking_uri="sqlite:///experiments/walker_experiments.db",
+                    experiment_name="walker_robot_training"
+                )
+                
                 self.metrics_collector = MetricsCollector(
                     enable_mlflow=True,
                     enable_file_export=True,
@@ -1051,6 +1059,7 @@ class TrainingEnvironment:
             except Exception as e:
                 print(f"⚠️  Evaluation framework initialization failed: {e}")
                 self.enable_evaluation = False
+                self.mlflow_integration = None
 
         # Enhanced evolution configuration
         self.evolution_config = EvolutionConfig(
@@ -1382,6 +1391,8 @@ class TrainingEnvironment:
         # Stats and debug timers
         last_stats_time = time.time()
         last_debug_time = time.time()
+        last_health_check = time.time()
+        last_mlflow_log = time.time()
         
         step_count = 0
 
@@ -1453,6 +1464,36 @@ class TrainingEnvironment:
             # Update camera and statistics (can be done once per frame)
             self.update_camera(frame_time)
             
+            # Health check logging every 30 seconds
+            if current_time - last_health_check > 30.0:
+                try:
+                    import psutil
+                    import os
+                    process = psutil.Process(os.getpid())
+                    memory_mb = process.memory_info().rss / 1024 / 1024
+                    cpu_percent = process.cpu_percent()
+                    active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
+                    print(f"💚 HEALTH CHECK: Memory={memory_mb:.1f}MB, CPU={cpu_percent:.1f}%, Agents={active_agents}, Step={self.step_count}")
+                except Exception as e:
+                    print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
+                last_health_check = current_time
+            
+            # Debug logging every 15 seconds (increased from 10 for less spam)
+            if current_time - last_debug_time > 15.0:
+                print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active, Gen={self.evolution_engine.generation}")
+                if self.agents:
+                    # Debug output for the first agent
+                    try:
+                        first_agent = self.agents[0]
+                        if not getattr(first_agent, '_destroyed', False) and first_agent.body:
+                            print(f"   Agent sample: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
+                                  f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
+                                  f"reward={first_agent.total_reward:.2f}, steps={first_agent.steps}")
+                    except Exception as e:
+                        print(f"⚠️  Error in debug output: {e}")
+                        
+                last_debug_time = current_time
+            
             if current_time - last_stats_time > self.stats_update_interval:
                 self._update_statistics()
                 
@@ -1471,6 +1512,43 @@ class TrainingEnvironment:
                         print(f"⚠️  Error queuing evaluation metrics: {e}")
                 
                 last_stats_time = current_time
+            
+            # MLflow logging every 60 seconds
+            if current_time - last_mlflow_log > 60.0:
+                if self.enable_evaluation and hasattr(self, 'mlflow_integration') and self.mlflow_integration:
+                    try:
+                        # Log population metrics
+                        generation = self.evolution_engine.generation
+                        population_metrics = {
+                            'generation': generation,
+                            'population_size': len(self.agents),
+                            'avg_fitness': sum(a.get_evolutionary_fitness() for a in self.agents) / len(self.agents) if self.agents else 0,
+                            'best_fitness': max(a.get_evolutionary_fitness() for a in self.agents) if self.agents else 0,
+                            'diversity': self.evolution_engine.diversity_history[-1] if self.evolution_engine.diversity_history else 0,
+                            'step_count': self.step_count
+                        }
+                        self.mlflow_integration.log_population_metrics(generation, population_metrics)
+                        print(f"📊 Logged population metrics to MLflow (Gen {generation})")
+                        
+                        # Log individual robot metrics for top 3 performers
+                        if self.agents:
+                            sorted_agents = sorted(self.agents, key=lambda a: a.get_evolutionary_fitness(), reverse=True)
+                            for i, agent in enumerate(sorted_agents[:3]):
+                                individual_metrics = {
+                                    'fitness': agent.get_evolutionary_fitness(),
+                                    'total_reward': agent.total_reward,
+                                    'steps': agent.steps,
+                                    'position_x': agent.body.position.x if agent.body else 0,
+                                    'q_table_size': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0
+                                }
+                                self.mlflow_integration.log_individual_robot_metrics(
+                                    f"top_{i+1}_{agent.id[:8]}", individual_metrics, self.step_count
+                                )
+                        
+                    except Exception as e:
+                        print(f"⚠️  Error logging to MLflow: {e}")
+                
+                last_mlflow_log = current_time
             
             # Check for periodic learning
             if current_time - self.last_learning_time >= self.learning_interval:
@@ -1493,32 +1571,6 @@ class TrainingEnvironment:
                     print(f"❌ Evolution failed: {e}")
                     import traceback
                     traceback.print_exc()
-            
-            # Memory monitoring
-            if current_time - last_debug_time > 30.0:  # Every 30 seconds
-                try:
-                    import psutil
-                    import os
-                    process = psutil.Process(os.getpid())
-                    memory_mb = process.memory_info().rss / 1024 / 1024
-                    print(f"🔍 Memory usage: {memory_mb:.1f} MB")
-                except:
-                    pass
-            
-            if current_time - last_debug_time > 10.0:
-                print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active")
-                if self.agents:
-                    # Debug output for the first agent
-                    try:
-                        first_agent = self.agents[0]
-                        if not getattr(first_agent, '_destroyed', False) and first_agent.body:
-                            print(f"   Agent 0: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
-                                  f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
-                                  f"reward={first_agent.total_reward:.2f}")
-                    except Exception as e:
-                        print(f"⚠️  Error in debug output: {e}")
-                        
-                last_debug_time = current_time
             
             # Sleep to maintain target FPS
             time.sleep(max(0, self.dt - (time.time() - current_time)))
@@ -1770,6 +1822,23 @@ class TrainingEnvironment:
             # Start evaluation services
             if self.enable_evaluation:
                 try:
+                    # Start MLflow tracking session (only via our direct integration)
+                    if self.mlflow_integration:
+                        session_name = f"training_session_{int(time.time())}"
+                        evolution_config = {
+                            'population_size': self.num_agents,
+                            'elite_size': self.evolution_config.elite_size,
+                            'mutation_rate': self.evolution_config.mutation_rate,
+                            'crossover_rate': self.evolution_config.crossover_rate
+                        }
+                        self.mlflow_integration.start_training_run(
+                            run_name=session_name,
+                            population_size=self.num_agents,
+                            evolution_config=evolution_config
+                        )
+                        print(f"🔬 Started MLflow run: {session_name}")
+                    
+                    # Start metrics collector WITHOUT MLflow (we handle MLflow separately)
                     if self.metrics_collector:
                         session_name = f"training_session_{int(time.time())}"
                         evolution_config = {
@@ -1778,11 +1847,8 @@ class TrainingEnvironment:
                             'mutation_rate': self.evolution_config.mutation_rate,
                             'crossover_rate': self.evolution_config.crossover_rate
                         }
-                        self.metrics_collector.start_training_session(
-                            session_name=session_name,
-                            population_size=self.num_agents,
-                            evolution_config=evolution_config
-                        )
+                        # Note: Not calling start_training_session to avoid MLflow conflict
+                        print(f"📊 Metrics collector ready for session: {session_name}")
                     
                     if self.dashboard_exporter:
                         self.dashboard_exporter.start()

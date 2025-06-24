@@ -635,7 +635,7 @@ class EnhancedEvolutionEngine:
                 # Create new agent with diverse parameters
                 diverse_agent = EvolutionaryCrawlingAgent(
                     world=self.world,
-                    agent_id=agent.id,
+                    agent_id=None,  # Let agent generate its own UUID
                     position=agent.initial_position,
                     category_bits=agent.category_bits,
                     mask_bits=agent.mask_bits,
@@ -672,20 +672,25 @@ class EnhancedEvolutionEngine:
                     agents_to_destroy.append(sorted_pop[i])
                     
                     # Create immigrant
-                    immigrant = self._create_random_agent(sorted_pop[i].id)
+                    immigrant = self._create_random_agent(i)
                     sorted_pop[i] = immigrant
         
         return population, agents_to_destroy
     
-    def _create_random_agent(self, agent_id: int) -> EvolutionaryCrawlingAgent:
+    def _create_random_agent(self, position_index: Optional[int] = None) -> EvolutionaryCrawlingAgent:
         """Create a random agent with diverse parameters."""
         random_params = PhysicalParameters.random_parameters()
         spacing = 8 if self.config.population_size > 20 else 15
-        position = (agent_id * spacing, 6)
+        
+        # Use position_index for spacing if provided, otherwise use random position
+        if position_index is not None:
+            position = (position_index * spacing, 6)
+        else:
+            position = (random.randint(0, self.config.population_size) * spacing, 6)
         
         return EvolutionaryCrawlingAgent(
             world=self.world,
-            agent_id=agent_id,
+            agent_id=None,  # Let agent generate its own UUID
             position=position,
             category_bits=0x0002,
             mask_bits=0x0001,
