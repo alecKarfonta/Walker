@@ -83,10 +83,4 @@ scrape_configs:
   - job_name: 'node-exporter'
     scrape_interval: 30s
     static_configs:
-      - targets: []  # Add node-exporter if needed
-
-# Storage configuration
-storage:
-  tsdb:
-    retention: "15d"
-    wal-compression: true 
+      - targets: []  # Add node-exporter if needed 

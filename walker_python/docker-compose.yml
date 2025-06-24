@@ -7,8 +7,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: walker-training-app
+    hostname: walker-training-app
     ports:
-      - "8080:8080"  # Web interface
+      - "7777:8080"  # Web interface
       - "2322:2322"  # Dashboard exporter API
     volumes:
       - ./evaluation_exports:/app/evaluation_exports
@@ -17,9 +18,9 @@ services:
       - walker-data:/app/data
     environment:
       - PYTHONPATH=/app
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - MLFLOW_TRACKING_URI=http://walker-mlflow:5000
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_metrics
-      - GRAFANA_URL=http://grafana:3000
+      - GRAFANA_URL=http://walker-grafana:3000
     depends_on:
       - mlflow
       - prometheus
@@ -34,10 +35,11 @@ services:
 
   # MLflow Tracking Server
   mlflow:
-    image: python:3.12-slim
+    image: ghcr.io/mlflow/mlflow:latest
     container_name: walker-mlflow
+    hostname: walker-mlflow
     ports:
-      - "5001:5000"
+      - "5002:5000"
     volumes:
       - mlflow-data:/mlflow
       - ./mlruns:/mlruns
@@ -45,14 +47,12 @@ services:
       - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow/mlflow.db
       - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
     command: >
-      bash -c "
-      pip install mlflow[extras]==2.8.1 &&
       mlflow server 
         --backend-store-uri sqlite:///mlflow/mlflow.db 
         --default-artifact-root /mlflow/artifacts 
         --host 0.0.0.0 
-        --port 5000
-      "
+        --port 5000 
+        --serve-artifacts
     networks:
       - walker-network
     restart: unless-stopped
@@ -66,8 +66,9 @@ services:
   prometheus:
     image: prom/prometheus:v2.45.0
     container_name: walker-prometheus
+    hostname: walker-prometheus
     ports:
-      - "9091:9090"
+      - "9889:9090"
     volumes:
       - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus-data:/prometheus
@@ -92,8 +93,9 @@ services:
   grafana:
     image: grafana/grafana:10.2.0
     container_name: walker-grafana
+    hostname: walker-grafana
     ports:
-      - "3001:3000"
+      - "3009:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
@@ -120,6 +122,7 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: walker-redis
+    hostname: walker-redis
     ports:
       - "6380:6379"  # Non-default port to avoid conflicts
     volumes:
@@ -138,8 +141,9 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: walker-postgres
+    hostname: walker-postgres
     ports:
-      - "5433:5432"  # Non-default port to avoid conflicts
+      - "5434:5432"  # Non-default port to avoid conflicts
     volumes:
       - postgres-data:/var/lib/postgresql/data
     environment:
@@ -175,4 +179,4 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16 
+        - subnet: 172.25.0.0/16 
