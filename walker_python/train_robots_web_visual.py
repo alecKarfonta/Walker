@@ -1768,7 +1768,7 @@ class TrainingEnvironment:
         # Evolution timing with safety
         self.evolution_interval = 180.0  # 3 minutes between generations
         self.last_evolution_time = time.time()
-        self.auto_evolution_enabled = True
+        self.auto_evolution_enabled = False
         self._evolution_requested = False  # Flag for requested evolution
         
         # Settle the world
@@ -1841,6 +1841,26 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"⚠️ Learning Manager initialization failed: {e}")
             self.learning_manager = None
+
+        # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
+        try:
+            from src.agents.robot_memory_pool import RobotMemoryPool
+            self.robot_memory_pool = RobotMemoryPool(
+                world=self.world,
+                min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
+                max_pool_size=num_agents * 2,  # 2x population as maximum pool
+                category_bits=self.AGENT_CATEGORY,
+                mask_bits=self.GROUND_CATEGORY
+            )
+            
+            # Connect learning manager to memory pool for knowledge transfer
+            if self.learning_manager:
+                self.robot_memory_pool.set_learning_manager(self.learning_manager)
+            
+            print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
+        except Exception as e:
+            print(f"⚠️ Robot Memory Pool initialization failed: {e}")
+            self.robot_memory_pool = None
 
         print(f"🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
@@ -2386,7 +2406,7 @@ class TrainingEnvironment:
                 print(f"❌ Error replacing dead agents: {e}")
     
     def _create_replacement_agent(self):
-        """Create a new agent to replace a dead one."""
+        """Create a new agent to replace a dead one using memory pool if available."""
         try:
             # Find a good spawn position (spread them out)
             existing_positions = []
@@ -2408,18 +2428,29 @@ class TrainingEnvironment:
             from src.agents.physical_parameters import PhysicalParameters
             random_params = PhysicalParameters.random_parameters()
             
-            # Create new agent
-            from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
-            new_agent = EvolutionaryCrawlingAgent(
-                world=self.world,
-                agent_id=None,  # Generate new UUID automatically
-                position=spawn_position,
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY,
-                physical_params=random_params
-            )
-            
-            return new_agent
+            # Use memory pool if available for efficient reuse with learning preservation
+            if self.robot_memory_pool:
+                new_agent = self.robot_memory_pool.acquire_robot(
+                    position=spawn_position,
+                    physical_params=random_params,
+                    parent_lineage=[],  # Fresh agent, no lineage
+                    restore_learning=True  # Try to restore previous learning if available
+                )
+                logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool")
+                return new_agent
+            else:
+                # Fallback: Create new agent directly
+                from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+                new_agent = EvolutionaryCrawlingAgent(
+                    world=self.world,
+                    agent_id=None,  # Generate new UUID automatically
+                    position=spawn_position,
+                    category_bits=self.AGENT_CATEGORY,
+                    mask_bits=self.GROUND_CATEGORY,
+                    physical_params=random_params
+                )
+                logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
+                return new_agent
             
         except Exception as e:
             print(f"❌ Error creating replacement agent: {e}")
@@ -2604,11 +2635,22 @@ class TrainingEnvironment:
                 }
 
     def _safe_destroy_agent(self, agent):
-        """Safely destroy an agent with proper error handling."""
+        """Safely destroy an agent with proper error handling, using memory pool if available."""
         if not agent or getattr(agent, '_destroyed', False):
             return  # Already destroyed
             
         try:
+            # Return agent to memory pool if available (preserves learning)
+            if self.robot_memory_pool:
+                try:
+                    self.robot_memory_pool.return_robot(agent, preserve_learning=True)
+                    print(f"♻️ Returned agent {agent.id} to memory pool with learning preserved")
+                    return
+                except Exception as e:
+                    print(f"⚠️ Failed to return agent {agent.id} to memory pool: {e}")
+                    # Fall through to manual destruction
+            
+            # Manual destruction (fallback when no memory pool)
             # Mark as destroyed first to prevent further operations
             agent._destroyed = True
             
@@ -2657,7 +2699,7 @@ class TrainingEnvironment:
             agent.lower_arm_joint = None
             agent.wheel_joints = []
             
-            print(f"✅ Successfully destroyed agent {agent.id}")
+            print(f"✅ Successfully destroyed agent {agent.id} (manual destruction)")
             
         except Exception as e:
             print(f"❌ Critical error destroying agent {getattr(agent, 'id', 'unknown')}: {e}")

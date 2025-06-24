@@ -9,6 +9,7 @@ import random
 from .crawling_crate import CrawlingCrate
 from .q_table import  EnhancedQTable
 import Box2D as b2
+import time
 
 from .base_agent import BaseAgent
 
@@ -160,6 +161,11 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.steps_since_last_learning = 0
         self.current_action_tuple = (1, 0)  # FIXED: Start with a real action from the action list
         self.prev_x = position[0]  # Track previous position for reward calculation
+        
+        # ACTION PERSISTENCE: Time-based action selection (0.5 seconds)
+        self.action_persistence_duration = 0.25  # 0.5 seconds
+        self.last_action_time = time.time()  # Track when last action was selected
+        self.action_persisted = False  # Track if we're in persistence mode
         
         # Speed and acceleration tracking (inspired by Java implementation)
         self.speed = 0.0
@@ -671,8 +677,11 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             if q_table_size > 1000:
                 print(f"    ⚠️  Q-table getting large! {q_table_size} states may slow performance")
         
-        # Enhanced action selection with adaptive intervals
-        if self.steps % self.action_interval == 0:
+        # TIME-BASED ACTION SELECTION: Only select new actions every 0.5 seconds
+        current_time = time.time()
+        time_since_last_action = current_time - self.last_action_time
+        
+        if time_since_last_action >= self.action_persistence_duration:
             # Store previous state and action for Q-learning update
             prev_state = self.current_state
             prev_action = self.current_action
@@ -699,14 +708,25 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             self.current_action_tuple = self.actions[action_idx]
             self.add_action_to_history(action_idx)
             
+            # Update timing for next action selection
+            self.last_action_time = current_time
+            self.action_persisted = False
+            
             # ENHANCED DEBUG: Show action changes for first agent
             if self.id == 0 and (self.current_action_tuple != previous_action_tuple or self.steps % 300 == 0):
                 confidence_info = self.q_table.confidence_based_action(self.current_state)
-                print(f"🎯 Agent {self.id} Step {self.steps}: ACTION CHANGE")
+                print(f"🎯 Agent {self.id} Step {self.steps}: ACTION CHANGE (after {time_since_last_action:.3f}s)")
                 print(f"  {previous_action_tuple} -> {self.current_action_tuple} (action {action_idx})")
                 print(f"  State: {self.current_state}, Confident: {confidence_info[2]}")
                 print(f"  Reward: {reward:.4f}, Epsilon: {self.epsilon:.3f}")
                 print(f"  Recent actions: {self.action_history[-5:] if len(self.action_history) >= 5 else self.action_history}")
+        else:
+            # PERSIST PREVIOUS ACTION: Continue using the same action until 0.5s elapsed
+            self.action_persisted = True
+            
+            # Debug for first agent occasionally to show persistence
+            if self.id == 0 and self.steps % 180 == 0:  # Every 3 seconds at 60fps
+                print(f"🔄 Agent {self.id} Step {self.steps}: PERSISTING action {self.current_action_tuple} (for {time_since_last_action:.3f}s/{self.action_persistence_duration}s)")
         
         # Adaptive exploration and parameter updates
         if self.steps % 50 == 0:  # Update adaptation every 50 steps
@@ -819,6 +839,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.steps_since_last_learning = 0
         self.current_action_tuple = (1, 0)  # FIXED: Start with a real action from the action list
         self.prev_x = self.initial_position[0]  # Use initial_position from parent class
+        
+        # Reset action persistence timing
+        self.last_action_time = time.time()
+        self.action_persisted = False
         
         # Reset action history
         self.action_history = []

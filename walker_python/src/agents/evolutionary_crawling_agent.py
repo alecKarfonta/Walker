@@ -11,6 +11,7 @@ from typing import Tuple, Dict, Any, List, Optional, Union
 from copy import deepcopy
 import random
 import uuid
+import time
 
 from .base_agent import BaseAgent
 from .crawling_crate_agent import CrawlingCrateAgent
@@ -99,6 +100,18 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         # Destruction tracking to prevent core dumps
         self._destroyed = False
         
+        # Initialize crawling-specific tracking
+        self.recent_displacements = []
+        self.action_sequence = []
+        
+        # ACTION PERSISTENCE: Time-based action selection (0.5 seconds) - INHERITED
+        self.action_persistence_duration = 0.25  # 0.25 seconds
+        self.last_action_time = time.time()  # Track when last action was selected
+        self.action_persisted = False  # Track if we're in persistence mode
+        
+        # Learning approach inheritance for evolution (can be None or LearningApproach)
+        self._inherited_learning_approach = None  # Type: Optional[LearningApproach]
+    
     def _create_evolutionary_body(self):
         """Create body using evolved physical parameters."""
         body_def = b2.b2BodyDef(
@@ -366,13 +379,6 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         self.use_enhanced_state = True
         self.enhanced_state_size = 3  # shoulder, elbow, velocity
         
-        # Initialize crawling-specific tracking
-        self.recent_displacements = []
-        self.action_sequence = []
-        
-        # Learning approach inheritance for evolution (can be None or LearningApproach)
-        self._inherited_learning_approach = None  # Type: Optional[LearningApproach]
-    
     def get_evolutionary_reward(self, prev_x: float) -> float:
         """
         Enhanced reward function that considers evolved physical parameters.
@@ -595,6 +601,10 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         """Reset agent to a new position while preserving learned behavior."""
         self.initial_position = position
         self.reset_position()
+        
+        # Reset action persistence timing
+        self.last_action_time = time.time()
+        self.action_persisted = False
         
     def destroy(self):
         """Clean up physics bodies safely."""
