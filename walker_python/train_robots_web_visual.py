@@ -1081,7 +1081,8 @@ class TrainingEnvironment:
         self.evolution_engine = EnhancedEvolutionEngine(
             world=self.world,
             config=self.evolution_config,
-            selection_strategy=TournamentSelection()
+            mlflow_integration=self.mlflow_integration,
+            logger=None
         )
 
         # Create initial diverse population
