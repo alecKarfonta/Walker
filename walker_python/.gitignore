@@ -141,4 +141,4 @@ default.prefs
 # OS files
 .DS_Store
 Thumbs.db 
-walker_python/container_full_backup/experiments/walker_experiments.db
+walker_python/container_full_backup/experiments/walker_experiments.db*.db
