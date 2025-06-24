@@ -1662,8 +1662,8 @@ class TrainingEnvironment:
     """
     def __init__(self, num_agents=30, enable_evaluation=True):  # Reduced from 50 to 30 to save memory
         self.num_agents = num_agents
-        self.world = b2.b2World(gravity=(0, -10), doSleep=True)
-        self.dt = 1.0 / 60.0
+        self.world = b2.b2World(gravity=(0, -9.8))
+        self.dt = 1.0 / 60.0  # 60 FPS
 
         # World bounds for resetting fallen agents
         self.world_bounds_y = -20.0
@@ -1671,6 +1671,7 @@ class TrainingEnvironment:
         # Collision filtering setup
         self.GROUND_CATEGORY = 0x0001
         self.AGENT_CATEGORY = 0x0002
+        self.OBSTACLE_CATEGORY = 0x0004  # NEW: Category for obstacles
 
         # Create the ground
         self._create_ground()
@@ -1821,6 +1822,9 @@ class TrainingEnvironment:
         # Initialize ecosystem roles for existing agents
         self._initialize_ecosystem_roles()
 
+        # Initialize obstacle physics body tracking
+        self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
+
         # Initialize elite robot management system
         self.elite_manager = EliteManager(
             storage_directory="robot_storage",
@@ -1853,7 +1857,7 @@ class TrainingEnvironment:
                 min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
                 max_pool_size=num_agents * 2,  # 2x population as maximum pool
                 category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY
+                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
             )
             
             # Connect learning manager to memory pool for knowledge transfer
@@ -2064,6 +2068,9 @@ class TrainingEnvironment:
             
             # Update environmental challenges
             self.environmental_system.update_environment(self.evolution_engine.generation)
+            
+            # Create physics bodies for any new obstacles
+            self._create_obstacle_physics_bodies()
             
             # Update agent health and energy based on ecosystem effects
             for agent in self.agents:
@@ -2352,8 +2359,8 @@ class TrainingEnvironment:
                     self.robot_stats[agent_id]['food_consumed'] += energy_gain
                 
                 # Log significant consumption events (keep minimal logging)
-                if energy_gain > 0.1:  # Only log substantial energy gains
-                    print(f"🍽️ Agent {agent_id[:8]} consumed energy: +{boosted_energy_gain:.2f}")
+                #if energy_gain > 0.1:  # Only log substantial energy gains
+                #    print(f"🍽️ Agent {agent_id[:8]} consumed energy: +{boosted_energy_gain:.2f}")
                 
                 # Carnivores and omnivores can also hunt other robots for energy
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -2568,7 +2575,7 @@ class TrainingEnvironment:
                     agent_id=None,  # Generate new UUID automatically
                     position=spawn_position,
                     category_bits=self.AGENT_CATEGORY,
-                    mask_bits=self.GROUND_CATEGORY,
+                    mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
                     physical_params=random_params
                 )
                 logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
@@ -2935,6 +2942,13 @@ class TrainingEnvironment:
             if current_time - self.last_ecosystem_update > self.ecosystem_update_interval:
                 self._update_ecosystem_dynamics()
                 self.last_ecosystem_update = current_time
+            
+            # Create obstacle physics bodies periodically (every 10 seconds)
+            if not hasattr(self, 'last_obstacle_update'):
+                self.last_obstacle_update = current_time
+            if current_time - self.last_obstacle_update > 10.0:
+                self._create_obstacle_physics_bodies()
+                self.last_obstacle_update = current_time
             
             # Generate resources between agents periodically
             if current_time - self.last_resource_generation > self.resource_generation_interval:
@@ -3391,15 +3405,7 @@ class TrainingEnvironment:
                     },
                     'environment': {
                         'status': environmental_status,
-                        'obstacles': [
-                            {
-                                'type': obs.get('type', 'unknown'),
-                                'position': obs.get('position', [0, 0]),
-                                'size': obs.get('size', 2.0),  # Default size for simple obstacles
-                                'danger_level': obs.get('danger_level', 0.3)  # Default danger level
-                            }
-                            for obs in self.environmental_system.obstacles if obs and isinstance(obs, dict)
-                        ]
+                        'obstacles': self._get_obstacle_data_for_ui()  # Use new physics-body-based obstacle data
                     }
                 }
                 
@@ -3714,7 +3720,7 @@ class TrainingEnvironment:
             agent_id=None,  # Generate new UUID automatically
             position=position,
             category_bits=self.AGENT_CATEGORY,
-            mask_bits=self.GROUND_CATEGORY,
+            mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
             physical_params=random_params
         )
         self.agents.append(new_agent)
@@ -4068,6 +4074,210 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"⚠️ Error calculating closest food distance for agent {getattr(agent, 'id', 'unknown')}: {e}")
             return {'distance': float('inf'), 'food_type': 'error calculating'}
+
+    def _create_obstacle_physics_bodies(self):
+        """Create Box2D physics bodies for obstacles that don't have them yet."""
+        try:
+            if not hasattr(self, 'obstacle_bodies'):
+                self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
+            
+            # Get obstacles from environmental system
+            obstacles_to_create = []
+            
+            # Environmental system obstacles
+            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
+                for i, obstacle in enumerate(self.environmental_system.obstacles):
+                    obstacle_id = f"env_{i}_{obstacle['type']}"
+                    if obstacle_id not in self.obstacle_bodies:
+                        obstacles_to_create.append({
+                            'id': obstacle_id,
+                            'type': obstacle['type'],
+                            'position': obstacle['position'],
+                            'size': 2.0,  # Default size
+                            'source': 'environmental'
+                        })
+            
+            # Evolution engine obstacles
+            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
+                for i, obstacle in enumerate(self.evolution_engine.environment_obstacles):
+                    if obstacle.get('active', True):
+                        obstacle_id = f"evo_{i}_{obstacle['type']}"
+                        if obstacle_id not in self.obstacle_bodies:
+                            obstacles_to_create.append({
+                                'id': obstacle_id,
+                                'type': obstacle['type'],
+                                'position': obstacle['position'],
+                                'size': obstacle.get('size', 2.0),
+                                'source': 'evolution'
+                            })
+            
+            # Create physics bodies for new obstacles
+            bodies_created = 0
+            for obstacle_data in obstacles_to_create:
+                try:
+                    body = self._create_single_obstacle_body(obstacle_data)
+                    if body:
+                        self.obstacle_bodies[obstacle_data['id']] = body
+                        bodies_created += 1
+                except Exception as e:
+                    print(f"⚠️ Error creating physics body for obstacle {obstacle_data['id']}: {e}")
+            
+            if bodies_created > 0:
+                print(f"🗿 Created {bodies_created} obstacle physics bodies. Total active: {len(self.obstacle_bodies)}")
+            
+            # Clean up bodies for obstacles that no longer exist
+            self._cleanup_removed_obstacles()
+            
+        except Exception as e:
+            print(f"⚠️ Error in obstacle physics body creation: {e}")
+    
+    def _create_single_obstacle_body(self, obstacle_data):
+        """Create a Box2D physics body for a single obstacle."""
+        try:
+            obstacle_type = obstacle_data['type']
+            position = obstacle_data['position']
+            size = obstacle_data.get('size', 2.0)
+            
+            # Create static body for obstacle
+            obstacle_body = self.world.CreateStaticBody(position=position)
+            
+            # Choose shape based on obstacle type
+            if obstacle_type in ['boulder', 'wall']:
+                # Rectangular obstacles
+                width = size if obstacle_type == 'boulder' else min(size, 1.0)  # Walls are thinner
+                height = size if obstacle_type == 'boulder' else max(size, 3.0)  # Walls are taller
+                
+                fixture = obstacle_body.CreateFixture(
+                    shape=b2.b2PolygonShape(box=(width/2, height/2)),
+                    density=0.0,  # Static body
+                    friction=0.7,
+                    restitution=0.2,
+                    filter=b2.b2Filter(
+                        categoryBits=self.OBSTACLE_CATEGORY,
+                        maskBits=self.AGENT_CATEGORY  # Collide with agents
+                    )
+                )
+                
+            elif obstacle_type == 'pit':
+                # Create pit as a low rectangular obstacle
+                fixture = obstacle_body.CreateFixture(
+                    shape=b2.b2PolygonShape(box=(size/2, 0.5)),  # Low height for pit
+                    density=0.0,
+                    friction=0.3,  # Slippery
+                    restitution=0.0,
+                    filter=b2.b2Filter(
+                        categoryBits=self.OBSTACLE_CATEGORY,
+                        maskBits=self.AGENT_CATEGORY
+                    )
+                )
+                
+            else:
+                # Default: circular obstacle for other types
+                fixture = obstacle_body.CreateFixture(
+                    shape=b2.b2CircleShape(radius=size/2),
+                    density=0.0,
+                    friction=0.5,
+                    restitution=0.3,
+                    filter=b2.b2Filter(
+                        categoryBits=self.OBSTACLE_CATEGORY,
+                        maskBits=self.AGENT_CATEGORY
+                    )
+                )
+            
+            # Store obstacle type on the body for identification
+            obstacle_body.userData = {
+                'type': 'obstacle',
+                'obstacle_type': obstacle_type,
+                'obstacle_id': obstacle_data['id']
+            }
+            
+            return obstacle_body
+            
+        except Exception as e:
+            print(f"⚠️ Error creating obstacle body: {e}")
+            return None
+    
+    def _cleanup_removed_obstacles(self):
+        """Remove physics bodies for obstacles that no longer exist."""
+        try:
+            if not hasattr(self, 'obstacle_bodies'):
+                return
+            
+            # Get current obstacle IDs
+            current_obstacle_ids = set()
+            
+            # Environmental obstacles
+            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
+                for i, obstacle in enumerate(self.environmental_system.obstacles):
+                    current_obstacle_ids.add(f"env_{i}_{obstacle['type']}")
+            
+            # Evolution obstacles
+            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
+                for i, obstacle in enumerate(self.evolution_engine.environment_obstacles):
+                    if obstacle.get('active', True):
+                        current_obstacle_ids.add(f"evo_{i}_{obstacle['type']}")
+            
+            # Remove bodies for obstacles that no longer exist
+            bodies_to_remove = []
+            for obstacle_id, body in self.obstacle_bodies.items():
+                if obstacle_id not in current_obstacle_ids:
+                    bodies_to_remove.append(obstacle_id)
+            
+            removed_count = 0
+            for obstacle_id in bodies_to_remove:
+                try:
+                    body = self.obstacle_bodies.pop(obstacle_id)
+                    self.world.DestroyBody(body)
+                    removed_count += 1
+                except Exception as e:
+                    print(f"⚠️ Error removing obstacle body {obstacle_id}: {e}")
+            
+            if removed_count > 0:
+                print(f"🗑️ Removed {removed_count} obsolete obstacle bodies")
+                
+        except Exception as e:
+            print(f"⚠️ Error cleaning up obstacle bodies: {e}")
+    
+    def _get_obstacle_data_for_ui(self):
+        """Get obstacle data for the web UI visualization."""
+        try:
+            obstacles_for_ui = []
+            
+            # Add obstacles that have physics bodies
+            if hasattr(self, 'obstacle_bodies'):
+                for obstacle_id, body in self.obstacle_bodies.items():
+                    if body and hasattr(body, 'userData') and body.userData:
+                        obstacle_type = body.userData.get('obstacle_type', 'unknown')
+                        position = (body.position.x, body.position.y)
+                        
+                        # Determine size based on fixtures
+                        size = 2.0  # Default
+                        if body.fixtures:
+                            fixture = body.fixtures[0]
+                            shape = fixture.shape
+                            if hasattr(shape, 'radius'):  # Circle
+                                size = shape.radius * 2
+                            elif hasattr(shape, 'vertices'):  # Polygon
+                                # Approximate size from polygon bounds
+                                vertices = shape.vertices
+                                if vertices:
+                                    x_coords = [v[0] for v in vertices]
+                                    y_coords = [v[1] for v in vertices]
+                                    size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
+                        
+                        obstacles_for_ui.append({
+                            'id': obstacle_id,
+                            'type': obstacle_type,
+                            'position': position,
+                            'size': size,
+                            'active': True
+                        })
+            
+            return obstacles_for_ui
+            
+        except Exception as e:
+            print(f"⚠️ Error getting obstacle data for UI: {e}")
+            return []
 
 # --- Main Execution ---
 app = Flask(__name__)

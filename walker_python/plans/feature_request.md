@@ -2,6 +2,7 @@
 User Requests
 - [ ] When I click a robot to focus on them the camera resets to an old position before moving to focus on the robot. Instead it should smoothly move from the current position to focus on the robot.
 
+- [ ] Remove resource regeneration. Instead when a food source reachs below 1.0 then remove it and then spawn a new one somewhere else.
 
 - [ ] Also ensure that the other learning approaches are restord, like the deep q learning, how do we transfer knowledge for those agents?
 
@@ -13,7 +14,25 @@ User Requests
 
 - [x] ✅ When calculating a robots distance to the nearest food it should only consider food that is not depleted.
 
-- [ ] The random obstacles are not interacting with the robots because of their masking bits.
+- [x] ✅ The random obstacles are not interacting with the robots because of their masking bits.
+
+**COMPLETELY FIXED**: Obstacle collision system implemented with proper physics bodies
+1. **New Collision Category**: Added `OBSTACLE_CATEGORY = 0x0004` for obstacle physics bodies
+2. **Robot Collision Update**: Updated all robot mask bits to `GROUND_CATEGORY | OBSTACLE_CATEGORY` (0x0005) so robots collide with both ground AND obstacles
+3. **Physics Body Creation**: Added comprehensive system to convert obstacle data into actual Box2D physics bodies:
+   - `_create_obstacle_physics_bodies()` - Creates physics bodies for obstacles from environmental/evolution systems
+   - `_create_single_obstacle_body()` - Creates individual physics bodies with proper collision filtering
+   - `_cleanup_removed_obstacles()` - Removes physics bodies for obsolete obstacles
+   - `_get_obstacle_data_for_ui()` - Provides obstacle data for web visualization
+4. **Obstacle Types**: Different obstacle shapes with proper physics properties:
+   - **Boulder/Wall**: Rectangular Box2D bodies with varying dimensions and friction
+   - **Pit**: Low-height rectangular bodies with reduced friction for slippery effect
+   - **Other Types**: Circular bodies with customizable size and restitution
+5. **Dynamic Management**: Obstacles are created during ecosystem updates and periodically (every 10s)
+6. **Integration**: Updated training loop and web UI to display physics-based obstacle interactions
+7. **Testing Verified**: All collision categories, physics body creation, and robot collision masking confirmed working correctly
+
+✅ **RESULT**: Robots now physically interact with and are blocked by randomly spawned obstacles. Different obstacle types have different physical properties (size, friction, shape). The system dynamically creates and removes obstacle physics bodies as the environment changes.
 
 - [ ] Whole ui still occasionally locks up, not sure what process is causing that. Could be something about resources. Look for ways you can improve the consistency and performance of the physics engine and frontend.  Move some operations to other thread to avoid blocking the ui.
 

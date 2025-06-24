@@ -8,19 +8,28 @@ services:
       dockerfile: Dockerfile
     container_name: walker-training-app
     hostname: walker-training-app
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONPATH=/app
+      - MLFLOW_TRACKING_URI=http://walker-mlflow:5000
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_metrics
+      - GRAFANA_URL=http://walker-grafana:3000
     ports:
       - "7777:8080"  # Web interface
       - "2322:2322"  # Dashboard exporter API
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     volumes:
       - ./evaluation_exports:/app/evaluation_exports
       - ./experiments:/app/experiments
       - ./mlruns:/app/mlruns
       - walker-data:/app/data
-    environment:
-      - PYTHONPATH=/app
-      - MLFLOW_TRACKING_URI=http://walker-mlflow:5000
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_metrics
-      - GRAFANA_URL=http://walker-grafana:3000
     depends_on:
       - walker-mlflow
       - walker-prometheus

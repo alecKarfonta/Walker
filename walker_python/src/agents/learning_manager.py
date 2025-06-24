@@ -299,8 +299,8 @@ class LearningManager:
             # Initialize experience collection (lightweight) vs training (heavy) separation
             agent._deep_step_count = 0
             agent._deep_experience_collection_freq = 5     # Collect experience every 5 steps (lightweight)
-            agent._deep_training_freq = 500               # Train every 500 steps (faster for testing)
-            agent._deep_min_buffer_size = 500             # Minimum experiences before any training (fast testing)
+            agent._deep_training_freq = 2000              # Train every 2000 steps (sufficient data collection)
+            agent._deep_min_buffer_size = 10000           # Minimum 10k experiences before any training (ensure sufficient data)
             agent._deep_ready_to_train = False            # No training until buffer is full
             agent._deep_prev_state = None                 # Initialize previous state
             agent._deep_prev_action = None                # Initialize previous action
@@ -320,8 +320,8 @@ class LearningManager:
                     if not hasattr(agent, '_deep_step_count'):
                         agent._deep_step_count = 0
                         agent._deep_experience_collection_freq = 5
-                        agent._deep_training_freq = 500  # Faster for testing
-                        agent._deep_min_buffer_size = 500  # Fast testing
+                        agent._deep_training_freq = 2000  # Sufficient data collection
+                        agent._deep_min_buffer_size = 10000  # Ensure sufficient training data
                         agent._deep_ready_to_train = False
                         agent._deep_prev_state = None
                         agent._deep_prev_action = None
@@ -389,8 +389,8 @@ class LearningManager:
                             print(f"🎯 TRAINING READY: Agent {agent.id} buffer filled ({len(deep_q_learner.memory):,} experiences)")
                             print(f"   🔥 GPU training will begin every {agent._deep_training_freq:,} steps")
                         else:
-                            # Periodic buffer status update (every 500 steps for fast testing)
-                            if hasattr(deep_q_learner, 'memory') and agent._deep_step_count % 500 == 0:
+                            # Periodic buffer status update (every 1000 steps)
+                            if hasattr(deep_q_learner, 'memory') and agent._deep_step_count % 1000 == 0:
                                 current_buffer_size = len(deep_q_learner.memory)
                                 progress = (current_buffer_size / agent._deep_min_buffer_size) * 100
                                 print(f"📊 Buffer Progress: Agent {agent.id} - {current_buffer_size:,}/{agent._deep_min_buffer_size:,} ({progress:.1f}%)")

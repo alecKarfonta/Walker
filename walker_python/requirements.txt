@@ -3,6 +3,11 @@ numpy>=1.21.0
 box2d-py>=2.3.8
 pygame>=2.0.0
 
+# Deep Learning - PyTorch with CUDA support
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
 # Web interface
 flask>=2.0.0
 flask-socketio>=5.0.0
