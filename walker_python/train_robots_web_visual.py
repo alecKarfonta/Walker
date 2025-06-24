@@ -1842,6 +1842,9 @@ class TrainingEnvironment:
             print(f"⚠️ Learning Manager initialization failed: {e}")
             self.learning_manager = None
 
+        # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
+        self._initialize_random_learning_approaches()
+
         # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
         try:
             from src.agents.robot_memory_pool import RobotMemoryPool
@@ -1931,6 +1934,122 @@ class TrainingEnvironment:
                 self.survival_stats['agent_birth_times'][agent.id] = time.time()
         
         print(f"🦎 Initialized ecosystem roles for {len(self.agents)} agents")
+
+    def _initialize_random_learning_approaches(self):
+        """Initialize random learning approaches for all agents to ensure diversity."""
+        if not self.learning_manager:
+            print("⚠️ Learning Manager not available - agents will use default learning approach")
+            return
+        
+        # Import learning approaches
+        from src.agents.learning_manager import LearningApproach
+        import random
+        
+        # Available learning approaches with weights (prefer more advanced approaches)
+        learning_approaches = [
+            (LearningApproach.BASIC_Q_LEARNING, 0.15),      # 15% - Simple baseline
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.35),   # 35% - Advanced tabular
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.35),   # 35% - Survival-focused
+            (LearningApproach.DEEP_Q_LEARNING, 0.15),       # 15% - Neural networks
+        ]
+        
+        # Create weighted list for random selection
+        weighted_approaches = []
+        for approach, weight in learning_approaches:
+            weighted_approaches.extend([approach] * int(weight * 100))
+        
+        # Track assignments for reporting
+        approach_counts = {approach: 0 for approach, _ in learning_approaches}
+        successful_assignments = 0
+        failed_assignments = 0
+        
+        print(f"🎯 Assigning random learning approaches to {len(self.agents)} agents...")
+        
+        for i, agent in enumerate(self.agents):
+            if getattr(agent, '_destroyed', False):
+                continue
+                
+            try:
+                # Select random learning approach
+                selected_approach = random.choice(weighted_approaches)
+                
+                # Apply the learning approach
+                success = self.learning_manager.set_agent_approach(agent, selected_approach)
+                
+                if success:
+                    # Store the approach name on the agent for web interface
+                    setattr(agent, 'learning_approach', selected_approach.value)
+                    approach_counts[selected_approach] += 1
+                    successful_assignments += 1
+                    
+                    # Log first few assignments for verification
+                    if i < 5:
+                        print(f"   Agent {agent.id[:8]}: {selected_approach.value}")
+                else:
+                    failed_assignments += 1
+                    print(f"   ❌ Failed to assign {selected_approach.value} to agent {agent.id[:8]}")
+                    
+            except Exception as e:
+                failed_assignments += 1
+                print(f"   ❌ Error assigning learning approach to agent {agent.id}: {e}")
+        
+        # Report final distribution
+        print(f"🧠 Learning Approach Distribution:")
+        total_assigned = successful_assignments
+        for approach, count in approach_counts.items():
+            if count > 0:
+                percentage = (count / total_assigned * 100) if total_assigned > 0 else 0
+                approach_info = self.learning_manager.approach_info[approach]
+                icon = approach_info['icon']
+                name = approach_info['name']
+                print(f"   {icon} {name}: {count} agents ({percentage:.1f}%)")
+        
+        if failed_assignments > 0:
+            print(f"   ⚠️ Failed assignments: {failed_assignments}")
+        
+        print(f"✅ Successfully assigned learning approaches to {successful_assignments}/{len(self.agents)} agents")
+
+    def _assign_random_learning_approach_single(self, agent):
+        """Assign a random learning approach to a single agent (for replacement agents)."""
+        if not self.learning_manager:
+            return
+        
+        # Import learning approaches
+        from src.agents.learning_manager import LearningApproach
+        import random
+        
+        # Available learning approaches with weights (same as initialization)
+        learning_approaches = [
+            (LearningApproach.BASIC_Q_LEARNING, 0.15),      # 15% - Simple baseline
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.35),   # 35% - Advanced tabular
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.35),   # 35% - Survival-focused
+            (LearningApproach.DEEP_Q_LEARNING, 0.15),       # 15% - Neural networks
+        ]
+        
+        # Create weighted list for random selection
+        weighted_approaches = []
+        for approach, weight in learning_approaches:
+            weighted_approaches.extend([approach] * int(weight * 100))
+        
+        try:
+            # Select random learning approach
+            selected_approach = random.choice(weighted_approaches)
+            
+            # Apply the learning approach
+            success = self.learning_manager.set_agent_approach(agent, selected_approach)
+            
+            if success:
+                # Store the approach name on the agent for web interface
+                setattr(agent, 'learning_approach', selected_approach.value)
+                approach_info = self.learning_manager.approach_info[selected_approach]
+                icon = approach_info['icon']
+                name = approach_info['name']
+                print(f"   🎯 Assigned {icon} {name} to replacement agent {agent.id[:8]}")
+            else:
+                print(f"   ❌ Failed to assign {selected_approach.value} to replacement agent {agent.id[:8]}")
+                
+        except Exception as e:
+            print(f"   ❌ Error assigning learning approach to replacement agent {agent.id}: {e}")
 
     def _update_ecosystem_dynamics(self):
         """Update ecosystem dynamics including agent interactions, territories, and predation."""
@@ -2399,6 +2518,9 @@ class TrainingEnvironment:
                         
                         # Initialize new agent's ecosystem data
                         self._initialize_single_agent_ecosystem(replacement_agent)
+                        
+                        # ✨ ASSIGN RANDOM LEARNING APPROACH TO REPLACEMENT AGENT
+                        self._assign_random_learning_approach_single(replacement_agent)
                         
                         print(f"🐣 Spawned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
                 
