@@ -1042,9 +1042,11 @@ HTML_TEMPLATE = """
                         case 'seeds': foodColor = '#FF9800'; break;
                     }
                     
-                    const radius = 0.5 + (ratio * 1.5); // Size based on remaining amount
-                    const alpha = 0.4 + (ratio * 0.4); // Transparency based on amount
+                    const baseRadius = 0.8;
+                    const radius = baseRadius + (ratio * 1.2); // Size based on remaining amount
+                    const alpha = 0.5 + (ratio * 0.5); // Transparency based on amount
                     
+                    // Draw resource base
                     ctx.fillStyle = foodColor + Math.floor(alpha * 255).toString(16).padStart(2, '0');
                     ctx.strokeStyle = foodColor;
                     ctx.lineWidth = 0.1;
@@ -1054,16 +1056,64 @@ HTML_TEMPLATE = """
                     ctx.fill();
                     ctx.stroke();
                     
-                    // Add depletion animation if amount is low
-                    if (ratio < 0.3) {
+                    // Draw resource type icon
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = '0.8px Arial';
+                    ctx.textAlign = 'center';
+                    const typeIcons = {
+                        'plants': '🌿',
+                        'meat': '🥩',
+                        'insects': '🐛',
+                        'seeds': '🌰'
+                    };
+                    ctx.fillText(typeIcons[food.type] || '🍃', x, y + 0.3);
+                    
+                    // Add depletion warning animation
+                    if (ratio < 0.4) {
                         const time = Date.now() / 1000;
-                        const pulse = 0.5 + 0.5 * Math.sin(time * 4);
-                        ctx.strokeStyle = `rgba(255, 255, 0, ${pulse})`;
+                        const pulse = 0.3 + 0.7 * Math.sin(time * 6);
+                        const warningColor = ratio < 0.2 ? 'rgba(255, 0, 0, ' : 'rgba(255, 165, 0, ';
+                        
+                        ctx.strokeStyle = warningColor + pulse + ')';
                         ctx.lineWidth = 0.2;
                         ctx.beginPath();
-                        ctx.arc(x, y, radius + 0.3, 0, 2 * Math.PI);
+                        ctx.arc(x, y, radius + 0.4, 0, 2 * Math.PI);
                         ctx.stroke();
+                        
+                        // Add sparkle effect for very low resources
+                        if (ratio < 0.2) {
+                            for (let i = 0; i < 4; i++) {
+                                const angle = (i / 4) * 2 * Math.PI + time * 2;
+                                const sparkleRadius = radius + 0.6;
+                                const sx = x + Math.cos(angle) * sparkleRadius;
+                                const sy = y + Math.sin(angle) * sparkleRadius;
+                                
+                                ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
+                                ctx.beginPath();
+                                ctx.arc(sx, sy, 0.1, 0, 2 * Math.PI);
+                                ctx.fill();
+                            }
+                        }
                     }
+                    
+                    // Draw resource amount bar
+                    const barWidth = radius * 2;
+                    const barHeight = 0.2;
+                    const barY = y - radius - 0.5;
+                    
+                    // Background bar
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.fillRect(x - barWidth/2, barY, barWidth, barHeight);
+                    
+                    // Amount bar
+                    ctx.fillStyle = ratio > 0.5 ? '#4CAF50' : ratio > 0.2 ? '#FF9800' : '#F44336';
+                    ctx.fillRect(x - barWidth/2, barY, barWidth * ratio, barHeight);
+                    
+                    // Amount text
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = '0.4px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`${amount.toFixed(0)}/${maxCapacity.toFixed(0)}`, x, barY - 0.2);
                 });
             }
         }
@@ -1163,22 +1213,62 @@ HTML_TEMPLATE = """
                 ctx.fillText(roleSymbols[role] || '🤖', x, baseY + barSpacing * 2 + 0.8);
             }
             
-            // Status indicator for active agents
-            if (status !== 'idle' && speed > 0.1) {
-                const statusSymbols = {
-                    'hunting': '🎯',
-                    'feeding': '🍃',
-                    'fleeing': '💨',
-                    'territorial': '🛡️',
-                    'moving': '➡️',
-                    'active': '⚡'
-                };
+                            // Status indicator for active agents
+                if (status !== 'idle' && speed > 0.1) {
+                    const statusSymbols = {
+                        'hunting': '🎯',
+                        'feeding': '🍃',
+                        'fleeing': '💨',
+                        'territorial': '🛡️',
+                        'moving': '➡️',
+                        'active': '⚡'
+                    };
+                    
+                    ctx.fillStyle = STATUS_COLORS[status] || '#FFFFFF';
+                    ctx.font = '0.8px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(statusSymbols[status] || '●', x + 1.5, y + 2.0);
+                }
                 
-                ctx.fillStyle = STATUS_COLORS[status] || '#FFFFFF';
-                ctx.font = '0.8px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(statusSymbols[status] || '●', x + 1.5, y + 2.0);
-            }
+                // Special consumption animation for feeding agents
+                if (status === 'feeding' && energy < 0.9) {
+                    const time = Date.now() / 1000;
+                    const consumptionPulse = 0.5 + 0.5 * Math.sin(time * 8);
+                    
+                    // Draw consumption particles
+                    for (let i = 0; i < 3; i++) {
+                        const angle = (i / 3) * 2 * Math.PI + time * 3;
+                        const particleRadius = 1.5 + 0.5 * Math.sin(time * 4 + i);
+                        const px = x + Math.cos(angle) * particleRadius;
+                        const py = y + Math.sin(angle) * particleRadius;
+                        
+                        ctx.fillStyle = `rgba(50, 200, 50, ${consumptionPulse * 0.8})`;
+                        ctx.beginPath();
+                        ctx.arc(px, py, 0.15, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                    
+                    // Draw energy absorption lines
+                    ctx.strokeStyle = `rgba(100, 255, 100, ${consumptionPulse * 0.6})`;
+                    ctx.lineWidth = 0.1;
+                    ctx.setLineDash([0.2, 0.2]);
+                    
+                    for (let i = 0; i < 4; i++) {
+                        const angle = (i / 4) * 2 * Math.PI + time * 2;
+                        const lineLength = 2.0;
+                        const startX = x + Math.cos(angle) * 1.0;
+                        const startY = y + Math.sin(angle) * 1.0;
+                        const endX = x + Math.cos(angle) * lineLength;
+                        const endY = y + Math.sin(angle) * lineLength;
+                        
+                        ctx.beginPath();
+                        ctx.moveTo(startX, startY);
+                        ctx.lineTo(endX, endY);
+                        ctx.stroke();
+                    }
+                    
+                    ctx.setLineDash([]); // Reset line dash
+                }
         }
         
         function drawMovementTrail(agentId, position, speed) {
@@ -1561,6 +1651,11 @@ class TrainingEnvironment:
         self.last_ecosystem_update = time.time()
         self.ecosystem_update_interval = 30.0  # Update ecosystem every 30 seconds
         
+        # Resource generation system
+        self.last_resource_generation = time.time()
+        self.resource_generation_interval = 15.0  # Generate resources every 15 seconds
+        self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
+        
         # Initialize ecosystem roles for existing agents
         self._initialize_ecosystem_roles()
 
@@ -1620,6 +1715,9 @@ class TrainingEnvironment:
                     'energy': 1.0,  # 0.0 to 1.0
                     'last_updated': time.time()
                 }
+                
+                # Initialize energy level for resource consumption
+                self.agent_energy_levels[agent.id] = 1.0
         
         print(f"🦎 Initialized ecosystem roles for {len(self.agents)} agents")
 
@@ -1796,6 +1894,70 @@ class TrainingEnvironment:
                                 self.agent_health[predator.id]['energy'] + 0.2)
                         
                         break  # One predation per predator per update
+
+    def _generate_resources_between_agents(self):
+        """Generate resources strategically between agents."""
+        try:
+            # Get positions of all active agents
+            agent_positions = []
+            for agent in self.agents:
+                if not getattr(agent, '_destroyed', False) and agent.body:
+                    agent_positions.append((agent.id, (agent.body.position.x, agent.body.position.y)))
+            
+            if len(agent_positions) >= 2:
+                # Sort agents by x position for systematic resource placement
+                agent_positions.sort(key=lambda x: x[1][0])
+                
+                # Generate resources between agents using ecosystem dynamics
+                self.ecosystem_dynamics.generate_resources_between_agents(agent_positions)
+                
+                print(f"🌱 Resource generation cycle completed. Total resources: {len(self.ecosystem_dynamics.food_sources)}")
+        
+        except Exception as e:
+            print(f"⚠️ Error generating resources: {e}")
+    
+    def _update_resource_consumption(self):
+        """Update agent energy levels through resource consumption."""
+        try:
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False) or not agent.body:
+                    continue
+                
+                agent_id = agent.id
+                agent_position = (agent.body.position.x, agent.body.position.y)
+                
+                # Get current energy level
+                current_energy = self.agent_energy_levels.get(agent_id, 1.0)
+                
+                # Natural energy decay over time
+                energy_decay = 0.002  # Small constant decay
+                current_energy = max(0.0, current_energy - energy_decay)
+                
+                # Try to consume nearby resources
+                energy_gain = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
+                current_energy = min(1.0, current_energy + energy_gain)
+                
+                # Update energy level
+                self.agent_energy_levels[agent_id] = current_energy
+                
+                # Update agent health data for visualization
+                if agent_id in self.agent_health:
+                    self.agent_health[agent_id]['energy'] = current_energy
+                
+                # Update agent status data for visualization
+                if agent_id in self.agent_statuses:
+                    self.agent_statuses[agent_id]['energy'] = current_energy
+                    
+                    # Update status based on energy level
+                    if current_energy < 0.2:
+                        self.agent_statuses[agent_id]['status'] = 'feeding'  # Desperate for food
+                    elif current_energy > 0.8:
+                        role = self.agent_statuses[agent_id]['role']
+                        if role == 'carnivore':
+                            self.agent_statuses[agent_id]['status'] = 'hunting'  # High energy, ready to hunt
+        
+        except Exception as e:
+            print(f"⚠️ Error updating resource consumption: {e}")
 
     def _update_statistics(self):
         """Update population statistics with enhanced safety checks."""
@@ -2094,6 +2256,14 @@ class TrainingEnvironment:
             if current_time - self.last_ecosystem_update > self.ecosystem_update_interval:
                 self._update_ecosystem_dynamics()
                 self.last_ecosystem_update = current_time
+            
+            # Generate resources between agents periodically
+            if current_time - self.last_resource_generation > self.resource_generation_interval:
+                self._generate_resources_between_agents()
+                self.last_resource_generation = current_time
+            
+            # Update agent energy levels through resource consumption
+            self._update_resource_consumption()
             
             # Health check logging every 30 seconds
             if current_time - last_health_check > 30.0:
