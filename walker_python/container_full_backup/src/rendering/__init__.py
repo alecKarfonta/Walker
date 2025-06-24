@@ -1,1 +1,0 @@
-# Rendering module for visualization 

@@ -443,21 +443,49 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             parent_lineage=child_lineage
         )
         
-        # Inherit and crossover Q-tables if both parents have learned
-        if len(self.q_table.q_values) > 10 and len(other.q_table.q_values) > 10:
-            child.q_table = self.q_table.copy()
-            child.q_table.learn_from_other_table(other.q_table, learning_rate=0.3)
-            # Offspring inherits learning approach from parent with more Q-table data
-            primary_parent = self if len(self.q_table.q_values) >= len(other.q_table.q_values) else other
+        # COMPREHENSIVE LEARNING TRANSFER: Preserve ALL learning weights for each approach
+        try:
+            # Determine primary parent (more learning data) for approach inheritance
+            if len(self.q_table.q_values) >= len(other.q_table.q_values):
+                primary_parent = self
+                secondary_parent = other
+            else:
+                primary_parent = other
+                secondary_parent = self
+            
+            # Inherit learning approach from primary parent
             child._inherited_learning_approach = getattr(primary_parent, '_inherited_learning_approach', None)
-        elif len(self.q_table.q_values) > len(other.q_table.q_values):
+            
+            # Copy Q-table from primary parent (preserves all learning weights)
+            child.q_table = primary_parent.q_table.copy()
+            
+            # Cross-train with secondary parent if both have significant learning
+            if (len(primary_parent.q_table.q_values) > 10 and 
+                len(secondary_parent.q_table.q_values) > 10):
+                
+                if hasattr(child.q_table, 'learn_from_other_table'):
+                    child.q_table.learn_from_other_table(secondary_parent.q_table, learning_rate=0.3)
+                    print(f"🧬 Crossover learning: {primary_parent.id[:6]} + {secondary_parent.id[:6]} → {child.id[:6]}")
+                
+                # Store both parents' learning data for comprehensive transfer
+                setattr(child, '_parent_qtables', {
+                    'primary': primary_parent.q_table,
+                    'secondary': secondary_parent.q_table,
+                    'primary_approach': getattr(primary_parent, '_inherited_learning_approach', None),
+                    'secondary_approach': getattr(secondary_parent, '_inherited_learning_approach', None)
+                })
+            else:
+                # Store single parent data
+                setattr(child, '_parent_qtables', {
+                    'primary': primary_parent.q_table,
+                    'primary_approach': getattr(primary_parent, '_inherited_learning_approach', None)
+                })
+                
+        except Exception as e:
+            print(f"⚠️ Error in comprehensive learning transfer during crossover: {e}")
+            # Fallback to basic transfer
             child.q_table = self.q_table.copy()
-            # Offspring inherits learning approach from parent with Q-table data
             child._inherited_learning_approach = getattr(self, '_inherited_learning_approach', None)
-        else:
-            child.q_table = other.q_table.copy()
-            # Offspring inherits learning approach from parent with Q-table data
-            child._inherited_learning_approach = getattr(other, '_inherited_learning_approach', None)
         
         child.crossover_count = 1
         return child
@@ -489,9 +517,16 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             parent_lineage=child_lineage
         )
         
-        # Copy Q-table and learning approach inheritance
+        # COMPREHENSIVE LEARNING TRANSFER: Copy Q-table and learning approach inheritance
         clone.q_table = self.q_table.copy()
         clone._inherited_learning_approach = getattr(self, '_inherited_learning_approach', None)
+        
+        # Store parent learning data for comprehensive transfer
+        setattr(clone, '_parent_qtables', {
+            'primary': self.q_table,
+            'primary_approach': getattr(self, '_inherited_learning_approach', None)
+        })
+        
         clone.mutation_count = self.mutation_count + 1
         
         return clone

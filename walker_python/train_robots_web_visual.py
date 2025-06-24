@@ -423,7 +423,7 @@ HTML_TEMPLATE = """
         let ecosystemData = null;
         let environmentData = null;
         let predationEvents = [];
-        let agentTrails = new Map(); // Store movement trails for agents
+        // Animation trails disabled for performance optimization
 
         function resizeCanvas() {
             const wrapper = document.getElementById('canvas-wrapper');
@@ -1035,9 +1035,7 @@ HTML_TEMPLATE = """
             // Draw enhanced robots with ecosystem roles
             drawEnhancedRobots(data);
             
-            // Draw predation events and effects
-            drawPredationEvents();
-            drawDeathEvents();
+            // Animation effects disabled for performance optimization
 
             ctx.restore(); // Restore to pre-camera transform state
         }
@@ -1169,20 +1167,7 @@ HTML_TEMPLATE = """
                         ctx.arc(x, y, radius + 0.4, 0, 2 * Math.PI);
                         ctx.stroke();
                         
-                        // Add sparkle effect for very low resources
-                        if (ratio < 0.2) {
-                            for (let i = 0; i < 4; i++) {
-                                const angle = (i / 4) * 2 * Math.PI + time * 2;
-                                const sparkleRadius = radius + 0.6;
-                                const sx = x + Math.cos(angle) * sparkleRadius;
-                                const sy = y + Math.sin(angle) * sparkleRadius;
-                                
-                                ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
-                                ctx.beginPath();
-                                ctx.arc(sx, sy, 0.1, 0, 2 * Math.PI);
-                                ctx.fill();
-                            }
-                        }
+                        // Sparkle effects disabled for performance optimization
                     }
                     
                     // Draw resource amount bar
@@ -1255,15 +1240,9 @@ HTML_TEMPLATE = """
                 const agentPos = [agent.body.x, agent.body.y];
                 drawAgentStatusIndicators(agentPos, role, status, health, energy, speed, isFocused);
                 
-                // Draw movement trail for fast-moving agents
-                if (speed > 1.0) {
-                    drawMovementTrail(robot.id, agentPos, speed);
-                }
+                // Movement trails disabled for performance optimization
                 
-                // Draw alliance connections
-                if (ecosystem.alliances && ecosystem.alliances.length > 0) {
-                    drawAllianceConnections(robot.id, agentPos, ecosystem.alliances, data.agents);
-                }
+                // Alliance connections disabled for performance optimization
             });
         }
         
@@ -1726,6 +1705,21 @@ class TrainingEnvironment:
             logger=None
         )
 
+        # Initialize robot memory pool for efficient object reuse
+        try:
+            from src.agents.robot_memory_pool import RobotMemoryPool
+            self.robot_memory_pool = RobotMemoryPool(
+                world=self.world,
+                min_pool_size=10,
+                max_pool_size=50,
+                category_bits=self.AGENT_CATEGORY,
+                mask_bits=self.GROUND_CATEGORY
+            )
+            print("🏊 Robot memory pool initialized for efficient object reuse")
+        except Exception as e:
+            print(f"⚠️ Could not initialize robot memory pool: {e}")
+            self.robot_memory_pool = None
+
         # Create initial diverse population
         self.agents = self.evolution_engine.initialize_population()
 
@@ -1819,6 +1813,11 @@ class TrainingEnvironment:
         # FLEXIBLE LEARNING SYSTEM INTEGRATION
         print(f"\n🎛️ === FLEXIBLE LEARNING SYSTEM INTEGRATION ===")
         self._initialize_learning_manager()
+        
+        # Connect learning manager to memory pool for comprehensive transfer
+        if hasattr(self, 'robot_memory_pool') and hasattr(self, 'learning_manager') and self.robot_memory_pool:
+            self.robot_memory_pool.set_learning_manager(self.learning_manager)
+            print("🔗 Learning manager connected to memory pool for comprehensive knowledge transfer")
 
         print(f"\n🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
@@ -3185,13 +3184,97 @@ class TrainingEnvironment:
                         # Find agent by ID instead of assuming ID matches list index
                         agent = next((a for a in current_agents if a.id == r_stat['id']), None)
                         if agent:
+                            # Get agent ID for use throughout this loop iteration
+                            agent_id = r_stat['id']
+                            
+                            # Calculate distance to nearest food that this robot type can actually eat
+                            nearest_food_distance = float('inf')
+                            nearest_food_type = "none"
+                            
+                            if hasattr(self, 'ecosystem_dynamics') and self.ecosystem_dynamics.food_sources:
+                                agent_pos = r_stat.get('current_position', (0, 0))
+                                
+                                # Get robot's ecosystem role to determine what foods it can eat
+                                agent_role = self.ecosystem_dynamics.agent_roles.get(agent_id, None)
+                                
+                                if agent_role:
+                                    # Define consumption efficiency matrix (what each role can eat)
+                                    from src.ecosystem_dynamics import EcosystemRole
+                                    consumption_efficiency = {
+                                        EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.8, "insects": 0.0, "meat": 0.0},
+                                        EcosystemRole.CARNIVORE: {"plants": 0.1, "seeds": 0.05, "insects": 0.6, "meat": 1.0},
+                                        EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.8},
+                                        EcosystemRole.SCAVENGER: {"plants": 0.2, "seeds": 0.1, "insects": 0.7, "meat": 1.0},
+                                        EcosystemRole.SYMBIONT: {"plants": 0.9, "seeds": 0.8, "insects": 0.5, "meat": 0.0}
+                                    }
+                                    
+                                    role_efficiency = consumption_efficiency.get(agent_role, {})
+                                    
+                                    # Check environmental food sources that this robot can eat
+                                    for food_source in self.ecosystem_dynamics.food_sources:
+                                        if hasattr(food_source, 'amount') and food_source.amount > 0.1:  # Only consider non-depleted food
+                                            food_type = food_source.food_type
+                                            efficiency = role_efficiency.get(food_type, 0.0)
+                                            
+                                            # Only consider foods this robot can actually consume (efficiency > 0)
+                                            if efficiency > 0.0:
+                                                food_pos = food_source.position
+                                                distance = ((agent_pos[0] - food_pos[0])**2 + (agent_pos[1] - food_pos[1])**2)**0.5
+                                                if distance < nearest_food_distance:
+                                                    nearest_food_distance = distance
+                                                    nearest_food_type = food_type
+                                    
+                                    # For carnivores and scavengers, also consider other agents as potential prey
+                                    if agent_role in [EcosystemRole.CARNIVORE, EcosystemRole.SCAVENGER]:
+                                        for other_agent in current_agents:
+                                            if (other_agent.id != agent_id and 
+                                                not getattr(other_agent, '_destroyed', False) and 
+                                                other_agent.body):
+                                                
+                                                other_pos = (other_agent.body.position.x, other_agent.body.position.y)
+                                                distance = ((agent_pos[0] - other_pos[0])**2 + (agent_pos[1] - other_pos[1])**2)**0.5
+                                                
+                                                # For scavengers, only consider weak prey (more likely targets)
+                                                if agent_role == EcosystemRole.SCAVENGER:
+                                                    other_energy = self.agent_energy_levels.get(other_agent.id, 1.0)
+                                                    if other_energy < 0.5:  # Only weak prey for scavengers
+                                                        if distance < nearest_food_distance:
+                                                            nearest_food_distance = distance
+                                                            nearest_food_type = "prey (weak)"
+                                                else:  # Carnivore - considers any prey
+                                                    if distance < nearest_food_distance:
+                                                        nearest_food_distance = distance
+                                                        nearest_food_type = "prey"
+                                else:
+                                    # Fallback: if no role assigned, check all food sources
+                                    for food_source in self.ecosystem_dynamics.food_sources:
+                                        if hasattr(food_source, 'amount') and food_source.amount > 0.1:
+                                            food_pos = food_source.position
+                                            distance = ((agent_pos[0] - food_pos[0])**2 + (agent_pos[1] - food_pos[1])**2)**0.5
+                                            if distance < nearest_food_distance:
+                                                nearest_food_distance = distance
+                                                nearest_food_type = food_source.food_type
+                            
+                            # If no consumable food found, set to a large but finite value
+                            if nearest_food_distance == float('inf'):
+                                nearest_food_distance = 999.9
+                                nearest_food_type = "none"
+                            
+                            # Get robot's ecosystem role for display
+                            agent_role_str = "unknown"
+                            if hasattr(self, 'ecosystem_dynamics') and agent_id in self.ecosystem_dynamics.agent_roles:
+                                agent_role_str = self.ecosystem_dynamics.agent_roles[agent_id].value
+                            
                             robot_details.append({
                                 'id': r_stat['id'],
                                 'name': f"Robot {r_stat['id']}",
                                 'rank': i + 1,
                                 'distance': r_stat.get('total_distance', 0),
                                 'position': r_stat.get('current_position', (0,0)),
-                                'episode_reward': r_stat.get('episode_reward', 0)
+                                'episode_reward': r_stat.get('episode_reward', 0),
+                                'nearest_food_distance': round(nearest_food_distance, 1),
+                                'nearest_food_type': nearest_food_type,
+                                'ecosystem_role': agent_role_str
                             })
                 except Exception as e:
                     print(f"⚠️  Error creating robot details: {e}")

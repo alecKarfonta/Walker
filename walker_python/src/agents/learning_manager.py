@@ -254,6 +254,10 @@ class LearningManager:
             survival_adapter = upgrade_agent_to_survival_learning(agent, self.ecosystem_interface)
             self.agent_adapters[agent.id] = survival_adapter
             
+            # Transfer knowledge from original Q-table if available
+            if agent.id in self.agent_original_qtables:
+                self._transfer_survival_knowledge(agent, self.agent_original_qtables[agent.id])
+            
             return True
             
         except Exception as e:
@@ -435,6 +439,10 @@ class LearningManager:
             # Replace the step method
             agent.step = deep_learning_step
             
+            # Transfer knowledge from original Q-table if available
+            if agent.id in self.agent_original_qtables:
+                self._transfer_deep_knowledge(agent, self.agent_original_qtables[agent.id])
+            
             print(f"🧠 Agent {agent.id} now using Deep Q-Learning with GPU acceleration")
             return True
             
@@ -482,6 +490,137 @@ class LearningManager:
                 
         except Exception as e:
             print(f"⚠️ Error transferring enhanced knowledge: {e}")
+    
+    def _transfer_survival_knowledge(self, agent, source_qtable):
+        """Transfer survival Q-learning knowledge including ecosystem awareness."""
+        try:
+            if hasattr(source_qtable, 'q_values') and hasattr(agent.q_table, 'q_values'):
+                # Direct Q-value transfer for survival states
+                transferred_states = 0
+                for state_key, action_values in source_qtable.q_values.items():
+                    if isinstance(action_values, list) and len(action_values) > 0:
+                        agent.q_table.q_values[state_key] = action_values.copy()
+                        transferred_states += 1
+                        
+                        # Transfer visit counts if available
+                        if hasattr(source_qtable, 'visit_counts') and hasattr(agent.q_table, 'visit_counts'):
+                            if state_key in source_qtable.visit_counts:
+                                agent.q_table.visit_counts[state_key] = source_qtable.visit_counts[state_key].copy()
+                
+                print(f"📚 Survival knowledge transfer: {transferred_states} survival states preserved")
+                
+                # Transfer survival-specific metadata
+                if hasattr(source_qtable, 'stage_progression'):
+                    agent.q_table.stage_progression = getattr(source_qtable, 'stage_progression', 'basic_movement')
+                
+                if hasattr(source_qtable, 'survival_stats'):
+                    agent.q_table.survival_stats = getattr(source_qtable, 'survival_stats', {}).copy()
+                    
+        except Exception as e:
+            print(f"⚠️ Error transferring survival knowledge: {e}")
+
+    def _transfer_deep_knowledge(self, agent, source_qtable):
+        """Transfer deep Q-learning knowledge including neural network weights."""
+        try:
+            # Get the deep learning adapter
+            deep_learner = self.agent_adapters.get(agent.id)
+            if not deep_learner:
+                print(f"⚠️ No deep learning adapter found for agent {agent.id}")
+                return
+                
+            # Transfer neural network weights if source has them
+            if hasattr(source_qtable, '_deep_learner_weights'):
+                try:
+                    deep_learner.load_state_dict(source_qtable._deep_learner_weights)
+                    print(f"📚 Deep learning neural network weights transferred")
+                except Exception as e:
+                    print(f"⚠️ Could not load neural network weights: {e}")
+            
+            # Transfer experience replay buffer
+            if hasattr(source_qtable, '_deep_experience_buffer') and hasattr(deep_learner, 'memory'):
+                try:
+                    source_buffer = source_qtable._deep_experience_buffer
+                    if source_buffer and len(source_buffer) > 0:
+                        # Transfer up to 10,000 most recent experiences
+                        transfer_count = min(10000, len(source_buffer))
+                        for i in range(-transfer_count, 0):  # Get last N experiences
+                            deep_learner.memory.push(*source_buffer[i])
+                        print(f"📚 Transferred {transfer_count} experiences to replay buffer")
+                except Exception as e:
+                    print(f"⚠️ Could not transfer experience buffer: {e}")
+            
+            # Transfer learning statistics
+            if hasattr(source_qtable, '_deep_training_stats'):
+                deep_learner._training_stats = getattr(source_qtable, '_deep_training_stats', {}).copy()
+                
+        except Exception as e:
+            print(f"⚠️ Error transferring deep learning knowledge: {e}")
+
+    def transfer_complete_knowledge(self, source_agent, target_agent, approach: LearningApproach):
+        """
+        Comprehensive knowledge transfer between agents for any learning approach.
+        
+        Args:
+            source_agent: Agent to copy knowledge from
+            target_agent: Agent to copy knowledge to  
+            approach: Learning approach to use for transfer
+        """
+        try:
+            print(f"🧠 Transferring {approach.value} knowledge: {source_agent.id} → {target_agent.id}")
+            
+            # Store source Q-table for transfer
+            source_qtable = source_agent.q_table
+            
+            # Store approach-specific data from source
+            if approach == LearningApproach.DEEP_Q_LEARNING:
+                # Store neural network weights and experience buffer
+                deep_adapter = self.agent_adapters.get(source_agent.id)
+                if deep_adapter:
+                    try:
+                        source_qtable._deep_learner_weights = deep_adapter.state_dict()
+                        source_qtable._deep_experience_buffer = list(deep_adapter.memory.buffer) if hasattr(deep_adapter.memory, 'buffer') else []
+                        source_qtable._deep_training_stats = getattr(deep_adapter, '_training_stats', {})
+                    except Exception as e:
+                        print(f"⚠️ Error storing deep learning data: {e}")
+                        
+            elif approach == LearningApproach.SURVIVAL_Q_LEARNING:
+                # Store survival-specific data
+                survival_adapter = self.agent_adapters.get(source_agent.id)
+                if survival_adapter:
+                    try:
+                        source_qtable.stage_progression = getattr(survival_adapter, 'learning_stage', 'basic_movement')
+                        source_qtable.survival_stats = getattr(survival_adapter, 'survival_stats', {}).copy()
+                    except Exception as e:
+                        print(f"⚠️ Error storing survival data: {e}")
+            
+            # Set up target agent with the same approach
+            success = self.set_agent_approach(target_agent, approach)
+            if not success:
+                print(f"❌ Failed to set up {approach.value} on target agent")
+                return False
+            
+            # Perform knowledge transfer based on approach
+            if approach == LearningApproach.BASIC_Q_LEARNING:
+                self._transfer_basic_knowledge(target_agent, source_qtable)
+            elif approach == LearningApproach.ENHANCED_Q_LEARNING:
+                self._transfer_enhanced_knowledge(target_agent, source_qtable)
+            elif approach == LearningApproach.SURVIVAL_Q_LEARNING:
+                self._transfer_survival_knowledge(target_agent, source_qtable)
+            elif approach == LearningApproach.DEEP_Q_LEARNING:
+                self._transfer_deep_knowledge(target_agent, source_qtable)
+            
+            # Copy learning parameters
+            target_agent.learning_rate = getattr(source_agent, 'learning_rate', 0.1)
+            target_agent.epsilon = getattr(source_agent, 'epsilon', 0.3)
+            if hasattr(source_agent, 'epsilon_decay'):
+                target_agent.epsilon_decay = source_agent.epsilon_decay
+                
+            print(f"✅ Complete knowledge transfer successful for {approach.value}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error in complete knowledge transfer: {e}")
+            return False
     
     def _update_performance_tracking(self, agent_id: str, from_approach: LearningApproach, 
                                    to_approach: LearningApproach):
