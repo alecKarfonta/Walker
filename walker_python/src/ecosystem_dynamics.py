@@ -277,6 +277,9 @@ class EcosystemDynamics:
                 food.amount = min(food.max_capacity, 
                                 food.amount + food.regeneration_rate * self.seasonal_resource_modifier)
         
+        # Remove depleted food sources
+        self.food_sources = [food for food in self.food_sources if food.amount > 0.1]
+        
         # Add new food sources based on season and territory
         if random.random() < 0.15 * self.seasonal_resource_modifier:
             position = (random.uniform(-60, 60), random.uniform(-5, 35))
@@ -290,6 +293,129 @@ class EcosystemDynamics:
                 max_capacity=random.uniform(20, 80)
             )
             self.food_sources.append(food_source)
+    
+    def generate_resources_between_agents(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
+        """Generate resources strategically between agents"""
+        if len(agent_positions) < 2:
+            return
+        
+        # Clear existing food sources to regenerate fresh ones
+        if len(self.food_sources) > 50:  # Don't let resources accumulate too much
+            self.food_sources = self.food_sources[-30:]  # Keep only 30 most recent
+        
+        # Generate resources between adjacent agents
+        for i in range(len(agent_positions) - 1):
+            agent1_id, pos1 = agent_positions[i]
+            agent2_id, pos2 = agent_positions[i + 1]
+            
+            # Calculate midpoint with some randomness
+            mid_x = (pos1[0] + pos2[0]) / 2 + random.uniform(-5, 5)
+            mid_y = (pos1[1] + pos2[1]) / 2 + random.uniform(-2, 8)
+            
+            # Ensure resource is above ground
+            mid_y = max(mid_y, 2.0)
+            
+            # Determine resource type based on nearby agent roles
+            agent1_role = self.agent_roles.get(agent1_id, EcosystemRole.OMNIVORE)
+            agent2_role = self.agent_roles.get(agent2_id, EcosystemRole.OMNIVORE)
+            
+            food_type = self._determine_resource_type(agent1_role, agent2_role)
+            
+            # Create resource if there isn't one too close already
+            if not self._resource_nearby((mid_x, mid_y), min_distance=8.0):
+                food_source = FoodSource(
+                    position=(mid_x, mid_y),
+                    food_type=food_type,
+                    amount=random.uniform(15, 40),
+                    regeneration_rate=random.uniform(0.3, 1.5),
+                    max_capacity=random.uniform(25, 60)
+                )
+                self.food_sources.append(food_source)
+                print(f"🍃 Generated {food_type} resource at ({mid_x:.1f}, {mid_y:.1f})")
+    
+    def _determine_resource_type(self, role1: EcosystemRole, role2: EcosystemRole) -> str:
+        """Determine resource type based on nearby agent roles"""
+        role_preferences = {
+            EcosystemRole.HERBIVORE: ["plants", "seeds"],
+            EcosystemRole.CARNIVORE: ["meat", "insects"],
+            EcosystemRole.OMNIVORE: ["plants", "insects", "seeds"],
+            EcosystemRole.SCAVENGER: ["meat", "insects"],
+            EcosystemRole.SYMBIONT: ["plants", "seeds"]
+        }
+        
+        # Combine preferences from both roles
+        combined_preferences = []
+        combined_preferences.extend(role_preferences.get(role1, ["plants"]))
+        combined_preferences.extend(role_preferences.get(role2, ["plants"]))
+        
+        return random.choice(combined_preferences)
+    
+    def _resource_nearby(self, position: Tuple[float, float], min_distance: float) -> bool:
+        """Check if there's already a resource too close to the given position"""
+        for food in self.food_sources:
+            distance = math.sqrt((position[0] - food.position[0])**2 + 
+                               (position[1] - food.position[1])**2)
+            if distance < min_distance:
+                return True
+        return False
+    
+    def consume_resource(self, agent_id: str, agent_position: Tuple[float, float], consumption_rate: float = 2.0) -> float:
+        """Agent consumes nearby resources and gains energy"""
+        energy_gained = 0.0
+        consumption_distance = 3.0  # Distance within which agent can consume resources
+        
+        for food in self.food_sources:
+            distance = math.sqrt((agent_position[0] - food.position[0])**2 + 
+                               (agent_position[1] - food.position[1])**2)
+            
+            if distance <= consumption_distance and food.amount > 0:
+                # Calculate consumption based on agent role and food type
+                agent_role = self.agent_roles.get(agent_id, EcosystemRole.OMNIVORE)
+                consumption_efficiency = self._get_consumption_efficiency(agent_role, food.food_type)
+                
+                # Amount consumed this frame
+                consumed = min(food.amount, consumption_rate * consumption_efficiency)
+                food.amount -= consumed
+                
+                # Energy gained (with diminishing returns if multiple agents consuming)
+                energy_gained += consumed * consumption_efficiency * 0.1
+                
+                if consumed > 0:
+                    print(f"🍽️ {agent_id[:8]} consumed {consumed:.1f} {food.food_type} (energy +{energy_gained:.2f})")
+                
+                # Break after consuming from one resource per frame
+                break
+        
+        return min(energy_gained, 0.5)  # Cap energy gain per frame
+    
+    def _get_consumption_efficiency(self, role: EcosystemRole, food_type: str) -> float:
+        """Get consumption efficiency based on agent role and food type"""
+        efficiency_matrix = {
+            EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.8, "insects": 0.2, "meat": 0.1},
+            EcosystemRole.CARNIVORE: {"meat": 1.0, "insects": 0.7, "plants": 0.2, "seeds": 0.1},
+            EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.7},
+            EcosystemRole.SCAVENGER: {"meat": 0.9, "insects": 0.8, "plants": 0.3, "seeds": 0.2},
+            EcosystemRole.SYMBIONT: {"plants": 0.9, "seeds": 0.8, "insects": 0.5, "meat": 0.3}
+        }
+        
+        return efficiency_matrix.get(role, {}).get(food_type, 0.5)
+    
+    def get_nearby_resources(self, position: Tuple[float, float], radius: float = 5.0) -> List[Dict[str, Any]]:
+        """Get resources near a given position"""
+        nearby = []
+        for food in self.food_sources:
+            distance = math.sqrt((position[0] - food.position[0])**2 + 
+                               (position[1] - food.position[1])**2)
+            if distance <= radius:
+                nearby.append({
+                    'position': food.position,
+                    'type': food.food_type,
+                    'amount': food.amount,
+                    'max_capacity': food.max_capacity,
+                    'distance': distance,
+                    'regeneration_rate': food.regeneration_rate
+                })
+        return nearby
     
     def _manage_territorial_conflicts(self):
         """Resolve territorial conflicts"""
