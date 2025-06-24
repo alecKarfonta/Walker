@@ -311,6 +311,13 @@ class SparseQTable:
             'update_count': self.update_count,
         }
     
+    def get_best_q_values_for_all_states(self) -> Dict[str, float]:
+        """Get the best Q-value for each state in the table."""
+        best_values = {}
+        for state_key, action_values in self.q_values.items():
+            best_values[state_key] = float(max(action_values))
+        return best_values
+    
     def save(self, filename: str):
         """Save Q-table to file."""
         with open(filename, 'wb') as f:
