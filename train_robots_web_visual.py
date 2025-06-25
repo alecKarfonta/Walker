@@ -14,6 +14,7 @@ import time
 import json
 import logging
 import random
+import math
 from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
@@ -332,7 +333,8 @@ HTML_TEMPLATE = """
             <canvas id="simulation-canvas"></canvas>
             <button id="resetView" style="position:absolute; top:10px; left:10px; z-index:50;">Reset View</button>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
-            <div id="focus-indicator" style="display:none; position:absolute; top:10px; right:10px; z-index:50; background:rgba(231, 76, 60, 0.9); color:white; padding:10px 15px; border-radius:5px;">
+            <button id="testCarnivoreFeeding" onclick="testCarnivoreFeeding()" style="position:absolute; top:10px; left:250px; z-index:50; background:#FF4444; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Test Carnivore</button>
+            <div id="focus-indicator" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); z-index:50; background:rgba(231, 76, 60, 0.95); color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:2px solid rgba(255,255,255,0.2);">
                 🎯 Focused on Agent: <span id="focused-agent-id">-</span>
             </div>
         </div>
@@ -1308,6 +1310,55 @@ HTML_TEMPLATE = """
                 
                 // Alliance connections disabled for performance
             });
+            
+            // FEEDING ANIMATION: Draw consumption lines from robots to food with role-based colors
+            if (data.ecosystem && data.ecosystem.consumption_events) {
+                data.ecosystem.consumption_events.forEach(consumption => {
+                    const agentPos = [consumption.agent_position[0], consumption.agent_position[1]];
+                    const foodPos = [consumption.food_position[0], consumption.food_position[1]];
+                    
+                    // CLEAR LINE COLORS based on food type and role
+                    let lineColor = '#4CAF50'; // Default green
+                    let consumptionLineWidth = 2;
+                    
+                    // Environmental food colors
+                    if (consumption.food_type.includes('plants')) lineColor = '#4CAF50'; // Green for plants
+                    if (consumption.food_type.includes('insects')) lineColor = '#795548'; // Brown for insects  
+                    if (consumption.food_type.includes('seeds')) lineColor = '#FF9800'; // Orange for seeds
+                    
+                    // Robot consumption colors (thicker lines)
+                    if (consumption.food_type.includes('robot')) {
+                        consumptionLineWidth = 4; // Thicker line for robot consumption
+                        if (consumption.food_type.includes('carnivore')) lineColor = '#D32F2F'; // Dark red for carnivore
+                        if (consumption.food_type.includes('scavenger')) lineColor = '#7B1FA2'; // Purple for scavenger  
+                        if (consumption.food_type.includes('omnivore')) lineColor = '#F57C00'; // Dark orange for omnivore
+                    }
+                    
+                    // Animated line with pulsing effect
+                    const alpha = 0.8 - (consumption.progress * 0.5); // Fade out as animation progresses
+                    const animationLineWidth = 0.2 + (consumption.progress * 0.1); // Get slightly thicker as animation progresses
+                    
+                    ctx.strokeStyle = lineColor;
+                    ctx.globalAlpha = alpha;
+                    ctx.lineWidth = animationLineWidth;
+                    ctx.setLineDash([0.5, 0.3]); // Small dashed line
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(agentPos[0], agentPos[1]);
+                    ctx.lineTo(foodPos[0], foodPos[1]);
+                    ctx.stroke();
+                    
+                    // Reset line style
+                    ctx.setLineDash([]);
+                    ctx.globalAlpha = 1.0;
+                    
+                    // Energy gain indicator at robot position
+                    ctx.fillStyle = lineColor;
+                    ctx.font = '0.6px Arial';
+                    ctx.textAlign = 'center';
+                                         ctx.fillText(`+${consumption.energy_gained.toFixed(1)}`, agentPos[0], agentPos[1] - 1.5);
+                 });
+             }
         }
         
         function drawAgentStatusIndicators(position, role, status, health, energy, speed, isFocused) {
@@ -1361,8 +1412,6 @@ HTML_TEMPLATE = """
                     ctx.textAlign = 'center';
                     ctx.fillText(statusSymbols[status] || '●', x + 1.5, y + 2.0);
                 }
-                
-                // Consumption animations disabled for maximum performance
         }
         
         // Movement trail function removed for performance optimization
@@ -1654,6 +1703,29 @@ HTML_TEMPLATE = """
             console.log(`🎯 Food lines ${showFoodLines ? 'enabled' : 'disabled'}`);
         }
 
+        // Test carnivore feeding mechanics
+        function testCarnivoreFeeding() {
+            console.log('🧪 Testing carnivore feeding mechanics...');
+            fetch('./test_carnivore_feeding', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log('✅ Carnivore feeding test completed');
+                    alert('Carnivore feeding test completed - check console logs for results');
+                } else {
+                    console.error('❌ Carnivore feeding test failed:', data.message);
+                    alert('Carnivore feeding test failed: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error during carnivore feeding test:', error);
+                alert('Error running carnivore feeding test');
+            });
+        }
+
     </script>
 </body>
 </html>
@@ -1840,14 +1912,17 @@ class TrainingEnvironment:
         self.last_ecosystem_update = time.time()
         self.ecosystem_update_interval = 20.0  # Update ecosystem every 20 seconds for better responsiveness
         
-        # Resource generation system  
+        # Resource generation system - REDUCED FREQUENCY for stability
         self.last_resource_generation = time.time()
-        self.resource_generation_interval = 45.0  # Generate strategic resources every 45 seconds (balanced)
+        self.resource_generation_interval = 120.0  # Generate strategic resources every 2 minutes (was 45s) for stable rewards
         self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
         
         # Death and survival system
         self.death_events = []  # Track recent death events for visualization
         self.agents_pending_replacement = []  # Queue for dead agents needing replacement
+        
+        # Food consumption animation system
+        self.consumption_events = []  # Track active food consumption for animation
         self.survival_stats = {
             'total_deaths': 0,
             'deaths_by_starvation': 0,
@@ -1945,6 +2020,9 @@ class TrainingEnvironment:
     def _create_ground(self):
         """Creates a static ground body."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
+        
+        # Ensure the ground body is awake for proper collision detection with robots
+        ground_body.awake = True
         
         # Calculate ground width to accommodate evolution engine spawn area
         # Evolution engine uses: max(800, population_size * min_spacing * 1.5)
@@ -2066,6 +2144,9 @@ class TrainingEnvironment:
             # Create static body for terrain
             terrain_body = self.world.CreateStaticBody(position=position)
             
+            # Ensure the body is awake for proper collision detection with robots
+            terrain_body.awake = True
+            
             # Create terrain as a box (representing elevated ground)
             fixture = terrain_body.CreateFixture(
                 shape=b2.b2PolygonShape(box=(size/2, height/2)),
@@ -2157,7 +2238,7 @@ class TrainingEnvironment:
                 # Initialize agent status tracking
                 self.agent_statuses[agent.id] = {
                     'role': role.value,
-                    'status': 'idle',  # idle, hunting, feeding, fleeing, territorial
+                    'status': 'idle',  # idle, hunting, feeding, eating, fleeing, territorial
                     'last_status_change': time.time(),
                     'energy': 1.0,  # 0.0 to 1.0
                     'speed_factor': 1.0,
@@ -2368,11 +2449,17 @@ class TrainingEnvironment:
                 if current_time - event['timestamp'] < 5.0
             ]
             
+            # Clean up old consumption events (keep only active animations)
+            self.consumption_events = [
+                event for event in self.consumption_events
+                if current_time - event['timestamp'] < event['duration']
+            ]
+            
         except Exception as e:
             print(f"⚠️ Error updating ecosystem dynamics: {e}")
     
     def _update_agent_statuses(self):
-        """Update agent statuses based on their current behaviors and ecosystem role."""
+        """Update agent statuses - SIMPLIFIED to only hunting and eating."""
         current_time = time.time()
         
         for agent in self.agents:
@@ -2384,38 +2471,25 @@ class TrainingEnvironment:
                 continue
                 
             status_data = self.agent_statuses[agent_id]
-            role = status_data['role']
             
             # Update speed factor based on velocity
             velocity = agent.body.linearVelocity
             speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
             status_data['speed_factor'] = min(2.0, speed / 2.0)  # Normalize and cap at 2x
             
-            # Update status based on role and behavior
-            if role == 'carnivore':
-                # Carnivores hunt when they have energy
-                if self.agent_health[agent_id]['energy'] > 0.3 and speed > 1.0:
-                    status_data['status'] = 'hunting'
-                elif speed < 0.5:
-                    status_data['status'] = 'idle'
-                else:
-                    status_data['status'] = 'moving'
-            elif role == 'herbivore':
-                # Herbivores feed or flee
-                if speed > 2.0:
-                    status_data['status'] = 'fleeing'
-                elif speed < 0.5:
-                    status_data['status'] = 'feeding'
-                else:
-                    status_data['status'] = 'moving'
-            else:
-                # Other roles have simpler status updates
-                if speed > 1.5:
-                    status_data['status'] = 'moving'
-                elif speed < 0.5:
-                    status_data['status'] = 'idle'
-                else:
-                    status_data['status'] = 'active'
+            # Check if agent is currently eating and if enough time has passed
+            if status_data['status'] == 'eating':
+                # Keep eating status for 3 seconds after consumption
+                if current_time - status_data['last_status_change'] < 3.0:
+                    continue  # Keep eating status
+                # Otherwise, switch back to hunting
+                status_data['status'] = 'hunting'
+                status_data['last_status_change'] = current_time
+            
+            # SIMPLIFIED: If not eating, then always hunting
+            elif status_data['status'] != 'hunting':
+                status_data['status'] = 'hunting'
+                status_data['last_status_change'] = current_time
             
             # Update alliances and territories from ecosystem
             status_data['alliances'] = list(self.ecosystem_dynamics.alliances.get(agent_id, set()))
@@ -2509,46 +2583,33 @@ class TrainingEnvironment:
             print(f"⚠️ Error generating resources: {e}")
     
     def _validate_resource_positions(self, agent_positions):
-        """Validate that resources are within reasonable consumption distance of agents."""
+        """Validate that resources maintain proper distance from agents - NO MORE MOVING FOOD CLOSE TO AGENTS."""
         try:
-            consumption_distance = 3.0  # Match the consumption distance from ecosystem_dynamics
+            minimum_safe_distance = 6.0  # Must be at least 6m from any agent (matches ecosystem_dynamics)
             resources_to_remove = []
-            resources_moved = 0
             
             for food_source in self.ecosystem_dynamics.food_sources:
                 food_pos = food_source.position
                 
-                # Find closest agent to this resource
-                closest_distance = float('inf')
-                closest_agent_pos = None
-                
+                # Check if this resource is too close to ANY agent
+                too_close_to_agent = False
                 for agent_id, agent_pos in agent_positions:
                     distance = ((food_pos[0] - agent_pos[0])**2 + (food_pos[1] - agent_pos[1])**2)**0.5
-                    if distance < closest_distance:
-                        closest_distance = distance
-                        closest_agent_pos = agent_pos
+                    if distance < minimum_safe_distance:
+                        too_close_to_agent = True
+                        break
                 
-                # If resource is too far from all agents, move it closer to the nearest agent
-                if closest_distance > consumption_distance * 2.0 and closest_agent_pos:  # Allow 2x consumption distance
-                    # Move resource to within consumption distance of nearest agent
-                    direction_x = food_pos[0] - closest_agent_pos[0]
-                    direction_y = food_pos[1] - closest_agent_pos[1]
-                    
-                    # Normalize direction
-                    distance = (direction_x**2 + direction_y**2)**0.5
-                    if distance > 0:
-                        direction_x /= distance
-                        direction_y /= distance
-                        
-                        # Place resource at consumption distance from agent
-                        new_x = closest_agent_pos[0] + direction_x * (consumption_distance - 0.5)
-                        new_y = max(2.0, closest_agent_pos[1] + direction_y * (consumption_distance - 0.5))
-                        
-                        food_source.position = (new_x, new_y)
-                        resources_moved += 1
+                # CRITICAL: Remove resources that are too close instead of moving them
+                # This prevents random rewards from food appearing right next to robots
+                if too_close_to_agent:
+                    resources_to_remove.append(food_source)
             
-            if resources_moved > 5:  # Only log if many resources needed repositioning
-                print(f"🔧 Repositioned {resources_moved} resources for better agent access")
+            # Remove resources that are too close to agents
+            if resources_to_remove:
+                for food_source in resources_to_remove:
+                    self.ecosystem_dynamics.food_sources.remove(food_source)
+                print(f"🚫 Removed {len(resources_to_remove)} food sources that were too close to agents (<{minimum_safe_distance}m)")
+                print(f"   📍 This prevents random rewards and ensures fair competition")
                 
         except Exception as e:
             print(f"⚠️ Error validating resource positions: {e}")
@@ -2568,7 +2629,11 @@ class TrainingEnvironment:
                 # Get current energy level
                 current_energy = self.agent_energy_levels.get(agent_id, 1.0)
                 
-                # Very gentle energy decay over time - realistic survival pressure
+                # Try to consume nearby resources FIRST (before energy decay)
+                energy_gain, consumed_food_type, consumed_food_position = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
+                # Energy gain is now properly scaled in the consume_resource function
+                
+                # Apply consistent energy decay (not paused during eating)
                 base_decay = 0.0001  
                 
                 # Minimal additional decay based on movement 
@@ -2579,22 +2644,78 @@ class TrainingEnvironment:
                 # Role-based energy costs (minimal differences)
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
                 role_multipliers = {
-                    'carnivore': 1.05,  # Very slightly more energy needed
-                    'herbivore': 0.95,  # Very slightly more efficient
+                    'carnivore': 1.02,  # Slightly more energy needed for hunting
+                    'herbivore': 0.98,  # Slightly more efficient
                     'omnivore': 1.0,    # Balanced
-                    'scavenger': 0.98,  # Very slightly efficient
-                    'symbiont': 0.92    # More efficient but not extreme
+                    'scavenger': 0.99,  # Slightly efficient
+                    'symbiont': 0.97    # More efficient in groups
                 }
                 role_multiplier = role_multipliers.get(role, 1.0)
                 
                 total_decay = (base_decay + movement_cost) * role_multiplier
                 current_energy = max(0.0, current_energy - total_decay)
                 
-                # Try to consume nearby resources (with massive energy restoration)
-                energy_gain = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
-                # Massive boost to energy gain - eating should rapidly restore energy
-                boosted_energy_gain = energy_gain * 15.0  # 15x energy gain from resources!
-                current_energy = min(1.0, current_energy + boosted_energy_gain)
+                # Health management based on energy levels
+                if agent_id in self.agent_health:
+                    current_health = self.agent_health[agent_id]['health']
+                    
+                    if current_energy > 0.7:
+                        # HIGH ENERGY: Recover health gradually
+                        health_recovery = 0.001  # Slow health recovery when well-fed
+                        self.agent_health[agent_id]['health'] = min(1.0, current_health + health_recovery)
+                        if current_health < 0.9 and current_health + health_recovery >= 0.9:
+                            print(f"💚 {agent_id[:8]} is recovering health (energy: {current_energy:.2f})")
+                    
+                    elif current_energy < 0.1:
+                        # LOW ENERGY: Health degrades from starvation
+                        health_degradation = 0.002  # Health loss when starving
+                        self.agent_health[agent_id]['health'] = max(0.0, current_health - health_degradation)
+                        if current_health - health_degradation <= 0.0:
+                            print(f"💀 {agent_id[:8]} is starving to death (health: {current_health:.3f})")
+                
+                # Apply energy gain from eating
+                current_energy = min(1.0, current_energy + energy_gain)
+                
+                                            # IMPROVED: Update status when consuming food and create animation
+                if energy_gain > 0 and agent_id in self.agent_statuses:
+                    self.agent_statuses[agent_id]['status'] = 'eating'
+                    self.agent_statuses[agent_id]['last_status_change'] = time.time()
+                    
+                    # STORE EATING TARGET for robot details display
+                    self.agent_statuses[agent_id]['eating_target'] = {
+                        'type': 'environmental',
+                        'food_type': consumed_food_type,
+                        'position': consumed_food_position,
+                        'energy_gained': energy_gain,
+                        'timestamp': time.time()
+                    }
+                    
+                    # CLEAR ROLE-BASED CONSUMPTION MESSAGES
+                    role_food_descriptions = {
+                        'herbivore': {'plants': 'grazing on plants', 'seeds': 'eating seeds', 'insects': 'reluctantly eating insects', 'meat': 'eating meat'},
+                        'carnivore': {},  # CARNIVORES CANNOT EAT ANY ENVIRONMENTAL FOOD - this should never be reached
+                        'omnivore': {'plants': 'foraging plants', 'seeds': 'gathering seeds', 'insects': 'catching insects', 'meat': 'eating meat'},
+                        'scavenger': {},  # SCAVENGERS CANNOT EAT ANY ENVIRONMENTAL FOOD - this should never be reached
+                        'symbiont': {'plants': 'symbiotically feeding on plants', 'seeds': 'collecting seeds', 'insects': 'eating insects', 'meat': 'eating meat'}
+                    }
+                    
+                    role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
+                    food_description = role_food_descriptions.get(role, {}).get(consumed_food_type, f'eating {consumed_food_type}')
+                    
+                    print(f"🍴 {agent_id[:8]} is {food_description} (energy: +{energy_gain:.2f}) [decay paused]")
+                    
+                    # FOOD ANIMATION: Create consumption event for visual line animation
+                    if consumed_food_position:
+                        consumption_event = {
+                            'agent_id': agent_id,
+                            'agent_position': [agent_position[0], agent_position[1]],
+                            'food_position': [consumed_food_position[0], consumed_food_position[1]],
+                            'food_type': f'{consumed_food_type}_{role}',  # Include role for clear visual distinction
+                            'energy_gained': energy_gain,
+                            'timestamp': time.time(),
+                            'duration': 2.0  # Animation duration in seconds
+                        }
+                        self.consumption_events.append(consumption_event)
                 
                 # Track food consumption for leaderboard
                 if energy_gain > 0 and agent_id in self.robot_stats:
@@ -2606,72 +2727,61 @@ class TrainingEnvironment:
                 #if energy_gain > 0.1:  # Only log substantial energy gains
                 #    print(f"🍽️ Agent {agent_id[:8]} consumed energy: +{boosted_energy_gain:.2f}")
                 
-                # Carnivores and omnivores can also hunt other robots for energy
+                # ROBOT CONSUMPTION: Use the fixed consume_robot function from ecosystem dynamics
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
-                if role in ['carnivore', 'omnivore'] and current_energy < 0.7:  # Only hunt when moderately hungry
-                    # Prepare list of potential prey (other agents)
-                    available_agents = []
-                    for other_agent in self.agents:
-                        if (not getattr(other_agent, '_destroyed', False) and other_agent.body and 
-                            other_agent.id != agent_id):  # Don't hunt yourself
-                            other_position = (other_agent.body.position.x, other_agent.body.position.y)
-                            other_role = self.agent_statuses.get(other_agent.id, {}).get('role', 'omnivore')
-                            other_energy = self.agent_energy_levels.get(other_agent.id, 1.0)
-                            available_agents.append((other_agent.id, other_position, other_role, other_energy))
+                if role in ['carnivore', 'omnivore', 'scavenger'] and current_energy < 0.8:  # Hunt when hungry
+                    robot_energy_gain, consumed_robot_id, consumed_robot_position = self.ecosystem_dynamics.consume_robot(
+                        agent_id, agent_position, self.agents, self.agent_energy_levels, self.agent_health
+                    )
                     
-                    if available_agents:
-                        # Attempt predation
-                        predation_energy, victim_id = self.ecosystem_dynamics.attempt_predation(
-                            agent_id, agent_position, available_agents
-                        )
+                    if robot_energy_gain > 0:
+                        # Apply energy gain
+                        current_energy = min(1.0, current_energy + robot_energy_gain)
                         
-                        if victim_id and predation_energy > 0:
-                            # Successful predation!
-                            current_energy = min(1.0, current_energy + predation_energy)
+                        # Update predator status to show they are eating robots
+                        if agent_id in self.agent_statuses:
+                            self.agent_statuses[agent_id]['status'] = 'eating'
+                            self.agent_statuses[agent_id]['last_status_change'] = time.time()
                             
-                            # Track predation for leaderboard (counts as food consumption)
-                            if agent_id in self.robot_stats:
-                                if 'food_consumed' not in self.robot_stats[agent_id]:
-                                    self.robot_stats[agent_id]['food_consumed'] = 0.0
-                                self.robot_stats[agent_id]['food_consumed'] += predation_energy
-                            
-                            # Record predation event for visualization  
-                            predation_event = {
-                                'predator_id': agent_id,
-                                'prey_id': victim_id,  # Changed from victim_id to prey_id to match status endpoint
-                                'position': agent_position,
-                                'energy_gained': predation_energy,
-                                'timestamp': time.time(),
-                                'success': True
-                            }
-                            self.predation_events.append(predation_event)
-                            
-                            # Kill the victim - set energy to 0 to trigger death
-                            self.agent_energy_levels[victim_id] = 0.0
-                            
-                            # Record death event for visualization
-                            death_event = {
-                                'agent_id': victim_id,
-                                'position': agent_position,
-                                'cause': 'predation',
-                                'role': self.agent_statuses.get(victim_id, {}).get('role', 'unknown'),
+                            # Store what they're eating for robot details
+                            self.agent_statuses[agent_id]['eating_target'] = {
+                                'type': 'robot',
+                                'target_id': consumed_robot_id,
+                                'energy_gained': robot_energy_gain,
                                 'timestamp': time.time()
                             }
-                            self.death_events.append(death_event)
                             
-                            # Update survival statistics
-                            self.survival_stats['total_deaths'] += 1
+                            # FOOD ANIMATION: Create consumption event for robot feeding
+                            if consumed_robot_position:
+                                consumption_event = {
+                                    'agent_id': agent_id,
+                                    'agent_position': [agent_position[0], agent_position[1]],
+                                    'food_position': [consumed_robot_position[0], consumed_robot_position[1]],
+                                    'food_type': f'robot_{role}',  # Special type showing predator role
+                                    'energy_gained': robot_energy_gain,
+                                    'timestamp': time.time(),
+                                    'duration': 2.0  # Animation duration in seconds
+                                }
+                                self.consumption_events.append(consumption_event)
+                        
+                        # Track robot consumption for leaderboard
+                        if agent_id in self.robot_stats:
+                            if 'food_consumed' not in self.robot_stats[agent_id]:
+                                self.robot_stats[agent_id]['food_consumed'] = 0.0
+                            self.robot_stats[agent_id]['food_consumed'] += robot_energy_gain
                 
                 # Update energy level
                 self.agent_energy_levels[agent_id] = current_energy
                 
-                # Check for death by starvation
-                if current_energy <= 0.0:
+                # Check for death by health loss ONLY - robots should only die when health reaches 0.0
+                current_health = self.agent_health.get(agent_id, {'health': 1.0})['health']
+                if current_health <= 0.0:
                     # Only process death once per agent
                     if agent not in agents_to_replace:
-                        print(f"💀 Agent {agent_id} died from starvation! (Role: {role})")
+                        cause = 'predation' if current_energy > 0.1 else 'starvation'
+                        print(f"💀 Agent {agent_id} died from {cause}! (Role: {role}, Health: {current_health:.2f}, Energy: {current_energy:.2f})")
                         agents_to_replace.append(agent)
-                        self._record_death_event(agent, 'starvation')
+                        self._record_death_event(agent, cause)
                         # Mark agent as destroyed to prevent further processing
                         setattr(agent, '_destroyed', True)
                     continue
@@ -2684,15 +2794,20 @@ class TrainingEnvironment:
                 if agent_id in self.agent_statuses:
                     self.agent_statuses[agent_id]['energy'] = current_energy
                     
-                    # Update status based on energy level (more balanced thresholds)
-                    if current_energy < 0.05:  # Only truly critical energy triggers dying
-                        self.agent_statuses[agent_id]['status'] = 'dying'  # Critical energy
-                    elif current_energy < 0.4:  # More reasonable threshold for seeking food
-                        self.agent_statuses[agent_id]['status'] = 'feeding'  # Looking for food
-                    elif current_energy > 0.7:  # Lower threshold for high energy activities
-                        role = self.agent_statuses[agent_id]['role']
-                        if role == 'carnivore':
-                            self.agent_statuses[agent_id]['status'] = 'hunting'  # High energy, ready to hunt
+                    # SIMPLIFIED: Don't override eating status - let it persist from consumption
+                    current_status = self.agent_statuses[agent_id]['status']
+                    current_health = self.agent_health.get(agent_id, {'health': 1.0})['health']
+                    
+                    # Only update status if not currently eating (preserves eating status)
+                    if current_status != 'eating':
+                        if current_health < 0.1:  # Critical health triggers dying
+                            self.agent_statuses[agent_id]['status'] = 'dying'  # Critical health
+                        elif current_energy < 0.15:  # Very low energy = immobilized
+                            self.agent_statuses[agent_id]['status'] = 'immobilized'  # Can't move
+                        elif current_energy < 0.4:  # Low energy = seeking food
+                            self.agent_statuses[agent_id]['status'] = 'hunting'  # Seeking food
+                        else:
+                            self.agent_statuses[agent_id]['status'] = 'hunting'  # Always hunting when not eating
             
             # Replace dead agents with new ones
             if agents_to_replace:
@@ -3143,6 +3258,27 @@ class TrainingEnvironment:
                                     continue
                                     
                                 try:
+                                    # Check if agent is immobilized (very low energy)
+                                    agent_energy = self.agent_energy_levels.get(agent.id, 1.0)
+                                    is_immobilized = agent_energy < 0.15
+                                    
+                                    if is_immobilized:
+                                        # Disable movement for immobilized agents
+                                        if hasattr(agent, 'upper_arm_joint') and agent.upper_arm_joint:
+                                            agent.upper_arm_joint.enableMotor = False
+                                            agent.upper_arm_joint.motorSpeed = 0
+                                        if hasattr(agent, 'lower_arm_joint') and agent.lower_arm_joint:
+                                            agent.lower_arm_joint.enableMotor = False
+                                            agent.lower_arm_joint.motorSpeed = 0
+                                        # Don't call step() for immobilized agents
+                                        continue
+                                    else:
+                                        # Re-enable movement for healthy agents
+                                        if hasattr(agent, 'upper_arm_joint') and agent.upper_arm_joint:
+                                            agent.upper_arm_joint.enableMotor = True
+                                        if hasattr(agent, 'lower_arm_joint') and agent.lower_arm_joint:
+                                            agent.lower_arm_joint.enableMotor = True
+                                    
                                     agent.step(self.dt)
 
                                     # Check for reset conditions but don't reset immediately
@@ -3152,9 +3288,10 @@ class TrainingEnvironment:
                                         agents_to_reset.append(('episode_end', agent))
                                 except Exception as e:
                                     print(f"⚠️  Error updating agent {agent.id}: {e}")
-                                    # Mark problematic agent as destroyed to prevent further issues
-                                    if not getattr(agent, '_destroyed', False):
-                                        agent._destroyed = True
+                                    import traceback
+                                    traceback.print_exc()
+                                    # DO NOT automatically destroy agents on errors - let them continue
+                                    # Only health-based death (health <= 0.0) should trigger replacement
                             
                             # Process resets after physics step to avoid corruption
                             for reset_type, agent in agents_to_reset:
@@ -3681,6 +3818,18 @@ class TrainingEnvironment:
                                 'age': current_time - d['timestamp']
                             }
                             for d in self.death_events if current_time - d['timestamp'] < 3.0  # Show deaths for 3 seconds only
+                        ],
+                        'consumption_events': [
+                            {
+                                'agent_id': c['agent_id'],
+                                'agent_position': c['agent_position'],
+                                'food_position': c['food_position'],
+                                'food_type': c['food_type'],
+                                'energy_gained': c['energy_gained'],
+                                'age': current_time - c['timestamp'],
+                                'progress': min(1.0, (current_time - c['timestamp']) / c['duration'])  # 0.0 to 1.0 animation progress
+                            }
+                            for c in self.consumption_events  # Include all active consumption events
                         ],
                         'survival_stats': {
                             'total_deaths': self.survival_stats['total_deaths'],
@@ -4279,15 +4428,16 @@ class TrainingEnvironment:
             food_sources = self.ecosystem_dynamics.food_sources
             potential_food_sources = []
             
-            # Add environmental food sources for all agents (even carnivores can eat insects)
-            for food in food_sources:
-                if food.amount > 0.1:  # Only consider food that can actually be consumed
-                    potential_food_sources.append({
-                        'position': food.position,
-                        'type': food.food_type,
-                        'source': 'environment',
-                        'amount': food.amount
-                    })
+            # Add environmental food sources ONLY for non-carnivore and non-scavenger agents
+            if agent_role not in ['carnivore', 'scavenger']:  # CARNIVORES AND SCAVENGERS ARE PURE ROBOT CONSUMERS - NO environmental food
+                for food in food_sources:
+                    if food.amount > 0.1:  # Only consider food that can actually be consumed
+                        potential_food_sources.append({
+                            'position': food.position,
+                            'type': food.food_type,
+                            'source': 'environment',
+                            'amount': food.amount
+                        })
             
             # For carnivores and scavengers, add other agents as potential prey
             if agent_role in ['carnivore', 'scavenger']:
@@ -4297,29 +4447,51 @@ class TrainingEnvironment:
                         continue
                     
                     other_pos = (other_agent.body.position.x, other_agent.body.position.y)
-                    other_energy = self.agent_health.get(other_agent.id, {'energy': 1.0})['energy']
+                    other_energy = self.agent_energy_levels.get(other_agent.id, 1.0)
+                    other_health = self.agent_health.get(other_agent.id, {'health': 1.0})['health']
+                    
+                    # SCAVENGER RESTRICTION: Only target robots with energy < 0.3 (any robot type when weakened)
+                    if agent_role == 'scavenger' and other_energy >= 0.3:
+                        continue  # Scavengers can only target weakened robots
+                    
+                    # CARNIVORE RESTRICTIONS: Can ONLY hunt herbivore, scavenger, and omnivore robots
+                    other_role = self.agent_statuses.get(other_agent.id, {}).get('role', 'omnivore')
+                    if agent_role == 'carnivore':
+                        valid_prey_roles = ['herbivore', 'scavenger', 'omnivore']  # Match ecosystem_dynamics.py rules
+                        if other_role not in valid_prey_roles:
+                            continue  # Carnivores can only hunt specific prey types
+                        if other_health <= 0.1:
+                            continue  # Don't target dying robots
                     
                     # Distance check for hunting range
                     distance = ((agent_pos[0] - other_pos[0])**2 + (agent_pos[1] - other_pos[1])**2)**0.5
-                    if distance < 20.0:  # Within hunting/perception range
-                        # For scavengers, prefer weak prey; for carnivores, target any prey
-                        prey_attractiveness = 1.0
+                    if distance < 15.0:  # Within hunting/perception range
+                        # Proper attractiveness based on role restrictions
                         if agent_role == 'scavenger':
-                            prey_attractiveness = 2.0 if other_energy < 0.5 else 0.5
+                            prey_attractiveness = 3.0 if other_energy < 0.1 else 1.0  # Scavengers prefer very weak prey
                         elif agent_role == 'carnivore':
-                            prey_attractiveness = 1.5 if other_energy < 0.6 else 1.0
+                            prey_attractiveness = 1.5 if other_health > 0.7 else 1.0  # Carnivores prefer healthy prey
+                        else:
+                            prey_attractiveness = 1.0
                         
                         potential_food_sources.append({
                             'position': other_pos,
-                            'type': 'meat',  # Other agents provide meat
+                            'type': 'robot',  # Other agents are robots, not "meat"
                             'source': 'prey',
                             'prey_id': other_agent.id,
                             'prey_energy': other_energy,
+                            'prey_health': other_health,
                             'attractiveness': prey_attractiveness
                         })
             
             if not potential_food_sources:
-                return {'distance': float('inf'), 'food_type': 'none available', 'source_type': 'none', 'food_position': None, 'signed_x_distance': float('inf')}
+                # ROLE-SPECIFIC MESSAGES: Differentiate between no food and no valid targets
+                if agent_role == 'carnivore':
+                    return {'distance': float('inf'), 'food_type': 'no herbivore/scavenger/omnivore prey available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': float('inf')}
+                elif agent_role == 'scavenger':
+                    return {'distance': float('inf'), 'food_type': 'no weakened robots available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': float('inf')}
+                else:
+                    return {'distance': float('inf'), 'food_type': 'no environmental food available', 'source_type': 'environment', 'food_position': None, 'signed_x_distance': float('inf')}
             
             # Find the nearest/most attractive food source for this agent type
             best_target = None
@@ -4353,7 +4525,9 @@ class TrainingEnvironment:
             
             # Determine food type description based on target
             if best_target.get('source') == 'prey':
-                food_type_desc = f"meat (prey: {best_target.get('prey_id', 'unknown')[:8]})"
+                prey_id = best_target.get('prey_id', 'unknown')
+                prey_energy = best_target.get('prey_energy', 0.0)
+                food_type_desc = f"robot prey {prey_id[:8]} (energy: {prey_energy:.2f})"
             else:
                 food_type_desc = best_target.get('type', 'unknown')
             
@@ -4427,6 +4601,9 @@ class TrainingEnvironment:
             
             # Create static body for obstacle
             obstacle_body = self.world.CreateStaticBody(position=position)
+            
+            # Ensure the body is awake for proper collision detection with robots
+            obstacle_body.awake = True
             
             # Choose shape based on obstacle type
             if obstacle_type in ['boulder', 'wall']:
@@ -4656,6 +4833,80 @@ class TrainingEnvironment:
             
         except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
+
+    def test_carnivore_feeding(self):
+        """Test method to place a carnivore next to prey to verify feeding mechanics"""
+        print("🧪 Running carnivore feeding test...")
+        
+        # Find a carnivore and a herbivore
+        carnivore = None
+        herbivore = None
+        
+        for agent in self.agents:
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+            role = self.agent_statuses.get(agent.id, {}).get('role', 'omnivore')
+            if role == 'carnivore' and carnivore is None:
+                carnivore = agent
+            elif role == 'herbivore' and herbivore is None:
+                herbivore = agent
+            
+            if carnivore and herbivore:
+                break
+        
+        if not carnivore or not herbivore:
+            print("❌ Test failed: Could not find both carnivore and herbivore")
+            return
+        
+        # Record initial states
+        carnivore_initial_energy = self.agent_energy_levels.get(carnivore.id, 1.0)
+        herbivore_initial_energy = self.agent_energy_levels.get(herbivore.id, 1.0)
+        herbivore_initial_health = self.agent_health.get(herbivore.id, {'health': 1.0})['health']
+        
+        # Position carnivore next to herbivore (within consumption distance)
+        herbivore_pos = (herbivore.body.position.x, herbivore.body.position.y)
+        test_position = (herbivore_pos[0] + 2.0, herbivore_pos[1])  # 2 meters away (within 4m consumption distance)
+        
+        # Move carnivore to test position
+        carnivore.body.position = test_position
+        carnivore.body.linearVelocity = (0, 0)  # Stop movement
+        
+        # Lower carnivore's energy to trigger hunting behavior
+        self.agent_energy_levels[carnivore.id] = 0.5  # Below 0.6 threshold
+        
+        print(f"🔬 Test setup:")
+        print(f"   Carnivore {carnivore.id[:8]} - Energy: {carnivore_initial_energy:.2f} -> 0.5")
+        print(f"   Herbivore {herbivore.id[:8]} - Energy: {herbivore_initial_energy:.2f}, Health: {herbivore_initial_health:.2f}")
+        print(f"   Distance: {math.sqrt((test_position[0] - herbivore_pos[0])**2 + (test_position[1] - herbivore_pos[1])**2):.1f}m")
+        
+        # Run consumption updates for several frames to see if feeding occurs
+        print("🔄 Running consumption updates...")
+        for frame in range(10):  # Run for 10 frames
+            # Manually trigger resource consumption update
+            self._update_resource_consumption()
+            
+            # Check current states
+            carnivore_energy = self.agent_energy_levels.get(carnivore.id, 1.0)
+            herbivore_energy = self.agent_energy_levels.get(herbivore.id, 1.0)
+            herbivore_health = self.agent_health.get(herbivore.id, {'health': 1.0})['health']
+            carnivore_status = self.agent_statuses.get(carnivore.id, {}).get('status', 'unknown')
+            
+            print(f"   Frame {frame+1}: Carnivore energy {carnivore_energy:.3f}, status: {carnivore_status}")
+            print(f"   Frame {frame+1}: Herbivore energy {herbivore_energy:.3f}, health: {herbivore_health:.3f}")
+            
+            # Check if carnivore is consuming herbivore
+            if carnivore_energy > 0.5 or carnivore_status == 'eating':
+                print(f"✅ SUCCESS: Carnivore is consuming herbivore!")
+                print(f"   Energy gained: {carnivore_energy - 0.5:.3f}")
+                print(f"   Herbivore health lost: {herbivore_initial_health - herbivore_health:.3f}")
+                return
+        
+        print("❌ FAILED: Carnivore did not consume herbivore after 10 frames")
+        print("   This indicates the robot consumption system is not working properly")
+        
+        # Reset positions to avoid disrupting normal simulation
+        carnivore.body.position = (random.uniform(-30, 30), 5.0)
+        self.agent_energy_levels[carnivore.id] = carnivore_initial_energy
 
 # --- Main Execution ---
 app = Flask(__name__)
@@ -4987,6 +5238,18 @@ def get_evaluation_diagnostics():
         return jsonify({'status': 'success', 'diagnostics': diagnostics})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/test_carnivore_feeding', methods=['POST'])
+def test_carnivore_feeding():
+    """Test endpoint to verify carnivore feeding mechanics"""
+    try:
+        if env:
+            env.test_carnivore_feeding()
+            return jsonify({'status': 'success', 'message': 'Carnivore feeding test completed - check console for results'})
+        else:
+            return jsonify({'status': 'error', 'message': 'Training environment not available'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Test failed: {str(e)}'})
 
 def main():
     # Set a different port for the web server to avoid conflicts
