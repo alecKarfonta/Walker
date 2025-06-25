@@ -156,49 +156,49 @@ class SurvivalAwareQLearning:
             
             reward = 0.0
             
-            # PRIMARY: Energy changes (most important)
+            # PRIMARY: Energy changes (most important) - SCALED DOWN
             old_energy_bin = old_state[2] if len(old_state) > 2 else 4
             new_energy_bin = new_state[2] if len(new_state) > 2 else 4
             energy_change = new_energy_bin - old_energy_bin
             
             if energy_change > 0:
-                reward += 20.0 * energy_change  # Major reward for energy gain
+                reward += 2.0 * energy_change  # REDUCED from 20.0
                 self.survival_stats['food_consumed'] += 1
                 self.survival_stats['energy_gained'] += energy_change
             elif energy_change < 0:
-                reward += 5.0 * energy_change   # Penalty for energy loss
+                reward += 0.5 * energy_change   # REDUCED from 5.0
             
-            # SECONDARY: Food-seeking behavior
+            # SECONDARY: Food-seeking behavior - SCALED DOWN
             old_food_dist_bin = old_state[4] if len(old_state) > 4 else 2
             new_food_dist_bin = new_state[4] if len(new_state) > 4 else 2
             
             if new_food_dist_bin < old_food_dist_bin:
-                reward += 3.0  # Reward for moving toward food
+                reward += 0.5  # REDUCED from 3.0
             elif new_food_dist_bin > old_food_dist_bin:
-                reward -= 1.0  # Penalty for moving away from food
+                reward -= 0.2  # REDUCED from 1.0
             
-            # TERTIARY: Movement efficiency (reduced importance)
+            # TERTIARY: Movement efficiency (reduced importance) - KEPT SAME
             velocity_bin = new_state[5] if len(new_state) > 5 else 0
             if velocity_bin > 0:
-                reward += 0.5  # Small reward for movement
+                reward += 0.1  # REDUCED from 0.5
             
-            # SURVIVAL PENALTIES
+            # SURVIVAL PENALTIES - SCALED DOWN
             energy_level = ecosystem_data.get('energy_level', 1.0)
             if energy_level < 0.2:
-                reward -= 5.0  # Penalty for critical energy
+                reward -= 1.0  # REDUCED from 5.0
             elif energy_level < 0.4:
-                reward -= 1.0  # Small penalty for low energy
+                reward -= 0.2  # REDUCED from 1.0
             
-            # Learning stage adjustments
+            # Learning stage adjustments - SCALED DOWN
             if self.learning_stage == 'basic_movement':
-                reward *= 2.0  # Amplify all rewards during basic learning
+                reward *= 1.5  # REDUCED from 2.0
             elif self.learning_stage == 'food_seeking':
                 # Boost food-related rewards
                 if energy_change > 0:
-                    reward += 10.0  # Extra bonus for food consumption
+                    reward += 1.0  # REDUCED from 10.0
             
-            # Bound the reward
-            reward = np.clip(reward, -10.0, 50.0)
+            # Bound the reward to match crawling reward scale
+            reward = np.clip(reward, -2.0, 5.0)  # REDUCED from (-10.0, 50.0)
             
             return reward
             

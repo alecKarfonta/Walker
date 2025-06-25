@@ -93,29 +93,32 @@ class SurvivalRewardCalculator:
         # 1. ENERGY GAIN REWARD (Highest Priority)
         energy_change = agent_data.get('energy_change', 0.0)
         if energy_change > 0:
-            # Major reward for gaining energy (eating)
-            energy_reward = energy_change * self.energy_gain_weight
+            # Major reward for gaining energy (eating) - REDUCED from 20.0 to 5.0
+            energy_reward = energy_change * 5.0  # REDUCED SCALE
             total_reward += energy_reward
             
-        # 2. FOOD-SEEKING BEHAVIOR REWARD
+        # 2. FOOD-SEEKING BEHAVIOR REWARD - SCALED DOWN
         food_approach_reward = self._calculate_food_approach_reward(old_state, new_state)
-        total_reward += food_approach_reward * self.food_approach_weight
+        total_reward += food_approach_reward * 1.0  # REDUCED from 3.0 to 1.0
         
-        # 3. MOVEMENT EFFICIENCY REWARD
+        # 3. MOVEMENT EFFICIENCY REWARD - KEPT SAME
         movement_reward = self._calculate_movement_efficiency(action, agent_data)
         total_reward += movement_reward * self.movement_efficiency_weight
         
-        # 4. SURVIVAL PENALTIES
+        # 4. SURVIVAL PENALTIES - SCALED DOWN
         survival_penalty = self._calculate_survival_penalties(new_state, agent_data)
-        total_reward += survival_penalty * self.survival_penalty_weight
+        total_reward += survival_penalty * 0.5  # REDUCED from 1.0 to 0.5
         
-        # 5. THRIVING BONUS
+        # 5. THRIVING BONUS - SCALED DOWN
         thriving_bonus = self._calculate_thriving_bonus(new_state, agent_data)
-        total_reward += thriving_bonus * self.thriving_bonus_weight
+        total_reward += thriving_bonus * 0.5  # REDUCED from 1.0 to 0.5
         
-        # 6. BEHAVIORAL BONUSES
+        # 6. BEHAVIORAL BONUSES - KEPT SAME
         behavior_bonus = self._calculate_behavior_bonuses(agent_data)
         total_reward += behavior_bonus
+        
+        # CRITICAL: Scale down final reward to match crawling reward scale
+        total_reward = np.clip(total_reward, -2.0, 10.0)  # Match crawling reward scale
         
         return total_reward
     
