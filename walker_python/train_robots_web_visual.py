@@ -1106,8 +1106,10 @@ HTML_TEMPLATE = """
             // Draw enhanced robots with ecosystem roles
             drawEnhancedRobots(data);
             
-            // Food lines disabled for maximum performance
-            // (can be re-enabled by user if needed)
+            // Draw food lines if enabled
+            if (showFoodLines) {
+                drawFoodLines(data);
+            }
             
             // All animation events disabled for maximum performance
 
