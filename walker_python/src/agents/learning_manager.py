@@ -37,6 +37,9 @@ class LearningManager:
         # Store original Q-tables for fallback
         self.agent_original_qtables: Dict[str, Any] = {}
         
+        # Deep learning training coordination
+        self._agents_currently_training: set = set()
+        
         # Performance tracking for comparison
         self.approach_performance: Dict[LearningApproach, Dict[str, float]] = {
             approach: {
@@ -284,10 +287,10 @@ class LearningManager:
                 gamma=0.99,
                 epsilon_start=1.0,
                 epsilon_end=0.01,
-                epsilon_decay=100000,
-                buffer_size=100000,
-                batch_size=64,
-                target_update_freq=1000,
+                epsilon_decay=150000,  # Slower decay
+                buffer_size=25000,     # Reduced from 100k to 25k
+                batch_size=32,         # Reduced from 64 to 32  
+                target_update_freq=2000,  # Less frequent updates
                 device="auto",  # Auto-detect GPU
                 use_dueling=True,
                 use_prioritized_replay=True
@@ -298,11 +301,11 @@ class LearningManager:
             
             # Initialize experience collection (lightweight) vs training (heavy) separation
             agent._deep_step_count = 0
-            agent._deep_experience_collection_freq = 5     # Collect experience every 5 steps (lightweight)
-            agent._deep_training_freq = 2000              # Train every 2000 steps (sufficient data collection)
-            agent._deep_min_buffer_size = 10000           # Minimum 10k experiences before any training (ensure sufficient data)
+            agent._deep_experience_collection_freq = 10    # Collect experience every 10 steps (reduced frequency)
+            agent._deep_training_freq = 15000             # Train every 15,000 steps (much less frequent) 
+            agent._deep_min_buffer_size = 5000            # Minimum 5k experiences (reduced from 10k)
             agent._deep_ready_to_train = False            # No training until buffer is full
-            agent._deep_prev_state = None                 # Initialize previous state
+            agent._deep_prev_state = None
             agent._deep_prev_action = None                # Initialize previous action
             agent._deep_prev_reward = 0.0                 # Initialize previous reward
             
@@ -319,9 +322,9 @@ class LearningManager:
                     # Initialize deep learning attributes if needed
                     if not hasattr(agent, '_deep_step_count'):
                         agent._deep_step_count = 0
-                        agent._deep_experience_collection_freq = 5
-                        agent._deep_training_freq = 2000  # Sufficient data collection
-                        agent._deep_min_buffer_size = 10000  # Ensure sufficient training data
+                        agent._deep_experience_collection_freq = 10
+                        agent._deep_training_freq = 15000
+                        agent._deep_min_buffer_size = 5000
                         agent._deep_ready_to_train = False
                         agent._deep_prev_state = None
                         agent._deep_prev_action = None
@@ -395,40 +398,60 @@ class LearningManager:
                                 progress = (current_buffer_size / agent._deep_min_buffer_size) * 100
                                 print(f"📊 Buffer Progress: Agent {agent.id} - {current_buffer_size:,}/{agent._deep_min_buffer_size:,} ({progress:.1f}%)")
                     
-                    # Heavy training phase (very infrequent)
+                    # Heavy training phase (very infrequent) with training coordination
                     if (agent._deep_ready_to_train and 
                         agent._deep_step_count % agent._deep_training_freq == 0 and
                         hasattr(deep_q_learner, 'memory') and 
                         len(deep_q_learner.memory) >= deep_q_learner.batch_size):
                         
+                        # Training coordination - prevent multiple agents training simultaneously
+                        # (initialized in __init__ method)
+                        
+                        # Skip training if too many agents are already training
+                        if len(self._agents_currently_training) >= 2:  # Max 2 agents training simultaneously
+                            # Defer training by small random amount
+                            import random
+                            agent._deep_step_count -= random.randint(100, 500)
+                            return result
+                        
+                        # Add this agent to training set
+                        self._agents_currently_training.add(agent.id)
+                        
                         try:
                             import time
+                            import threading
                             buffer_size = len(deep_q_learner.memory)
                             batch_size = deep_q_learner.batch_size
                             
-                            # Clear logging when GPU training begins
                             print(f"🔥 GPU TRAINING START: Agent {agent.id} (step {agent._deep_step_count})")
                             print(f"   📊 Buffer: {buffer_size:,} experiences | Batch: {batch_size}")
-                            print(f"   🧠 Device: {deep_q_learner.device} | Model: Deep Q-Network")
                             
                             training_start_time = time.time()
                             
-                            # Heavy neural network training (GPU intensive)
-                            learning_stats = deep_q_learner.learn()
+                            # BACKGROUND THREADING: Move heavy training to background thread
+                            def background_training():
+                                try:
+                                    # Heavy neural network training (GPU intensive)
+                                    learning_stats = deep_q_learner.learn()
+                                    
+                                    training_duration = time.time() - training_start_time
+                                    print(f"✅ GPU TRAINING COMPLETE: Agent {agent.id}")
+                                    print(f"   ⏱️  Duration: {training_duration:.3f}s | Loss: {learning_stats.get('loss', 'N/A')}")
+                                    
+                                    # Memory cleanup handled automatically by buffer maxlen
+                                except Exception as e:
+                                    print(f"❌ GPU TRAINING FAILED: Agent {agent.id} - {e}")
+                                finally:
+                                    # Remove from training set
+                                    self._agents_currently_training.discard(agent.id)
                             
-                            training_duration = time.time() - training_start_time
-                            
-                            # Detailed completion logging
-                            print(f"✅ GPU TRAINING COMPLETE: Agent {agent.id}")
-                            print(f"   ⏱️  Duration: {training_duration:.3f}s | Loss: {learning_stats.get('loss', 'N/A')}")
-                            
-                            # Log exploration rate if available
-                            epsilon_val = getattr(deep_q_learner, 'epsilon', getattr(deep_q_learner, 'current_epsilon', None))
-                            if epsilon_val is not None:
-                                print(f"   🎯 Exploration: ε={epsilon_val:.4f}")
+                            # Start background training (non-blocking)
+                            training_thread = threading.Thread(target=background_training, daemon=True)
+                            training_thread.start()
                                 
                         except Exception as e:
                             print(f"❌ GPU TRAINING FAILED: Agent {agent.id} - {e}")
+                            self._agents_currently_training.discard(agent.id)
                     
                     return result
                     

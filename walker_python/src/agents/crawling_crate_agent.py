@@ -133,10 +133,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.best_reward_received = -np.inf  # Start at -inf so first reward sets it
         self.worst_reward_received = np.inf   # Start at +inf so first reward sets it
         
-        # Experience replay buffer
-        self.replay_buffer = ReplayBuffer(capacity=8000)  # Increased capacity
-        self.batch_size = 48  # Increased batch size
-        self.replay_frequency = 8  # More frequent learning
+        # Experience replay buffer (optimized for performance)
+        self.replay_buffer = ReplayBuffer(capacity=3000)  # Reduced for performance
+        self.batch_size = 32  # Balanced batch size
+        self.replay_frequency = 12  # Less frequent learning for performance
         
         # Training state
         self.current_state = None

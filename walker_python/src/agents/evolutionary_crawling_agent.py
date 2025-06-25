@@ -337,11 +337,11 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         self.best_reward_received = -np.inf
         self.worst_reward_received = np.inf
         
-        # Experience replay
+        # Experience replay (optimized for performance)
         from .crawling_crate_agent import Experience, ReplayBuffer
-        self.replay_buffer = ReplayBuffer(capacity=8000)
-        self.batch_size = 48
-        self.replay_frequency = 8
+        self.replay_buffer = ReplayBuffer(capacity=2500)  # Reduced for performance
+        self.batch_size = 28  # Smaller batch size
+        self.replay_frequency = 15  # Less frequent for performance
         
         # Java-inspired tracking
         self.best_value = 0.0

@@ -75,7 +75,10 @@ class EcosystemInterface:
                 'health_level': 1.0,
                 'nearest_food_direction': 0.0,
                 'nearest_food_distance': 10.0,
+                'nearest_food_signed_x_distance': 10.0,
                 'food_type': 'plants',
+                'food_abundance': 0.0,
+                'food_position': None,
                 'nearby_agents': 0,
                 'competition_pressure': 0.0,
                 'threat_level': 0.0,
@@ -90,8 +93,10 @@ class EcosystemInterface:
                 return {
                     'nearest_food_direction': 0.0,
                     'nearest_food_distance': 10.0,
+                    'nearest_food_signed_x_distance': 10.0,
                     'food_type': 'plants',
-                    'food_abundance': 0.0
+                    'food_abundance': 0.0,
+                    'food_position': None
                 }
             
             agent_x, agent_y = agent_position
@@ -134,8 +139,10 @@ class EcosystemInterface:
                 return {
                     'nearest_food_direction': 0.0,
                     'nearest_food_distance': 10.0,
+                    'nearest_food_signed_x_distance': 10.0,
                     'food_type': 'plants',
-                    'food_abundance': 0.0
+                    'food_abundance': 0.0,
+                    'food_position': None
                 }
             
             # Calculate direction to food
@@ -144,14 +151,19 @@ class EcosystemInterface:
             if direction < 0:
                 direction += 2 * math.pi  # Normalize to 0-2π
             
+            # Calculate signed x-axis distance (positive = right, negative = left)
+            signed_x_distance = food_x - agent_x
+            
             # Food abundance (0-1)
             abundance = nearest_food.amount / nearest_food.max_capacity
             
             return {
                 'nearest_food_direction': direction,
                 'nearest_food_distance': nearest_distance,
+                'nearest_food_signed_x_distance': signed_x_distance,
                 'food_type': nearest_food.food_type,
-                'food_abundance': abundance
+                'food_abundance': abundance,
+                'food_position': (food_x, food_y)
             }
             
         except Exception as e:
@@ -159,8 +171,10 @@ class EcosystemInterface:
             return {
                 'nearest_food_direction': 0.0,
                 'nearest_food_distance': 10.0,
+                'nearest_food_signed_x_distance': 10.0,
                 'food_type': 'plants',
-                'food_abundance': 0.0
+                'food_abundance': 0.0,
+                'food_position': None
             }
     
     def _get_social_context(self, agent_id: str, agent_position: Tuple[float, float]) -> Dict[str, Any]:

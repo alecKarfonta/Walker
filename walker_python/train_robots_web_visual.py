@@ -328,6 +328,7 @@ HTML_TEMPLATE = """
         <div id="canvas-wrapper">
             <canvas id="simulation-canvas"></canvas>
             <button id="resetView" style="position:absolute; top:10px; left:10px; z-index:50;">Reset View</button>
+            <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
             <div id="focus-indicator" style="display:none; position:absolute; top:10px; right:10px; z-index:50; background:rgba(231, 76, 60, 0.9); color:white; padding:10px 15px; border-radius:5px;">
                 🎯 Focused on Agent: <span id="focused-agent-id">-</span>
             </div>
@@ -398,6 +399,18 @@ HTML_TEMPLATE = """
         let mouseDownY = 0;
         let mouseDownRobotId = null;
         let lastLeaderboardHtml = ''; // Variable to store the last state of the leaderboard HTML
+        let showFoodLines = false; // Food lines disabled by default for performance
+        let showFpsCounters = true; // FPS counters enabled by default
+        
+        // FPS Tracking
+        let uiFpsCounter = 0;
+        let uiFpsStartTime = Date.now();
+        let lastUiFpsUpdate = Date.now();
+        let currentUiFps = 0;
+        let physicsStepsCounter = 0;
+        let physicsStepsStartTime = Date.now();
+        let lastPhysicsFpsUpdate = Date.now();
+        let currentPhysicsFps = 0;
         
         // Missing constants that were causing errors
         const CLICK_THRESHOLD = 5; // pixels
@@ -896,6 +909,12 @@ HTML_TEMPLATE = """
                             </span>
                         </div>
                         <div class="detail-row">
+                            <span class="detail-label">X-Axis Distance:</span>
+                            <span class="detail-value" style="color: ${ecosystem.closest_food_signed_x_distance === undefined ? '#888' : ecosystem.closest_food_signed_x_distance > 0 ? '#4CAF50' : '#FF9800'};">
+                                ${ecosystem.closest_food_signed_x_distance === undefined ? 'N/A' : (ecosystem.closest_food_signed_x_distance > 0 ? '+' : '') + ecosystem.closest_food_signed_x_distance.toFixed(1) + 'm ' + (ecosystem.closest_food_signed_x_distance > 0 ? '→' : '←')}
+                            </span>
+                        </div>
+                        <div class="detail-row">
                             <span class="detail-label">Food Type:</span>
                             <span class="detail-value" style="color: ${ecosystem.closest_food_source === 'prey' ? '#FF6B6B' : '#4CAF50'};">
                                 ${ecosystem.closest_food_type || 'Unknown'}
@@ -1039,6 +1058,16 @@ HTML_TEMPLATE = """
                 predationEvents = data.ecosystem.predation_events;
             }
 
+            // Update UI FPS counter
+            uiFpsCounter++;
+            const now = Date.now();
+            if (now - lastUiFpsUpdate >= 1000) { // Update every second
+                currentUiFps = Math.round(uiFpsCounter * 1000 / (now - uiFpsStartTime));
+                uiFpsCounter = 0;
+                uiFpsStartTime = now;
+                lastUiFpsUpdate = now;
+            }
+            
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1074,11 +1103,17 @@ HTML_TEMPLATE = """
             // Draw enhanced robots with ecosystem roles
             drawEnhancedRobots(data);
             
-            // Draw predation events and effects
-            drawPredationEvents();
-            drawDeathEvents();
+            // Food lines disabled for maximum performance
+            // (can be re-enabled by user if needed)
+            
+            // All animation events disabled for maximum performance
 
             ctx.restore(); // Restore to pre-camera transform state
+            
+            // Draw FPS counters (overlay, not affected by camera transform)
+            if (showFpsCounters) {
+                drawFpsCounters(data);
+            }
         }
         
         function drawEnvironmentalElements(data) {
@@ -1142,14 +1177,10 @@ HTML_TEMPLATE = """
                     
                     ctx.strokeStyle = contested ? '#FF0000' : territoryColor;
                     ctx.lineWidth = contested ? 0.3 : 0.15;
-                    ctx.setLineDash(contested ? [0.5, 0.5] : []);
-                    
-                    // Draw territory boundary
+                    // Simplified territory boundary - no dashed lines for performance
                     ctx.beginPath();
                     ctx.arc(x, y, size/2, 0, 2 * Math.PI);
                     ctx.stroke();
-                    
-                    ctx.setLineDash([]); // Reset line dash
                 });
             }
             
@@ -1196,33 +1227,7 @@ HTML_TEMPLATE = """
                     };
                     ctx.fillText(typeIcons[food.type] || '🍃', x, y + 0.3);
                     
-                    // Add depletion warning animation
-                    if (ratio < 0.4) {
-                        const time = Date.now() / 1000;
-                        const pulse = 0.3 + 0.7 * Math.sin(time * 6);
-                        const warningColor = ratio < 0.2 ? 'rgba(255, 0, 0, ' : 'rgba(255, 165, 0, ';
-                        
-                        ctx.strokeStyle = warningColor + pulse + ')';
-                        ctx.lineWidth = 0.2;
-                        ctx.beginPath();
-                        ctx.arc(x, y, radius + 0.4, 0, 2 * Math.PI);
-                        ctx.stroke();
-                        
-                        // Add sparkle effect for very low resources
-                        if (ratio < 0.2) {
-                            for (let i = 0; i < 4; i++) {
-                                const angle = (i / 4) * 2 * Math.PI + time * 2;
-                                const sparkleRadius = radius + 0.6;
-                                const sx = x + Math.cos(angle) * sparkleRadius;
-                                const sy = y + Math.sin(angle) * sparkleRadius;
-                                
-                                ctx.fillStyle = `rgba(255, 255, 100, ${pulse})`;
-                                ctx.beginPath();
-                                ctx.arc(sx, sy, 0.1, 0, 2 * Math.PI);
-                                ctx.fill();
-                            }
-                        }
-                    }
+                    // Depletion warning animations disabled for performance
                     
                     // Draw resource amount bar
                     const barWidth = radius * 2;
@@ -1296,10 +1301,7 @@ HTML_TEMPLATE = """
                 
                 // Movement trails disabled for performance optimization
                 
-                // Draw alliance connections
-                if (ecosystem.alliances && ecosystem.alliances.length > 0) {
-                    drawAllianceConnections(robot.id, agentPos, ecosystem.alliances, data.agents);
-                }
+                // Alliance connections disabled for performance
             });
         }
         
@@ -1355,144 +1357,141 @@ HTML_TEMPLATE = """
                     ctx.fillText(statusSymbols[status] || '●', x + 1.5, y + 2.0);
                 }
                 
-                // Special consumption animation for feeding agents
-                if (status === 'feeding' && energy < 0.9) {
-                    const time = Date.now() / 1000;
-                    const consumptionPulse = 0.5 + 0.5 * Math.sin(time * 8);
-                    
-                    // Draw consumption particles
-                    for (let i = 0; i < 3; i++) {
-                        const angle = (i / 3) * 2 * Math.PI + time * 3;
-                        const particleRadius = 1.5 + 0.5 * Math.sin(time * 4 + i);
-                        const px = x + Math.cos(angle) * particleRadius;
-                        const py = y + Math.sin(angle) * particleRadius;
-                        
-                        ctx.fillStyle = `rgba(50, 200, 50, ${consumptionPulse * 0.8})`;
-                        ctx.beginPath();
-                        ctx.arc(px, py, 0.15, 0, 2 * Math.PI);
-                        ctx.fill();
-                    }
-                    
-                    // Draw energy absorption lines
-                    ctx.strokeStyle = `rgba(100, 255, 100, ${consumptionPulse * 0.6})`;
-                    ctx.lineWidth = 0.1;
-                    ctx.setLineDash([0.2, 0.2]);
-                    
-                    for (let i = 0; i < 4; i++) {
-                        const angle = (i / 4) * 2 * Math.PI + time * 2;
-                        const lineLength = 2.0;
-                        const startX = x + Math.cos(angle) * 1.0;
-                        const startY = y + Math.sin(angle) * 1.0;
-                        const endX = x + Math.cos(angle) * lineLength;
-                        const endY = y + Math.sin(angle) * lineLength;
-                        
-                        ctx.beginPath();
-                        ctx.moveTo(startX, startY);
-                        ctx.lineTo(endX, endY);
-                        ctx.stroke();
-                    }
-                    
-                    ctx.setLineDash([]); // Reset line dash
-                }
+                // Consumption animations disabled for maximum performance
         }
         
         // Movement trail function removed for performance optimization
         
-        function drawAllianceConnections(agentId, position, alliances, allAgents) {
-            alliances.forEach(allyId => {
-                const ally = allAgents.find(a => a.id === allyId);
-                if (ally && ally.body) {
-                    const allyPos = [ally.body.x, ally.body.y];
-                    const distance = Math.sqrt((position[0] - allyPos[0])**2 + (position[1] - allyPos[1])**2);
+        // Alliance connections function removed for performance
+        
+        function drawFoodLines(data) {
+            if (!data.agents) return;
+            
+            // Performance optimization: only draw for visible robots and limit to 15 lines max
+            const maxLines = 15;
+            let linesDrawn = 0;
+            
+            for (const agent of data.agents) {
+                if (linesDrawn >= maxLines) break;
+                
+                const ecosystem = agent.ecosystem || {};
+                const foodPosition = ecosystem.closest_food_position;
+                const signedXDistance = ecosystem.closest_food_signed_x_distance;
+                
+                // Only draw line if food position is available and reasonably close (reduced threshold)
+                if (foodPosition && signedXDistance !== undefined && Math.abs(signedXDistance) < 30) {
+                    const robotPos = [agent.body.x, agent.body.y];
+                    const [foodX, foodY] = foodPosition;
                     
-                    // Only draw connection if agents are close
-                    if (distance < 10.0) {
-                        ctx.strokeStyle = 'rgba(100, 200, 255, 0.3)';
-                        ctx.lineWidth = 0.1;
-                        ctx.setLineDash([0.3, 0.3]);
+                    // Skip if robot or food is far off-screen
+                    const screenDistance = Math.sqrt((robotPos[0] - cameraPosition.x) ** 2 + (robotPos[1] - cameraPosition.y) ** 2);
+                    if (screenDistance > 50 / cameraZoom) continue;
+                    
+                    // Simplified line color calculation
+                    const distance = Math.abs(signedXDistance);
+                    const intensity = Math.max(0.3, 1.0 - (distance / 20.0));
+                    const lineColor = signedXDistance > 0 ? 
+                        `rgba(100, 150, 255, ${intensity})` : 
+                        `rgba(255, 150, 100, ${intensity})`;
+                    
+                    // Draw simplified line (no dashes for performance)
+                    ctx.strokeStyle = lineColor;
+                    ctx.lineWidth = 0.12;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(robotPos[0], robotPos[1]);
+                    ctx.lineTo(foodX, foodY);
+                    ctx.stroke();
+                    
+                    // Simplified arrow (only if distance is reasonable)
+                    if (distance < 20) {
+                        const angle = Math.atan2(foodY - robotPos[1], foodX - robotPos[0]);
+                        const arrowLength = 0.6;
                         
                         ctx.beginPath();
-                        ctx.moveTo(position[0], position[1]);
-                        ctx.lineTo(allyPos[0], allyPos[1]);
+                        ctx.moveTo(foodX, foodY);
+                        ctx.lineTo(
+                            foodX - arrowLength * Math.cos(angle - 0.5),
+                            foodY - arrowLength * Math.sin(angle - 0.5)
+                        );
+                        ctx.lineTo(
+                            foodX - arrowLength * Math.cos(angle + 0.5),
+                            foodY - arrowLength * Math.sin(angle + 0.5)
+                        );
                         ctx.stroke();
-                        
-                        ctx.setLineDash([]); // Reset line dash
                     }
+                    
+                    linesDrawn++;
                 }
-            });
+            }
         }
         
-        function drawPredationEvents() {
-            if (!predationEvents || predationEvents.length === 0) return;
-            
-            const now = Date.now() / 1000;
-            
-            predationEvents.forEach(event => {
-                if (event.age > 5.0) return; // Don't draw old events
-                
-                const [x, y] = event.position;
-                const alpha = Math.max(0, 1.0 - (event.age / 5.0)); // Fade over 5 seconds
-                
-                if (event.success) {
-                    // Successful predation - red burst
-                    ctx.fillStyle = `rgba(255, 0, 0, ${alpha * 0.6})`;
-                    ctx.strokeStyle = `rgba(255, 100, 100, ${alpha})`;
-                    ctx.lineWidth = 0.2;
-                    
-                    const radius = 1.0 + (event.age * 0.5); // Expanding circle
-                    ctx.beginPath();
-                    ctx.arc(x, y, radius, 0, 2 * Math.PI);
-                    ctx.fill();
-                    ctx.stroke();
-                    
-                    // Add particles effect
-                    const particleCount = 8;
-                    for (let i = 0; i < particleCount; i++) {
-                        const angle = (i / particleCount) * 2 * Math.PI;
-                        const particleRadius = radius + (event.age * 0.8);
-                        const px = x + Math.cos(angle) * particleRadius;
-                        const py = y + Math.sin(angle) * particleRadius;
-                        
-                        ctx.fillStyle = `rgba(255, 50, 50, ${alpha * 0.8})`;
-                        ctx.beginPath();
-                        ctx.arc(px, py, 0.1, 0, 2 * Math.PI);
-                        ctx.fill();
-                    }
-                }
-            });
-        }
+        // Predation events function removed for performance
         
-        function drawDeathEvents() {
-            if (!window.lastData || !window.lastData.ecosystem || !window.lastData.ecosystem.death_events) return;
+        // Death events function removed for performance
+
+        function drawFpsCounters(data) {
+            // Get physics FPS from server data (more accurate than client-side calculation)
+            if (data && data.physics_fps !== undefined) {
+                currentPhysicsFps = data.physics_fps;
+            }
             
-            const deathEvents = window.lastData.ecosystem.death_events;
+            // Save current context
+            ctx.save();
             
-            deathEvents.forEach(event => {
-                if (event.age > 3.0) return; // Much shorter duration - only 3 seconds
-                
-                const [x, y] = event.position;
-                const alpha = Math.max(0, 1.0 - (event.age / 3.0)); // Quick fade over 3 seconds
-                
-                if (event.cause === 'starvation') {
-                    // Simple small cross mark - very lightweight
-                    const size = 0.8; // Small fixed size
-                    const lineWidth = 0.1;
-                    
-                    ctx.strokeStyle = `rgba(200, 100, 100, ${alpha * 0.8})`;
-                    ctx.lineWidth = lineWidth;
-                    
-                    // Draw simple "X" mark
-                    ctx.beginPath();
-                    ctx.moveTo(x - size, y - size);
-                    ctx.lineTo(x + size, y + size);
-                    ctx.moveTo(x + size, y - size);
-                    ctx.lineTo(x - size, y + size);
-                    ctx.stroke();
-                }
-            });
+            // Reset transform for UI overlay
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            
+            // FPS counter background
+            const fpsBoxWidth = 180;
+            const fpsBoxHeight = 70;
+            const fpsBoxX = canvas.width - fpsBoxWidth - 10;
+            const fpsBoxY = 10;
+            
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(fpsBoxX, fpsBoxY, fpsBoxWidth, fpsBoxHeight);
+            
+            ctx.strokeStyle = '#444444';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(fpsBoxX, fpsBoxY, fpsBoxWidth, fpsBoxHeight);
+            
+            // FPS text
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '14px monospace';
+            ctx.textAlign = 'left';
+            
+            // UI FPS
+            const uiFpsColor = currentUiFps >= 20 ? '#4CAF50' : currentUiFps >= 15 ? '#FF9800' : '#F44336';
+            ctx.fillStyle = uiFpsColor;
+            ctx.fillText(`UI FPS: ${currentUiFps}`, fpsBoxX + 10, fpsBoxY + 20);
+            
+            // Physics FPS
+            const physicsFpsColor = currentPhysicsFps >= 50 ? '#4CAF50' : currentPhysicsFps >= 30 ? '#FF9800' : '#F44336';
+            ctx.fillStyle = physicsFpsColor;
+            ctx.fillText(`Physics: ${currentPhysicsFps}`, fpsBoxX + 10, fpsBoxY + 40);
+            
+            // Performance indicator
+            ctx.fillStyle = '#BBBBBB';
+            ctx.font = '10px monospace';
+            const perfStatus = (currentUiFps >= 20 && currentPhysicsFps >= 50) ? 'OPTIMAL' : 
+                              (currentUiFps >= 15 && currentPhysicsFps >= 30) ? 'GOOD' : 'SLOW';
+            ctx.fillText(`Status: ${perfStatus}`, fpsBoxX + 10, fpsBoxY + 60);
+            
+            // Restore context
+            ctx.restore();
         }
 
+        let lastFetchTime = 0;
+        const fetchInterval = 33; // ~30 FPS instead of 60 FPS for performance
+        
         function fetchData() {
+            const now = Date.now();
+            if (now - lastFetchTime < fetchInterval) {
+                requestAnimationFrame(fetchData);
+                return;
+            }
+            lastFetchTime = now;
+            
             fetch('./status')  // Use relative path
                 .then(response => response.json())
                 .then(data => {
@@ -1623,6 +1622,20 @@ HTML_TEMPLATE = """
             } catch (err) {
                 console.error('Error switching learning approach:', err);
             }
+        }
+
+        // Toggle food lines display
+        function toggleFoodLines() {
+            showFoodLines = !showFoodLines;
+            const button = document.getElementById('toggleFoodLines');
+            if (showFoodLines) {
+                button.textContent = 'Hide Food Lines';
+                button.style.background = '#FF5722';
+            } else {
+                button.textContent = 'Show Food Lines';
+                button.style.background = '#4CAF50';
+            }
+            console.log(`🎯 Food lines ${showFoodLines ? 'enabled' : 'disabled'}`);
         }
 
     </script>
@@ -1848,6 +1861,27 @@ class TrainingEnvironment:
 
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
+
+        # Performance optimization tracking
+        self.last_performance_cleanup = time.time()
+        self.performance_cleanup_interval = 120.0  # Clean up every 2 minutes
+        
+        # Web interface throttling
+        self.last_web_interface_update = time.time()
+        self.web_interface_update_interval = 0.05  # 20 FPS instead of 60 FPS
+        self.web_data_cache = {}
+        self.web_cache_valid = False
+        
+        # Physics FPS tracking
+        self.physics_fps_counter = 0
+        self.physics_fps_start_time = time.time()
+        self.last_physics_fps_update = time.time()
+        self.current_physics_fps = 0
+        
+        # Background processing
+        import threading
+        self._background_processing_active = False
+        self._background_lock = threading.Lock()
 
         # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
         try:
@@ -2934,6 +2968,14 @@ class TrainingEnvironment:
                 # Decrement accumulator
                 accumulator -= self.dt
                 self.step_count += 1
+                
+                # Update physics FPS tracking
+                self.physics_fps_counter += 1
+                if current_time - self.last_physics_fps_update >= 1.0:  # Update every second
+                    self.current_physics_fps = round(self.physics_fps_counter / (current_time - self.physics_fps_start_time))
+                    self.physics_fps_counter = 0
+                    self.physics_fps_start_time = current_time
+                    self.last_physics_fps_update = current_time
 
             # Update camera and statistics (can be done once per frame)
             self.update_camera(frame_time)
@@ -2971,6 +3013,15 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
                 last_health_check = current_time
+            
+            # Performance cleanup every 2 minutes
+            if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
+                self._cleanup_performance_data()
+                self.last_performance_cleanup = current_time
+                
+            # Invalidate web cache periodically
+            if current_time - self.last_web_interface_update > 0.1:  # Invalidate after 100ms
+                self.web_cache_valid = False
             
             # Debug logging every 15 seconds (increased from 10 for less spam)
             if current_time - last_debug_time > 15.0:
@@ -3323,8 +3374,10 @@ class TrainingEnvironment:
                                 'alliances': agent_status.get('alliances', []),
                                 'territories': agent_status.get('territories', []),
                                 'closest_food_distance': convert_numpy_types(closest_food_info['distance']),
+                                'closest_food_signed_x_distance': convert_numpy_types(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
                                 'closest_food_type': closest_food_info['food_type'],
-                                'closest_food_source': closest_food_info.get('source_type', 'environment')
+                                'closest_food_source': closest_food_info.get('source_type', 'environment'),
+                                'closest_food_position': closest_food_info.get('food_position', None)
                             }
                         }
                         agents_data.append(agent_data)
@@ -3406,7 +3459,8 @@ class TrainingEnvironment:
                     'environment': {
                         'status': environmental_status,
                         'obstacles': self._get_obstacle_data_for_ui()  # Use new physics-body-based obstacle data
-                    }
+                    },
+                    'physics_fps': getattr(self, 'current_physics_fps', 0)
                 }
                 
             except Exception as e:
@@ -3978,7 +4032,7 @@ class TrainingEnvironment:
         """
         try:
             if getattr(agent, '_destroyed', False) or not agent.body:
-                return {'distance': float('inf'), 'food_type': 'unknown', 'source_type': 'none'}
+                return {'distance': float('inf'), 'food_type': 'unknown', 'source_type': 'none', 'food_position': None, 'signed_x_distance': float('inf')}
             
             agent_pos = (agent.body.position.x, agent.body.position.y)
             agent_id = str(agent.id)
@@ -4031,7 +4085,7 @@ class TrainingEnvironment:
                         })
             
             if not potential_food_sources:
-                return {'distance': float('inf'), 'food_type': 'none available', 'source_type': 'none'}
+                return {'distance': float('inf'), 'food_type': 'none available', 'source_type': 'none', 'food_position': None, 'signed_x_distance': float('inf')}
             
             # Find the nearest/most attractive food source for this agent type
             best_target = None
@@ -4057,7 +4111,11 @@ class TrainingEnvironment:
                     best_distance = effective_distance
             
             if best_target is None:
-                return {'distance': float('inf'), 'food_type': 'none found', 'source_type': 'none'}
+                return {'distance': float('inf'), 'food_type': 'none found', 'source_type': 'none', 'food_position': None, 'signed_x_distance': float('inf')}
+            
+            # Calculate signed x-axis distance (positive = right, negative = left)
+            target_pos = best_target['position']
+            signed_x_distance = target_pos[0] - agent_pos[0]
             
             # Determine food type description based on target
             if best_target.get('source') == 'prey':
@@ -4067,13 +4125,15 @@ class TrainingEnvironment:
             
             return {
                 'distance': best_distance,
+                'signed_x_distance': signed_x_distance,  # New: signed x-axis distance
                 'food_type': food_type_desc,
-                'source_type': best_target.get('source', 'environment')
+                'source_type': best_target.get('source', 'environment'),
+                'food_position': target_pos  # New: position for line drawing
             }
             
         except Exception as e:
             print(f"⚠️ Error calculating closest food distance for agent {getattr(agent, 'id', 'unknown')}: {e}")
-            return {'distance': float('inf'), 'food_type': 'error calculating'}
+            return {'distance': float('inf'), 'food_type': 'error calculating', 'food_position': None, 'signed_x_distance': float('inf')}
 
     def _create_obstacle_physics_bodies(self):
         """Create Box2D physics bodies for obstacles that don't have them yet."""
@@ -4278,6 +4338,62 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"⚠️ Error getting obstacle data for UI: {e}")
             return []
+
+    def _cleanup_performance_data(self):
+        """Clean up accumulated performance data to prevent memory growth."""
+        try:
+            # Clean up Q-learning history data
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False):
+                    continue
+                    
+                # Limit action history
+                if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
+                    agent.action_history = agent.action_history[-50:]
+                
+                # Clean up Q-table data if it exists and has history
+                if hasattr(agent, 'q_table'):
+                    if hasattr(agent.q_table, 'q_value_history') and len(agent.q_table.q_value_history) > 100:
+                        agent.q_table.q_value_history = agent.q_table.q_value_history[-100:]
+                    
+                    # Clean up visit counts for very large Q-tables
+                    if hasattr(agent.q_table, 'visit_counts') and hasattr(agent.q_table.visit_counts, '__len__'):
+                        try:
+                            if len(agent.q_table.visit_counts) > 5000:
+                                # Reset visit counts for least visited state-actions
+                                pass  # Skip complex cleanup for now
+                        except:
+                            pass
+                
+                # Clean up replay buffer if too large
+                if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
+                    buffer_capacity = getattr(agent.replay_buffer, 'capacity', 3000)
+                    if len(agent.replay_buffer.buffer) > buffer_capacity * 0.9:
+                        # Remove oldest 25% of experiences
+                        old_size = len(agent.replay_buffer.buffer)
+                        remove_count = old_size // 4
+                        for _ in range(remove_count):
+                            if agent.replay_buffer.buffer:
+                                agent.replay_buffer.buffer.popleft()
+            
+            # Clean up old robot stats for destroyed agents
+            active_agent_ids = {agent.id for agent in self.agents if not getattr(agent, '_destroyed', False)}
+            old_stats_keys = [k for k in self.robot_stats.keys() if k not in active_agent_ids]
+            for old_key in old_stats_keys[:10]:  # Remove up to 10 old entries at a time
+                del self.robot_stats[old_key]
+            
+            # Clean up ecosystem data
+            if hasattr(self.ecosystem_dynamics, 'food_sources'):
+                # Remove depleted food sources
+                self.ecosystem_dynamics.food_sources = [
+                    f for f in self.ecosystem_dynamics.food_sources if f.amount > 0.05
+                ]
+            
+            # Memory pool handles its own cleanup automatically
+            print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
+            
+        except Exception as e:
+            print(f"⚠️ Error during performance cleanup: {e}")
 
 # --- Main Execution ---
 app = Flask(__name__)

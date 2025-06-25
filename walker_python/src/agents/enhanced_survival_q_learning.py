@@ -219,13 +219,13 @@ class SurvivalRewardCalculator:
 class EnhancedSurvivalQLearning(EnhancedQTable):
     """Enhanced Q-Learning specifically designed for survival tasks."""
     
-    def __init__(self, action_count: int):
+    def __init__(self, action_count: int, use_signed_x_distance: bool = True):
         # Initialize with survival-appropriate state space
         state_dimensions = SurvivalState().get_state_size()
         super().__init__(action_count, default_value=0.0, 
                         confidence_threshold=20, exploration_bonus=0.2)
         
-        self.state_processor = SurvivalStateProcessor()
+        self.state_processor = SurvivalStateProcessor(use_signed_x_distance=use_signed_x_distance)
         self.reward_calculator = SurvivalRewardCalculator()
         
         # Survival-specific parameters
@@ -233,9 +233,9 @@ class EnhancedSurvivalQLearning(EnhancedQTable):
         self.food_seeking_bonus = 1.5
         self.survival_learning_rate_multiplier = 1.5
         
-        # Experience prioritization
-        self.experience_buffer = deque(maxlen=5000)
-        self.high_value_experiences = deque(maxlen=1000)
+        # Experience prioritization (reduced sizes for performance)
+        self.experience_buffer = deque(maxlen=2000)  # Reduced from 5000
+        self.high_value_experiences = deque(maxlen=400)  # Reduced from 1000
         
         # Curriculum learning stages
         self.learning_stage = 'basic_movement'  # -> 'food_seeking' -> 'survival_mastery'
@@ -424,15 +424,24 @@ class EnhancedSurvivalQLearning(EnhancedQTable):
 class SurvivalStateProcessor:
     """Processes raw agent and environment data into structured survival states."""
     
-    def __init__(self):
+    def __init__(self, use_signed_x_distance=True):
         # Binning parameters
         self.angle_bins = 8  # 45-degree increments
         self.distance_bins = 5
         self.velocity_bins = 4
         self.energy_bins = 5
         
+        # Distance configuration
+        self.use_signed_x_distance = use_signed_x_distance  # New: option to use signed x-axis distance
+        
         # Distance thresholds for food
-        self.food_distance_thresholds = [2.0, 5.0, 10.0, 20.0]  # very_close, close, medium, far, very_far
+        if self.use_signed_x_distance:
+            # For signed distance, use symmetric thresholds: [-20, -10, -5, -2, 0, 2, 5, 10, 20]
+            self.signed_distance_thresholds = [-20.0, -10.0, -5.0, -2.0, 2.0, 5.0, 10.0, 20.0]
+            self.distance_bins = len(self.signed_distance_thresholds) + 1  # 9 bins total
+        else:
+            # Regular distance thresholds  
+            self.food_distance_thresholds = [2.0, 5.0, 10.0, 20.0]  # very_close, close, medium, far, very_far
         
         # Velocity thresholds
         self.velocity_thresholds = [0.1, 0.5, 1.5]  # still, slow, medium, fast
@@ -582,7 +591,15 @@ class SurvivalStateProcessor:
         
         # Calculate direction to target
         target_pos = best_target['position']
-        actual_distance = math.sqrt((agent_pos[0] - target_pos[0])**2 + (agent_pos[1] - target_pos[1])**2)
+        
+        # Calculate distance based on configuration
+        if self.use_signed_x_distance:
+            # Use signed x-axis distance (positive = right, negative = left)
+            actual_distance = target_pos[0] - agent_pos[0]
+        else:
+            # Use regular Euclidean distance
+            actual_distance = math.sqrt((agent_pos[0] - target_pos[0])**2 + (agent_pos[1] - target_pos[1])**2)
+        
         direction_angle = math.atan2(target_pos[1] - agent_pos[1], target_pos[0] - agent_pos[0])
         direction_bin = self._angle_to_direction_bin(direction_angle)
         
@@ -611,10 +628,16 @@ class SurvivalStateProcessor:
     
     def _distance_to_bin(self, distance: float) -> int:
         """Convert distance to bin."""
-        for i, threshold in enumerate(self.food_distance_thresholds):
-            if distance <= threshold:
-                return i
-        return len(self.food_distance_thresholds)
+        if self.use_signed_x_distance:
+            for i, threshold in enumerate(self.signed_distance_thresholds):
+                if distance <= threshold:
+                    return i
+            return len(self.signed_distance_thresholds)
+        else:
+            for i, threshold in enumerate(self.food_distance_thresholds):
+                if distance <= threshold:
+                    return i
+            return len(self.food_distance_thresholds)
     
     def _get_relative_orientation(self, agent, food_position: Tuple[float, float]) -> int:
         """Get agent's body orientation relative to food."""
