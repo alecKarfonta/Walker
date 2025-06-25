@@ -491,6 +491,12 @@ class EnhancedEvolutionEngine:
         self.species: List[Any] = []  # Species objects
         self.hall_of_fame: Any = None  # HallOfFame object
         
+        # 🔧 NEW: Position management to prevent overlaps
+        self.used_positions: Set[Tuple[int, int]] = set()  # Track occupied grid positions
+        self.min_spacing = 12  # Minimum spacing between robots (increased from 8)
+        self.spawn_height = 8  # Height above ground for spawning
+        self.spawn_area_width = max(800, self.config.population_size * self.min_spacing * 1.5)  # Dynamic spawn area
+        
         # Fitness tracking
         self.fitness_history: List[float] = []
         self.diversity_history: List[float] = []
@@ -559,6 +565,27 @@ class EnhancedEvolutionEngine:
         if self.config.enable_multi_objective:
             for obj in self.config.fitness_objectives:
                 self.objective_history[obj] = []
+        
+        # Advanced evolutionary features initialization
+        self._init_advanced_features()
+        
+        print(f"🧬 Enhanced Evolution Engine initialized")
+        print(f"   🎯 Population: {self.config.population_size} agents")
+        print(f"   📍 Spawn area: {self.spawn_area_width}x{self.spawn_height} units")
+        print(f"   📏 Minimum spacing: {self.min_spacing} units")
+        print(f"   🔀 Selection: {self.current_selection_strategy}")
+        features_enabled = any([
+            self.config.enable_environmental_challenges,
+            self.config.enable_multi_objective,
+            self.config.enable_seasonal_evolution,
+            self.config.enable_social_learning
+        ])
+        print(f"   🌟 Advanced features: {'enabled' if features_enabled else 'disabled'}")
+    
+    def _init_advanced_features(self):
+        """Initialize advanced evolutionary features."""
+        # Initialize any other necessary attributes for advanced features
+        pass
     
     def _log_evolution_event(self, event_type: str, details: Dict):
         """Log significant evolutionary events."""
@@ -1033,10 +1060,13 @@ class EnhancedEvolutionEngine:
         return status
     
     def initialize_population(self) -> List[EvolutionaryCrawlingAgent]:
-        """Create initial population with diverse physical parameters."""
+        """Create initial population with diverse physical parameters and safe positioning."""
         population = []
         
         print(f"🐣 Creating initial population of {self.config.population_size} agents...")
+        
+        # Clear any existing position tracking
+        self._clear_position_tracking()
         
         for i in range(self.config.population_size):
             # Create random physical parameters for diversity
@@ -1046,16 +1076,15 @@ class EnhancedEvolutionEngine:
                 # Create diverse variants
                 physical_params = PhysicalParameters.random_parameters()
             
-            # Calculate spacing to avoid overlaps
-            spacing = 8 if self.config.population_size > 20 else 15
-            position = (i * spacing, 6)
+            # Get safe spawn position to avoid overlaps
+            position = self._get_safe_spawn_position(position_index=i)
             
             agent = EvolutionaryCrawlingAgent(
                 world=self.world,
                 agent_id=i,
                 position=position,
                 category_bits=0x0002,  # Agent category
-                mask_bits=0x0001,     # Collide with ground only
+                mask_bits=0x0001 | 0x0004,     # Collide with ground AND obstacles
                 physical_params=physical_params
             )
             
@@ -1065,6 +1094,7 @@ class EnhancedEvolutionEngine:
         self._update_evolution_stats()
         
         print(f"✅ Initial population created with diversity score: {self.diversity_history[-1]:.3f}")
+        print(f"📍 Population spawned across {self.spawn_area_width:.0f} units with {self.min_spacing} unit spacing")
         return population
     
     def evolve_generation(self) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
@@ -1297,23 +1327,94 @@ class EnhancedEvolutionEngine:
         
         return population, agents_to_destroy
     
-    def _create_random_agent(self, position_index: Optional[int] = None) -> EvolutionaryCrawlingAgent:
-        """Create a random agent with diverse parameters."""
-        random_params = PhysicalParameters.random_parameters()
-        spacing = 8 if self.config.population_size > 20 else 15
+    def _get_safe_spawn_position(self, position_index: Optional[int] = None) -> Tuple[float, float]:
+        """
+        Get a safe spawn position that doesn't overlap with existing agents.
         
-        # Use position_index for spacing if provided, otherwise use random position
-        if position_index is not None:
-            position = (position_index * spacing, 6)
-        else:
-            position = (random.randint(0, self.config.population_size) * spacing, 6)
+        Args:
+            position_index: Preferred index for deterministic positioning
+            
+        Returns:
+            Tuple of (x, y) coordinates for safe spawning
+        """
+        max_attempts = 100  # Prevent infinite loops
+        
+        for attempt in range(max_attempts):
+            if position_index is not None and attempt == 0:
+                # First try: use deterministic positioning based on index
+                x = position_index * self.min_spacing
+                y = self.spawn_height
+            else:
+                # Random positioning with improved distribution
+                x = random.uniform(0, self.spawn_area_width)
+                y = self.spawn_height + random.uniform(-2, 4)  # Small height variation
+            
+            # Convert to grid coordinates for collision checking
+            grid_x = int(x // (self.min_spacing // 2))  # Use half-spacing for finer grid
+            grid_y = int(y // (self.min_spacing // 2))
+            
+            # Check if position is safe (not too close to existing agents)
+            if self._is_position_safe(grid_x, grid_y):
+                # Mark position as used
+                self.used_positions.add((grid_x, grid_y))
+                
+                # Also mark adjacent positions to maintain spacing
+                for dx in range(-1, 2):
+                    for dy in range(-1, 2):
+                        self.used_positions.add((grid_x + dx, grid_y + dy))
+                
+                print(f"🎯 Safe spawn position found: ({x:.1f}, {y:.1f}) after {attempt + 1} attempts")
+                return (x, y)
+        
+        # Fallback: use the current population size to spread out
+        fallback_x = len(self.population) * self.min_spacing * 1.2
+        fallback_y = self.spawn_height
+        
+        print(f"⚠️  Using fallback position after {max_attempts} attempts: ({fallback_x:.1f}, {fallback_y:.1f})")
+        return (fallback_x, fallback_y)
+    
+    def _is_position_safe(self, grid_x: int, grid_y: int) -> bool:
+        """
+        Check if a grid position is safe for spawning (no overlaps).
+        
+        Args:
+            grid_x: Grid X coordinate
+            grid_y: Grid Y coordinate
+            
+        Returns:
+            True if position is safe, False if occupied
+        """
+        # Check if exact position is taken
+        if (grid_x, grid_y) in self.used_positions:
+            return False
+        
+        # Check surrounding area for spacing
+        safety_radius = 1  # Require 1 grid unit of spacing
+        for dx in range(-safety_radius, safety_radius + 1):
+            for dy in range(-safety_radius, safety_radius + 1):
+                if (grid_x + dx, grid_y + dy) in self.used_positions:
+                    return False
+        
+        return True
+    
+    def _clear_position_tracking(self):
+        """Clear position tracking for new population spawning."""
+        self.used_positions.clear()
+        print(f"🧹 Cleared position tracking for new population spawn")
+    
+    def _create_random_agent(self, position_index: Optional[int] = None) -> EvolutionaryCrawlingAgent:
+        """Create a random agent with diverse parameters and safe positioning."""
+        random_params = PhysicalParameters.random_parameters()
+        
+        # Get safe spawn position (improved from original problematic logic)
+        position = self._get_safe_spawn_position(position_index)
         
         return EvolutionaryCrawlingAgent(
             world=self.world,
             agent_id=None,  # Let agent generate its own UUID
             position=position,
             category_bits=0x0002,
-            mask_bits=0x0001,
+            mask_bits=0x0001 | 0x0004,  # Collide with ground AND obstacles
             physical_params=random_params
         )
     

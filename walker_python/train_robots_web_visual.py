@@ -1825,11 +1825,11 @@ class TrainingEnvironment:
         self.agent_statuses = {}  # Track agent statuses (hunting, feeding, etc.)
         self.predation_events = []  # Track recent predation events for visualization
         self.last_ecosystem_update = time.time()
-        self.ecosystem_update_interval = 30.0  # Update ecosystem every 30 seconds
+        self.ecosystem_update_interval = 20.0  # Update ecosystem every 20 seconds for better responsiveness
         
         # Resource generation system  
         self.last_resource_generation = time.time()
-        self.resource_generation_interval = 3.0  # Generate resources extremely frequently for abundant food
+        self.resource_generation_interval = 45.0  # Generate strategic resources every 45 seconds (balanced)
         self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
         
         # Death and survival system
@@ -1933,8 +1933,14 @@ class TrainingEnvironment:
         """Creates a static ground body."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
-        # Calculate ground width based on number of agents (reasonable size)
-        ground_width = max(500, self.num_agents * 15)  # Ensure enough width for all agents
+        # Calculate ground width to accommodate evolution engine spawn area
+        # Evolution engine uses: max(800, population_size * min_spacing * 1.5)
+        # With min_spacing = 12, this ensures ground covers the full spawn area
+        min_spacing = 12  # Must match evolution engine's min_spacing
+        calculated_spawn_width = max(800, self.num_agents * min_spacing * 1.5)
+        
+        # Add extra margin for robot movement beyond spawn area
+        ground_width = calculated_spawn_width + 200  # Extra 200 units for exploration
         
         # The ground's mask is set to collide with the agent category
         ground_fixture = ground_body.CreateFixture(
@@ -1946,14 +1952,16 @@ class TrainingEnvironment:
                 maskBits=self.AGENT_CATEGORY  # Collide with all agents
             )
         )
-        print(f"🔧 Ground setup complete with width {ground_width} for {self.num_agents} agents.")
+        print(f"🔧 Ground setup complete with width {ground_width} (spawn area: {calculated_spawn_width}) for {self.num_agents} agents.")
 
     def _generate_realistic_terrain(self):
         """Generate robot-scale terrain with navigable features appropriate for 1.5m robots."""
         try:
-            # Calculate world bounds based on robot scale and distribution
-            # Robot-scale terrain needs smaller, more detailed areas
-            ground_width = max(200, self.num_agents * 8)  # Smaller area for robot scale
+            # Calculate world bounds based on robot scale and distribution  
+            # Robot-scale terrain needs to match the ground width for consistency
+            min_spacing = 12  # Must match evolution engine's min_spacing
+            calculated_spawn_width = max(800, self.num_agents * min_spacing * 1.5)
+            ground_width = calculated_spawn_width + 200  # Match ground width calculation
             world_bounds = (-ground_width // 2, 0, ground_width // 2, 30)  # Lower height for robots
             
             print(f"🤖 Generating robot-scale terrain with style '{self.terrain_style}'...")
@@ -2168,12 +2176,12 @@ class TrainingEnvironment:
         from src.agents.learning_manager import LearningApproach
         import random
         
-        # Available learning approaches with weights (prefer more advanced approaches)
+        # Available learning approaches with weights (HEAVILY favor Deep Q-Learning)
         learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.15),      # 15% - Simple baseline
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.35),   # 35% - Advanced tabular
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.35),   # 35% - Survival-focused
-            (LearningApproach.DEEP_Q_LEARNING, 0.15),       # 15% - Neural networks
+            (LearningApproach.BASIC_Q_LEARNING, 0.10),      # 10% - Simple baseline
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.20),   # 20% - Advanced tabular
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.30),   # 30% - Survival-focused
+            (LearningApproach.DEEP_Q_LEARNING, 0.40),       # 40% - Neural networks (INCREASED!)
         ]
         
         # Create weighted list for random selection
@@ -2241,12 +2249,12 @@ class TrainingEnvironment:
         from src.agents.learning_manager import LearningApproach
         import random
         
-        # Available learning approaches with weights (same as initialization)
+        # Available learning approaches with weights (HEAVILY favor Deep Q-Learning for replacements)
         learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.15),      # 15% - Simple baseline
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.35),   # 35% - Advanced tabular
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.35),   # 35% - Survival-focused
-            (LearningApproach.DEEP_Q_LEARNING, 0.15),       # 15% - Neural networks
+            (LearningApproach.BASIC_Q_LEARNING, 0.10),      # 10% - Simple baseline
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.20),   # 20% - Advanced tabular
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.30),   # 30% - Survival-focused
+            (LearningApproach.DEEP_Q_LEARNING, 0.40),       # 40% - Neural networks (INCREASED!)
         ]
         
         # Create weighted list for random selection
@@ -2268,6 +2276,10 @@ class TrainingEnvironment:
                 icon = approach_info['icon']
                 name = approach_info['name']
                 print(f"   🎯 Assigned {icon} {name} to replacement agent {agent.id[:8]}")
+                
+                # Special logging for Deep Q-Learning to track creation
+                if selected_approach == LearningApproach.DEEP_Q_LEARNING:
+                    print(f"   🧠 DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Neural network active!")
             else:
                 print(f"   ❌ Failed to assign {selected_approach.value} to replacement agent {agent.id[:8]}")
                 
@@ -3203,6 +3215,24 @@ class TrainingEnvironment:
             if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
                 self._cleanup_performance_data()
                 self.last_performance_cleanup = current_time
+            
+            # Update enhanced learning systems (after current_agents is defined)
+            if hasattr(self, 'learning_manager') and self.learning_manager:
+                try:
+                    # Update agent performance for elite identification
+                    for agent in current_agents:
+                        if not getattr(agent, '_destroyed', False) and agent.body:
+                            try:
+                                self.learning_manager.update_agent_performance(agent, self.step_count)
+                            except Exception as e:
+                                if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
+                                    print(f"⚠️ Error updating agent performance: {e}")
+                    
+                    # Update elite agents periodically
+                    self.learning_manager.update_elites(current_agents, self.step_count)
+                except Exception as e:
+                    if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
+                        print(f"⚠️ Error updating enhanced learning systems: {e}")
                 
             # Invalidate web cache periodically
             if current_time - self.last_web_interface_update > 0.1:  # Invalidate after 100ms

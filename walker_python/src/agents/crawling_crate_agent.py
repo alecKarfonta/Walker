@@ -126,7 +126,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.reward_count = 0
         
         # Q-value bounds to prevent explosion
-        self.min_q_value = -5.0  # Increased range for better learning
+        self.min_q_value = -1.0  # REDUCED bounds to match smaller reward scale
         self.max_q_value = 5.0   # Increased range for better learning
         
         # Track extreme rewards seen in current episode
@@ -134,9 +134,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.worst_reward_received = np.inf   # Start at +inf so first reward sets it
         
         # Experience replay buffer (optimized for performance)
-        self.replay_buffer = ReplayBuffer(capacity=3000)  # Reduced for performance
-        self.batch_size = 32  # Balanced batch size
-        self.replay_frequency = 12  # Less frequent learning for performance
+        self.replay_buffer = ReplayBuffer(capacity=5000)
+        self.batch_size = 16
+        self.replay_frequency = 100  # Learn from replay every 100 steps
         
         # Training state
         self.current_state = None
@@ -162,8 +162,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.current_action_tuple = (1, 0)  # FIXED: Start with a real action from the action list
         self.prev_x = position[0]  # Track previous position for reward calculation
         
-        # ACTION PERSISTENCE: Time-based action selection (0.5 seconds)
-        self.action_persistence_duration = 0.25  # 0.5 seconds
+        # ACTION PERSISTENCE: Time-based action selection (0.25 seconds)
+        self.action_persistence_duration = 0.25  # 0.25 seconds
         self.last_action_time = time.time()  # Track when last action was selected
         self.action_persisted = False  # Track if we're in persistence mode
         
@@ -203,11 +203,15 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         # Reset action history
         self.action_history = []
-        self.max_action_history = 15  # Longer history
+        self.max_action_history = 1000  # Limit history size to manage memory
         
         # Initialize crawling-specific tracking variables
         self.recent_displacements = []
         self.action_sequence = []
+        
+        # Food approach reward tracking
+        self.prev_food_distance = float('inf')
+        self.food_distance_history = []  # Track recent food distances
 
     def get_enhanced_discretized_state(self) -> Tuple:
         """
@@ -284,7 +288,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         current_x = self.body.position.x
         total_reward = 0.0
         
-        # 1. FORWARD PROGRESS REWARD (Primary - 40% of total reward)
+        # 1. FORWARD PROGRESS REWARD (Primary - 35% of total reward, reduced from 40%)
         # Reward consistent forward movement, not just acceleration spikes
         displacement = current_x - prev_x
         if displacement > 0.003:  # Slightly lower threshold so small but real moves count
@@ -306,9 +310,14 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         else:
             progress_reward = 0.0  # FIXED: NO reward for tiny movements or standing still
         
-        total_reward += progress_reward * 0.4
+        total_reward += progress_reward * 0.35  # Reduced from 0.4 to make room for food reward
         
-        # 2. ARM GROUND CONTACT REWARD (25% of total reward)
+        # 2. FOOD APPROACH REWARD (NEW - 15% of total reward)
+        # Reward moving toward nearest food source
+        food_approach_reward = self._get_food_approach_reward()
+        total_reward += food_approach_reward * 0.15
+        
+        # 3. ARM GROUND CONTACT REWARD (25% of total reward)
         # Reward arms being in contact with ground for pushing
         arm_contact_reward = 0.0
         
@@ -334,7 +343,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         total_reward += arm_contact_reward * 0.25
         
-        # 3. ARM COORDINATION REWARD (20% of total reward)
+        # 4. ARM COORDINATION REWARD (20% of total reward)
         # Reward alternating or coordinated arm movements
         coordination_reward = 0.0
         
@@ -358,7 +367,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 
         #total_reward += coordination_reward * 0.20
         
-        # 4. STABILITY REWARD (10% of total reward)
+        # 5. STABILITY REWARD (10% of total reward)
         # Reward maintaining body stability while crawling
         body_angle = abs(self.body.angle)
         if body_angle < np.pi/6:  # Within 30 degrees
@@ -368,7 +377,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             
         #total_reward += stability_reward * 0.10
         
-        # 5. ENERGY EFFICIENCY REWARD (5% of total reward)
+        # 6. ENERGY EFFICIENCY REWARD (5% of total reward)
         # Reward achieving progress with reasonable energy expenditure
         energy_used = abs(self.current_action_tuple[0]) + abs(self.current_action_tuple[1])
         efficiency_reward = 0.0
@@ -382,7 +391,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             
         #total_reward += efficiency_reward * 0.05
         
-        # 6. BEHAVIORAL PATTERN REWARDS (Bonus)
+        # 7. BEHAVIORAL PATTERN REWARDS (Bonus)
         # Reward sequences that resemble crawling patterns
         pattern_bonus = 0.0
         
@@ -403,7 +412,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 
         #total_reward += pattern_bonus
         
-        # 7. GROUND INTERACTION BONUS
+        # 8. GROUND INTERACTION BONUS
         # Bonus for maintaining contact with ground while moving
         body_height = self.body.position.y
         if (body_height < ground_level + 0.5 and
@@ -414,7 +423,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             
         total_reward += ground_interaction_bonus
         
-        # 8. PENALTIES
+        # 9. PENALTIES
         # Penalty for getting stuck or falling
         if body_height < ground_level - 0.5:  # Fallen through ground
             total_reward -= 0.01  # REDUCED
@@ -447,7 +456,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             print(f"🐛 DETAILED Reward Debug Agent {self.id} Step {self.steps}:")
             print(f"  Position: prev_x={prev_x:.4f}, current_x={current_x:.4f}")
             print(f"  Displacement: {displacement:.6f}")
-            print(f"  Progress reward: {progress_reward:.6f} (weighted: {progress_reward * 0.4:.6f})")
+            print(f"  Progress reward: {progress_reward:.6f} (weighted: {progress_reward * 0.35:.6f})")
+            print(f"  Food approach reward: {food_approach_reward:.6f} (weighted: {food_approach_reward * 0.15:.6f})")
             print(f"  Upper arm height: {upper_arm_height:.4f}, Lower arm height: {lower_arm_height:.4f}")
             print(f"  Ground level: {ground_level}")
             print(f"  Arm contact raw: {arm_contact_reward:.6f} (weighted: {arm_contact_reward * 0.25:.6f})")
@@ -846,7 +856,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         
         # Reset action history
         self.action_history = []
-        self.max_action_history = 10
+        self.max_action_history = 1000  # Limit history size to manage memory
         
         # Reset speed and acceleration tracking
         self.speed = 0.0
@@ -882,6 +892,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         for part in [self.body, self.upper_arm, self.lower_arm] + self.wheels:
             part.linearVelocity = (0, 0)
             part.angularVelocity = 0
+        
+        # Food approach reward tracking
+        self.prev_food_distance = float('inf')
+        self.food_distance_history = []  # Track recent food distances
 
     def reset_position(self):
         """
@@ -1252,3 +1266,123 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.lower_arm.awake = True
         
         # Removed debug print to eliminate overhead - was running 1% of the time 
+
+    def _get_food_approach_reward(self) -> float:
+        """
+        Calculate reward for moving toward the nearest food source.
+        Returns positive reward for moving closer, small penalty for moving away.
+        """
+        try:
+            # Get current distance to nearest food
+            current_food_distance = self._get_nearest_food_distance()
+            
+            # Initialize if this is the first call
+            if not hasattr(self, 'prev_food_distance'):
+                self.prev_food_distance = current_food_distance
+                return 0.0
+            
+            # Calculate change in distance
+            distance_change = self.prev_food_distance - current_food_distance
+            
+            # Track food distance history for more sophisticated rewards
+            if not hasattr(self, 'food_distance_history'):
+                self.food_distance_history = []
+            
+            self.food_distance_history.append(current_food_distance)
+            if len(self.food_distance_history) > 10:
+                self.food_distance_history.pop(0)
+            
+            # Calculate food approach reward
+            food_reward = 0.0
+            
+            # Primary reward: moving closer to food
+            if distance_change > 0.1:  # Moved significantly closer
+                food_reward += min(0.02, distance_change * 0.1)  # Scale reward based on distance improvement
+            elif distance_change < -0.1:  # Moved significantly away
+                food_reward -= min(0.005, abs(distance_change) * 0.02)  # Small penalty for moving away
+            
+            # Bonus for being very close to food
+            if current_food_distance < 3.0:  # Within consumption range
+                food_reward += 0.01 * (3.0 - current_food_distance) / 3.0  # Proximity bonus
+            
+            # Bonus for consistent approach (trend reward)
+            if len(self.food_distance_history) >= 5:
+                trend = self.food_distance_history[0] - self.food_distance_history[-1]
+                if trend > 0:  # Generally getting closer over time
+                    food_reward += min(0.005, trend * 0.01)
+            
+            # Update previous distance for next calculation
+            self.prev_food_distance = current_food_distance
+            
+            # Debug logging for first agent occasionally
+            if self.id == 0 and self.steps % 200 == 0 and food_reward != 0.0:
+                print(f"🍎 Agent {self.id} Food Approach: distance={current_food_distance:.2f}, change={distance_change:.3f}, reward={food_reward:.4f}")
+            
+            return food_reward
+            
+        except Exception as e:
+            # Fail gracefully if food distance calculation fails
+            if self.id == 0 and self.steps % 500 == 0:
+                print(f"⚠️ Error calculating food approach reward for agent {self.id}: {e}")
+            return 0.0
+    
+    def _get_nearest_food_distance(self) -> float:
+        """
+        Get distance to nearest food source that this agent can consume.
+        Returns float('inf') if no food is available.
+        """
+        try:
+            # Try to access the training environment through the world attribute
+            # This is a bit of a hack but necessary for the crawling agent to access ecosystem data
+            training_env = None
+            
+            # Look for training environment in various possible locations
+            if hasattr(self.world, '_training_env'):
+                training_env = self.world._training_env
+            elif hasattr(self.world, 'training_environment'):
+                training_env = self.world.training_environment
+            elif hasattr(self, '_training_env'):
+                training_env = self._training_env
+            
+            if training_env and hasattr(training_env, 'ecosystem_dynamics'):
+                agent_pos = (self.body.position.x, self.body.position.y)
+                
+                # Get agent's ecosystem role for food type filtering
+                agent_role = 'omnivore'  # Default
+                if hasattr(training_env, 'agent_statuses') and self.id in training_env.agent_statuses:
+                    agent_role = training_env.agent_statuses[self.id].get('role', 'omnivore')
+                
+                nearest_distance = float('inf')
+                
+                # Check all food sources
+                for food_source in training_env.ecosystem_dynamics.food_sources:
+                    if food_source.amount <= 0.1:  # Skip depleted food
+                        continue
+                    
+                    # Check if this agent can eat this food type
+                    consumption_efficiency = training_env.ecosystem_dynamics._get_consumption_efficiency(
+                        training_env.ecosystem_dynamics.agent_roles.get(self.id, training_env.ecosystem_dynamics.EcosystemRole.OMNIVORE),
+                        food_source.food_type
+                    )
+                    
+                    if consumption_efficiency <= 0.0:
+                        continue  # Skip food this agent can't eat
+                    
+                    # Calculate distance
+                    food_x, food_y = food_source.position
+                    distance = ((agent_pos[0] - food_x) ** 2 + (agent_pos[1] - food_y) ** 2) ** 0.5
+                    
+                    if distance < nearest_distance:
+                        nearest_distance = distance
+                
+                return nearest_distance
+            else:
+                # Fallback: use a simple heuristic based on position
+                # Assume food is generally distributed around the origin
+                agent_pos = (self.body.position.x, self.body.position.y)
+                return ((agent_pos[0]) ** 2 + (agent_pos[1]) ** 2) ** 0.5
+                
+        except Exception as e:
+            if self.id == 0 and self.steps % 1000 == 0:  # Rare debug output
+                print(f"⚠️ Error getting food distance for agent {self.id}: {e}")
+            return float('inf') 

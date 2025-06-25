@@ -293,13 +293,13 @@ class EcosystemDynamics:
         min_food_sources = max(15, int(self.carrying_capacity * 0.2))  # At least 15 or 20% of carrying capacity
         current_food_count = len(self.food_sources)
         
-        # Enhanced food generation to maintain minimum population
-        food_spawn_chance = 0.15 * self.seasonal_resource_modifier
+        # Balanced food generation to maintain minimum population
+        food_spawn_chance = 0.08 * self.seasonal_resource_modifier  # Reduced from 15% to 8%
         
         # Increase spawn chance if below minimum threshold
         if current_food_count < min_food_sources:
             shortage_factor = (min_food_sources - current_food_count) / min_food_sources
-            food_spawn_chance += shortage_factor * 0.3  # Up to 30% additional chance when short
+            food_spawn_chance += shortage_factor * 0.15  # Reduced from 30% to 15% additional chance when short
         
         # Add new food sources based on need and season
         if random.random() < food_spawn_chance:
@@ -325,9 +325,9 @@ class EcosystemDynamics:
             )
             self.food_sources.append(food_source)
         
-        # Emergency food generation if critically low
-        if current_food_count < min_food_sources // 2:  # Less than half minimum
-            emergency_spawns = min(3, min_food_sources - current_food_count)  # Spawn up to 3 at once
+        # Emergency food generation if critically low (much less aggressive)
+        if current_food_count < min_food_sources // 3:  # Less than one third minimum (was half)
+            emergency_spawns = min(2, min_food_sources - current_food_count)  # Spawn up to 2 at once (was 3)
             for _ in range(emergency_spawns):
                 position = (random.uniform(-50, 50), random.uniform(-5, 30))
                 food_type = random.choice(["plants", "insects", "seeds"])  # Prefer easier food types
@@ -340,7 +340,8 @@ class EcosystemDynamics:
                     max_capacity=random.uniform(40, 120)
                 )
                 self.food_sources.append(food_source)
-                print(f"🚨 Emergency food spawn: {food_type} at ({position[0]:.1f}, {position[1]:.1f})")
+                # Silently create emergency food to reduce spam
+                pass
     
     def generate_resources_between_agents(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
         """Generate resources strategically between agents"""
@@ -348,8 +349,8 @@ class EcosystemDynamics:
             return
         
         # Clear existing food sources to regenerate fresh ones
-        if len(self.food_sources) > 50:  # Don't let resources accumulate too much
-            self.food_sources = self.food_sources[-30:]  # Keep only 30 most recent
+        if len(self.food_sources) > 35:  # Don't let resources accumulate too much (reduced from 50)
+            self.food_sources = self.food_sources[-25:]  # Keep only 25 most recent (reduced from 30)
         
         # Generate resources between adjacent agents
         for i in range(len(agent_positions) - 1):

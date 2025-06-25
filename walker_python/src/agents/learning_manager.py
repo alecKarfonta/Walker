@@ -17,6 +17,8 @@ class LearningApproach(Enum):
     ENHANCED_Q_LEARNING = "enhanced_q_learning"
     SURVIVAL_Q_LEARNING = "survival_q_learning"
     DEEP_Q_LEARNING = "deep_q_learning"  # For future use
+    ATTENTION_DEEP_Q_LEARNING = "attention_deep_q_learning"
+    ELITE_IMITATION_LEARNING = "elite_imitation_learning"
 
 
 class LearningManager:
@@ -89,8 +91,39 @@ class LearningManager:
                 'state_space': 'Continuous',
                 'advantages': ['Scalable', 'Continuous states', 'High performance ceiling'],
                 'disadvantages': ['Requires GPU', 'Slower startup', 'Less interpretable']
+            },
+            LearningApproach.ATTENTION_DEEP_Q_LEARNING: {
+                'name': 'Attention Deep Q-Learning',
+                'icon': '🔍',
+                'description': 'Neural network with multi-head attention mechanisms'
+            },
+            LearningApproach.ELITE_IMITATION_LEARNING: {
+                'name': 'Elite Imitation Learning',
+                'icon': '🎭',
+                'description': 'Learn from elite agent behavioral patterns'
             }
         }
+        
+        # Import enhanced learning systems
+        try:
+            from .attention_deep_q_learning import AttentionDeepQLearning
+            from .elite_imitation_learning import EliteImitationLearning
+            self.attention_deep_q_available = True
+            self.elite_imitation_available = True
+        except ImportError as e:
+            logger.warning(f"Enhanced learning systems not available: {e}")
+            self.attention_deep_q_available = False
+            self.elite_imitation_available = False
+        
+        # Elite imitation learning system (shared across all agents)
+        if self.elite_imitation_available:
+            self.elite_imitation = EliteImitationLearning(
+                imitation_probability=0.3,
+                elite_update_interval=500,
+                pattern_extraction_window=100
+            )
+        else:
+            self.elite_imitation = None
         
         print("🎛️ LearningManager initialized - Ready for flexible approach switching")
     
@@ -98,44 +131,35 @@ class LearningManager:
         """Get the current learning approach for an agent."""
         return self.agent_approaches.get(agent_id, LearningApproach.ENHANCED_Q_LEARNING)
     
-    def set_agent_approach(self, agent, new_approach: LearningApproach) -> bool:
-        """
-        Switch an agent to a new learning approach.
-        
-        Args:
-            agent: The agent to switch
-            new_approach: The new learning approach to use
-            
-        Returns:
-            bool: True if switch was successful, False otherwise
-        """
+    def set_agent_approach(self, agent, approach: LearningApproach) -> bool:
+        """Set learning approach for an agent with enhanced systems."""
         try:
             agent_id = agent.id
             current_approach = self.get_agent_approach(agent_id)
             
-            if current_approach == new_approach:
-                print(f"🔄 Agent {agent_id} already using {new_approach.value}")
+            if current_approach == approach:
+                print(f"🔄 Agent {agent_id} already using {approach.value}")
                 return True
             
-            print(f"🔄 Switching Agent {agent_id}: {current_approach.value} → {new_approach.value}")
+            print(f"🔄 Switching Agent {agent_id}: {current_approach.value} → {approach.value}")
             
             # Store current Q-table for knowledge transfer (always update to get latest learned data)
             self.agent_original_qtables[agent_id] = agent.q_table
             
             # Perform the switch
-            success = self._perform_approach_switch(agent, current_approach, new_approach)
+            success = self._perform_approach_switch(agent, current_approach, approach)
             
             if success:
-                self.agent_approaches[agent_id] = new_approach
-                self._update_performance_tracking(agent_id, current_approach, new_approach)
-                print(f"✅ Agent {agent_id} successfully switched to {new_approach.value}")
+                self.agent_approaches[agent_id] = approach
+                self._update_performance_tracking(agent_id, current_approach, approach)
+                print(f"✅ Agent {agent_id} successfully switched to {approach.value}")
                 return True
             else:
-                print(f"❌ Failed to switch Agent {agent_id} to {new_approach.value}")
+                print(f"❌ Failed to switch Agent {agent_id} to {approach.value}")
                 return False
                 
         except Exception as e:
-            print(f"❌ Error switching Agent {agent_id} to {new_approach.value}: {e}")
+            print(f"❌ Error switching Agent {agent_id} to {approach.value}: {e}")
             return False
     
     def _perform_approach_switch(self, agent, from_approach: LearningApproach, 
@@ -160,6 +184,68 @@ class LearningManager:
             
             elif to_approach == LearningApproach.DEEP_Q_LEARNING:
                 return self._setup_deep_q_learning(agent)
+            
+            elif to_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING and self.attention_deep_q_available:
+                from .attention_deep_q_learning import AttentionDeepQLearning
+                
+                # Get continuous state representation
+                state_data = self._get_agent_state_data(agent)
+                state_vector = self._convert_to_continuous_state(state_data)
+                
+                # Initialize attention-based deep Q-learning
+                attention_dqn = AttentionDeepQLearning(
+                    state_dim=len(state_vector),
+                    action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
+                    learning_rate=0.001
+                )
+                
+                # Store reference and replace action selection
+                agent._attention_dqn = attention_dqn
+                agent._original_choose_action = getattr(agent, 'choose_action', None)
+                
+                # Replace action selection method
+                def attention_choose_action():
+                    state_data = self._get_agent_state_data(agent)
+                    state_vector = self._convert_to_continuous_state(state_data)
+                    action = agent._attention_dqn.choose_action(state_vector, state_data)
+                    return action
+                
+                agent.choose_action = attention_choose_action
+                agent.learning_approach = to_approach.value
+                
+                print(f"🔍 Agent {agent.id} now using Attention Deep Q-Learning")
+                return True
+            
+            elif to_approach == LearningApproach.ELITE_IMITATION_LEARNING and self.elite_imitation_available:
+                # Store original action selection
+                agent._original_choose_action = getattr(agent, 'choose_action', None)
+                agent._use_elite_imitation = True
+                
+                # Enhanced action selection with elite imitation
+                def imitation_choose_action():
+                    # Get context for imitation learning
+                    context = self._get_agent_context(agent)
+                    current_state = self._get_agent_state(agent)
+                    
+                    # Try to get action from elite imitation
+                    if self.elite_imitation:
+                        imitation_action = self.elite_imitation.get_imitation_action(
+                            agent.id, current_state, context
+                        )
+                        if imitation_action is not None:
+                            return imitation_action
+                    
+                    # Fall back to original method
+                    if agent._original_choose_action:
+                        return agent._original_choose_action()
+                    else:
+                        return agent.choose_action() if hasattr(agent, 'choose_action') else 0
+                
+                agent.choose_action = imitation_choose_action
+                agent.learning_approach = to_approach.value
+                
+                print(f"🎭 Agent {agent.id} now using Elite Imitation Learning")
+                return True
             
             else:
                 print(f"⚠️ Unknown learning approach: {to_approach}")
@@ -758,3 +844,152 @@ class LearningManager:
         except Exception as e:
             print(f"⚠️ Error recommending approach: {e}")
             return LearningApproach.ENHANCED_Q_LEARNING 
+
+    def update_agent_performance(self, agent, step_count: int):
+        """Update agent performance for elite identification."""
+        if self.elite_imitation and hasattr(agent, 'id'):
+            try:
+                # Calculate performance metrics
+                performance_data = {
+                    'total_reward': getattr(agent, 'total_reward', 0.0),
+                    'survival_time': getattr(agent, 'steps', 0),
+                    'food_consumption': getattr(agent, 'total_reward', 0.0) * 0.1,  # Estimate
+                    'distance_traveled': abs(getattr(agent, 'body', type('', (), {'position': type('', (), {'x': 0})})()).position.x),
+                    'learning_efficiency': 0.5  # Default value
+                }
+                
+                self.elite_imitation.update_agent_performance(agent.id, performance_data)
+                
+                # Record trajectory for pattern extraction
+                if hasattr(agent, 'current_state') and hasattr(agent, 'current_action'):
+                    context = self._get_agent_context(agent)
+                    reward = getattr(agent, 'immediate_reward', 0.0)
+                    
+                    self.elite_imitation.record_agent_trajectory(
+                        agent.id, agent.current_state, agent.current_action, reward, context
+                    )
+                
+            except Exception as e:
+                logger.warning(f"Failed to update performance for agent {agent.id}: {e}")
+    
+    def update_elites(self, all_agents, current_step: int):
+        """Update elite agents periodically."""
+        if (self.elite_imitation and 
+            self.elite_imitation.should_update_elites(current_step)):
+            
+            agent_ids = [agent.id for agent in all_agents if hasattr(agent, 'id')]
+            self.elite_imitation.update_elites(agent_ids)
+    
+    def get_enhanced_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive statistics including enhanced learning systems."""
+        stats = {
+            'attention_deep_q_available': self.attention_deep_q_available,
+            'elite_imitation_available': self.elite_imitation_available,
+        }
+        
+        if self.elite_imitation:
+            stats['elite_imitation'] = self.elite_imitation.get_statistics()
+        
+        return stats
+    
+    def _get_agent_state_data(self, agent) -> Dict[str, Any]:
+        """Extract state data from agent for enhanced learning systems."""
+        try:
+            state_data = {}
+            
+            # Physical state
+            if hasattr(agent, 'body') and agent.body:
+                state_data['position'] = (agent.body.position.x, agent.body.position.y)
+                state_data['velocity'] = (agent.body.linearVelocity.x, agent.body.linearVelocity.y)
+                state_data['body_angle'] = agent.body.angle
+            
+            # Arm angles
+            if hasattr(agent, 'upper_arm') and hasattr(agent, 'lower_arm'):
+                state_data['arm_angles'] = {
+                    'shoulder': agent.upper_arm.angle if agent.upper_arm else 0,
+                    'elbow': agent.lower_arm.angle if agent.lower_arm else 0
+                }
+            
+            # Energy and health
+            state_data['energy'] = getattr(agent, 'energy_level', 1.0)
+            state_data['health'] = getattr(agent, 'health_level', 1.0)
+            
+            # Food information (simplified)
+            state_data['nearest_food'] = {
+                'distance': 10.0,  # Default value
+                'direction': 0.0,
+                'type': 0
+            }
+            
+            # Social context
+            state_data['nearby_agents'] = 2  # Default value
+            state_data['competition_pressure'] = 0.5
+            
+            return state_data
+            
+        except Exception as e:
+            logger.warning(f"Error extracting agent state data: {e}")
+            return {}
+    
+    def _convert_to_continuous_state(self, state_data: Dict[str, Any]) -> np.ndarray:
+        """Convert state data to continuous vector for neural networks."""
+        try:
+            # Use the attention deep Q-learning state representation if available
+            if self.attention_deep_q_available:
+                from .attention_deep_q_learning import AttentionDeepQLearning
+                temp_dqn = AttentionDeepQLearning()
+                return temp_dqn.get_enhanced_state_representation(state_data)
+            else:
+                # Fallback to simple state vector
+                return np.array([
+                    state_data.get('position', (0, 0))[0] / 100.0,
+                    state_data.get('position', (0, 0))[1] / 100.0,
+                    state_data.get('energy', 1.0),
+                    state_data.get('health', 1.0),
+                    state_data.get('body_angle', 0.0) / np.pi
+                ], dtype=np.float32)
+        except Exception as e:
+            logger.warning(f"Error converting to continuous state: {e}")
+            return np.zeros(5, dtype=np.float32)
+    
+    def _get_agent_context(self, agent) -> Dict[str, Any]:
+        """Get contextual information for elite imitation learning."""
+        try:
+            context = {}
+            
+            # Energy level context
+            energy = getattr(agent, 'energy_level', 1.0)
+            context['energy_level'] = energy
+            
+            # Food distance context (simplified)
+            context['food_distance'] = 10.0  # Default
+            
+            # Performance context
+            context['total_reward'] = getattr(agent, 'total_reward', 0.0)
+            context['steps_alive'] = getattr(agent, 'steps', 0)
+            
+            # Body state context
+            if hasattr(agent, 'body') and agent.body:
+                context['position_x'] = agent.body.position.x
+                context['position_y'] = agent.body.position.y
+                context['velocity'] = (agent.body.linearVelocity.x**2 + agent.body.linearVelocity.y**2)**0.5
+            
+            return context
+            
+        except Exception as e:
+            logger.warning(f"Error getting agent context: {e}")
+            return {}
+    
+    def _get_agent_state(self, agent):
+        """Get current state representation for imitation learning."""
+        try:
+            if hasattr(agent, 'current_state'):
+                return agent.current_state
+            elif hasattr(agent, 'get_discretized_state'):
+                return agent.get_discretized_state()
+            else:
+                # Fallback to simple state
+                return (0, 0)  # Default state
+        except Exception as e:
+            logger.warning(f"Error getting agent state: {e}")
+            return (0, 0) 
