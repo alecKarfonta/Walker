@@ -1,0 +1,17 @@
+Collecting pymunk
+  Obtaining dependency information for pymunk from https://files.pythonhosted.org/packages/76/4d/1dd3e673f0488de73135d80670769dfe2a2e1278af123162c8be0d557d24/pymunk-7.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading pymunk-7.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.2 kB)
+Collecting cffi>=1.17.1 (from pymunk)
+  Obtaining dependency information for cffi>=1.17.1 from https://files.pythonhosted.org/packages/8d/fb/4da72871d177d63649ac449aec2e8a29efe0274035880c7af59101ca2232/cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata
+  Downloading cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.5 kB)
+Requirement already satisfied: pycparser in /opt/conda/lib/python3.10/site-packages (from cffi>=1.17.1->pymunk) (2.21)
+Downloading pymunk-7.0.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 8.8 MB/s eta 0:00:00
+Downloading cffi-1.17.1-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (446 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 446.2/446.2 kB 35.5 MB/s eta 0:00:00
+Installing collected packages: cffi, pymunk
+  Attempting uninstall: cffi
+    Found existing installation: cffi 1.15.1
+    Uninstalling cffi-1.15.1:
+      Successfully uninstalled cffi-1.15.1
+Successfully installed cffi-1.17.1 pymunk-7.0.1

@@ -1,0 +1,191 @@
+version: '3.8'
+
+services:
+  # Walker Training Application
+  walker-training-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: walker-training-app
+    hostname: walker-training-app
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTHONPATH=/app
+      - MLFLOW_TRACKING_URI=http://walker-mlflow:5000
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_metrics
+      - GRAFANA_URL=http://walker-grafana:3000
+    ports:
+      - "7777:8080"  # Web interface
+      - "2322:2322"  # Dashboard exporter API
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ./evaluation_exports:/app/evaluation_exports
+      - ./experiments:/app/experiments
+      - ./mlruns:/app/mlruns
+      - walker-data:/app/data
+    depends_on:
+      - walker-mlflow
+      - walker-prometheus
+    networks:
+      - walker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # MLflow Tracking Server
+  walker-mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: walker-mlflow
+    hostname: walker-mlflow
+    ports:
+      - "5002:5000"
+    volumes:
+      - mlflow-data:/mlflow
+      - ./mlruns:/mlruns
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow/mlflow.db
+      - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
+    command: >
+      mlflow server 
+        --backend-store-uri sqlite:///mlflow/mlflow.db 
+        --default-artifact-root /mlflow/artifacts 
+        --host 0.0.0.0 
+        --port 5000 
+        --serve-artifacts
+    networks:
+      - walker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Prometheus Metrics Collection
+  walker-prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: walker-prometheus
+    hostname: walker-prometheus
+    ports:
+      - "9889:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.external-url=http://localhost:9091'
+    networks:
+      - walker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Grafana Visualization
+  walker-grafana:
+    image: grafana/grafana:10.2.0
+    container_name: walker-grafana
+    hostname: walker-grafana
+    ports:
+      - "3009:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/dashboard-configs:/var/lib/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=walker-admin-2024
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    depends_on:
+      - walker-prometheus
+    networks:
+      - walker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching and session management (optional)
+  redis:
+    image: redis:7.2-alpine
+    container_name: walker-redis
+    hostname: walker-redis
+    ports:
+      - "6380:6379"  # Non-default port to avoid conflicts
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - walker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL for advanced metrics storage (optional)
+  walker-postgres:
+    image: postgres:15-alpine
+    container_name: walker-postgres
+    hostname: walker-postgres
+    ports:
+      - "5434:5432"  # Non-default port to avoid conflicts
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=walker_metrics
+      - POSTGRES_USER=walker_user
+      - POSTGRES_PASSWORD=walker_secure_2024
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    networks:
+      - walker-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U walker_user -d walker_metrics"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  walker-data:
+    driver: local
+  mlflow-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  redis-data:
+    driver: local
+  postgres-data:
+    driver: local
+
+networks:
+  walker-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16 

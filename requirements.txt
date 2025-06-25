@@ -2,7 +2,6 @@
 numpy>=1.21.0
 box2d-py>=2.3.8
 pygame>=2.0.0
-pymunk>=6.2.0
 
 # Deep Learning - PyTorch with CUDA support
 torch>=2.0.0
@@ -34,4 +33,4 @@ numpy==1.26.4
 pandas==2.2.2
 pygame==2.5.2
 pytest==8.2.0
-box2d==2.3.10 
+box2d==2.3.10
