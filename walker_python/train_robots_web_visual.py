@@ -1370,64 +1370,75 @@ HTML_TEMPLATE = """
         // Alliance connections function removed for performance
         
         function drawFoodLines(data) {
-            if (!data.agents) return;
+            if (!data.agents || !focusedAgentId) {
+                console.log("🎯 No agents or no focused agent, skipping food lines");
+                return;
+            }
             
-            // Performance optimization: only draw for visible robots and limit to 15 lines max
-            const maxLines = 15;
-            let linesDrawn = 0;
+            // Only draw food line for the focused robot
+            const focusedAgent = data.agents.find(agent => agent.id === focusedAgentId);
+            if (!focusedAgent) {
+                console.log(`🎯 Focused agent ${focusedAgentId} not found in agent list`);
+                return;
+            }
             
-            for (const agent of data.agents) {
-                if (linesDrawn >= maxLines) break;
+            const ecosystem = focusedAgent.ecosystem || {};
+            const foodPosition = ecosystem.closest_food_position;
+            const signedXDistance = ecosystem.closest_food_signed_x_distance;
+            
+            console.log(`🎯 Food data for agent ${focusedAgentId}:`, {
+                foodPosition,
+                signedXDistance,
+                ecosystemKeys: Object.keys(ecosystem)
+            });
+            
+            // Only draw line if food position is available
+            if (foodPosition && Array.isArray(foodPosition) && foodPosition.length >= 2) {
+                const robotPos = [focusedAgent.body.x, focusedAgent.body.y];
+                const [foodX, foodY] = foodPosition;
                 
-                const ecosystem = agent.ecosystem || {};
-                const foodPosition = ecosystem.closest_food_position;
-                const signedXDistance = ecosystem.closest_food_signed_x_distance;
+                console.log(`🎯 Drawing food line from robot ${robotPos} to food ${foodPosition}`);
                 
-                // Only draw line if food position is available and reasonably close (reduced threshold)
-                if (foodPosition && signedXDistance !== undefined && Math.abs(signedXDistance) < 30) {
-                    const robotPos = [agent.body.x, agent.body.y];
-                    const [foodX, foodY] = foodPosition;
-                    
-                    // Skip if robot or food is far off-screen
-                    const screenDistance = Math.sqrt((robotPos[0] - cameraPosition.x) ** 2 + (robotPos[1] - cameraPosition.y) ** 2);
-                    if (screenDistance > 50 / cameraZoom) continue;
-                    
-                    // Simplified line color calculation
-                    const distance = Math.abs(signedXDistance);
-                    const intensity = Math.max(0.3, 1.0 - (distance / 20.0));
-                    const lineColor = signedXDistance > 0 ? 
-                        `rgba(100, 150, 255, ${intensity})` : 
-                        `rgba(255, 150, 100, ${intensity})`;
-                    
-                    // Draw simplified line (no dashes for performance)
-                    ctx.strokeStyle = lineColor;
-                    ctx.lineWidth = 0.12;
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(robotPos[0], robotPos[1]);
-                    ctx.lineTo(foodX, foodY);
-                    ctx.stroke();
-                    
-                    // Simplified arrow (only if distance is reasonable)
-                    if (distance < 20) {
-                        const angle = Math.atan2(foodY - robotPos[1], foodX - robotPos[0]);
-                        const arrowLength = 0.6;
-                        
-                        ctx.beginPath();
-                        ctx.moveTo(foodX, foodY);
-                        ctx.lineTo(
-                            foodX - arrowLength * Math.cos(angle - 0.5),
-                            foodY - arrowLength * Math.sin(angle - 0.5)
-                        );
-                        ctx.lineTo(
-                            foodX - arrowLength * Math.cos(angle + 0.5),
-                            foodY - arrowLength * Math.sin(angle + 0.5)
-                        );
-                        ctx.stroke();
-                    }
-                    
-                    linesDrawn++;
-                }
+                // Calculate distance for coloring
+                const distance = signedXDistance !== undefined ? Math.abs(signedXDistance) : 
+                                Math.sqrt((foodX - robotPos[0]) ** 2 + (foodY - robotPos[1]) ** 2);
+                
+                // Bright visible colors for debugging
+                const lineColor = signedXDistance !== undefined && signedXDistance > 0 ? 
+                    '#00FFFF' : '#FF6600'; // Cyan for right, orange for left
+                
+                // Thicker line for visibility
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 0.3;
+                
+                ctx.beginPath();
+                ctx.moveTo(robotPos[0], robotPos[1]);
+                ctx.lineTo(foodX, foodY);
+                ctx.stroke();
+                
+                // Draw arrow at food position
+                const angle = Math.atan2(foodY - robotPos[1], foodX - robotPos[0]);
+                const arrowLength = 1.0;
+                
+                ctx.strokeStyle = lineColor;
+                ctx.lineWidth = 0.2;
+                
+                ctx.beginPath();
+                ctx.moveTo(foodX, foodY);
+                ctx.lineTo(
+                    foodX - arrowLength * Math.cos(angle - 0.5),
+                    foodY - arrowLength * Math.sin(angle - 0.5)
+                );
+                ctx.lineTo(
+                    foodX - arrowLength * Math.cos(angle + 0.5),
+                    foodY - arrowLength * Math.sin(angle + 0.5)
+                );
+                ctx.lineTo(foodX, foodY);
+                ctx.stroke();
+                
+                console.log(`🎯 Food line drawn successfully`);
+            } else {
+                console.log(`🎯 No valid food position for agent ${focusedAgentId}`);
             }
         }
         
