@@ -578,16 +578,8 @@ class EnhancedEvolutionEngine:
         if not self.config.enable_environmental_challenges:
             return
         
-        # Spawn new obstacles
-        if random.random() < self.config.obstacle_spawn_rate:
-            obstacle = {
-                'type': random.choice(['boulder', 'pit', 'wall', 'moving_platform']),
-                'position': (random.uniform(-50, 50), random.uniform(0, 10)),
-                'size': random.uniform(2, 8),
-                'active': True
-            }
-            self.environment_obstacles.append(obstacle)
-            self._log_evolution_event('obstacle_spawned', obstacle)
+        # DISABLED: Dynamic obstacle spawning replaced by static world generation
+        # Obstacles are now generated at launch and persist throughout the simulation
         
         # Change terrain difficulty
         if random.random() < self.config.terrain_change_rate:

@@ -41,6 +41,9 @@ from src.agents.learning_manager import LearningManager, LearningApproach
 # Import elite robot management
 from src.persistence import EliteManager
 
+# Import realistic terrain generation
+from src.terrain_generation import generate_robot_scale_terrain
+
 # Configure logging - set debug level for Deep Q-Learning GPU training logs
 logging.basicConfig(
     level=logging.DEBUG,
@@ -1843,8 +1846,14 @@ class TrainingEnvironment:
         # Initialize ecosystem roles for existing agents
         self._initialize_ecosystem_roles()
 
-        # Initialize obstacle physics body tracking
+        # Initialize realistic terrain generation system (replaces dynamic obstacle spawning)
+        self.terrain_style = 'mixed'  # Default terrain style
+        self.terrain_mesh = None  # Store generated terrain mesh
+        self.terrain_collision_bodies = []  # Store terrain collision bodies
         self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
+        
+        # Generate realistic terrain at startup
+        self._generate_realistic_terrain()
 
         # Initialize elite robot management system
         self.elite_manager = EliteManager(
@@ -1918,6 +1927,7 @@ class TrainingEnvironment:
         print(f"   Auto-evolution every {self.evolution_interval}s")
         print(f"🌿 Ecosystem dynamics and visualization systems active")
         print(f"🏆 Elite preservation: {self.elite_manager.elite_per_generation} per generation, max {self.elite_manager.max_elite_storage} stored")
+        print(f"🏞️ Realistic terrain generated: {len(self.terrain_collision_bodies)} terrain bodies using '{self.terrain_style}' style")
 
     def _create_ground(self):
         """Creates a static ground body."""
@@ -1937,6 +1947,173 @@ class TrainingEnvironment:
             )
         )
         print(f"🔧 Ground setup complete with width {ground_width} for {self.num_agents} agents.")
+
+    def _generate_realistic_terrain(self):
+        """Generate robot-scale terrain with navigable features appropriate for 1.5m robots."""
+        try:
+            # Calculate world bounds based on robot scale and distribution
+            # Robot-scale terrain needs smaller, more detailed areas
+            ground_width = max(200, self.num_agents * 8)  # Smaller area for robot scale
+            world_bounds = (-ground_width // 2, 0, ground_width // 2, 30)  # Lower height for robots
+            
+            print(f"🤖 Generating robot-scale terrain with style '{self.terrain_style}'...")
+            print(f"🌍 World bounds: {world_bounds}")
+            
+            # Generate robot-scale terrain using the new terrain generation system
+            self.terrain_mesh, self.terrain_collision_bodies = generate_robot_scale_terrain(
+                style=self.terrain_style,
+                bounds=world_bounds,
+                resolution=0.25  # High resolution (25cm) for robot-scale details
+            )
+            
+            # Create physics bodies for all terrain features
+            self._create_terrain_physics_bodies()
+            
+            # Clear any existing environmental system obstacles since we're using terrain generation
+            if hasattr(self, 'environmental_system'):
+                self.environmental_system.obstacles = []
+            
+            # Clear any evolution engine obstacles since we're using terrain generation
+            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
+                self.evolution_engine.environment_obstacles = []
+            
+            print(f"✅ Realistic terrain generation complete!")
+            print(f"   🏔️ {len(self.terrain_collision_bodies)} terrain collision bodies")
+            print(f"   🏗️  {len(self.obstacle_bodies)} physics bodies created")
+            
+            # Show terrain statistics
+            if self.terrain_mesh:
+                import numpy as np
+                min_elevation = np.min(self.terrain_mesh.elevation)
+                max_elevation = np.max(self.terrain_mesh.elevation)
+                mean_elevation = np.mean(self.terrain_mesh.elevation)
+                
+                print(f"   📊 Terrain elevation:")
+                print(f"      Range: {min_elevation:.1f}m to {max_elevation:.1f}m")
+                print(f"      Average: {mean_elevation:.1f}m")
+                print(f"      Resolution: {self.terrain_mesh.resolution}m per grid cell")
+                
+        except Exception as e:
+            print(f"❌ Error generating realistic terrain: {e}")
+            # Fallback to empty terrain
+            self.terrain_collision_bodies = []
+            self.terrain_mesh = None
+
+    def _create_terrain_physics_bodies(self):
+        """Create Box2D physics bodies for all terrain features."""
+        try:
+            bodies_created = 0
+            
+            for i, terrain_body_data in enumerate(self.terrain_collision_bodies):
+                try:
+                    # Create unique ID for each terrain body
+                    terrain_id = f"terrain_{i}_{terrain_body_data['type']}"
+                    
+                    if terrain_id not in self.obstacle_bodies:
+                        body = self._create_single_terrain_body({
+                            'id': terrain_id,
+                            'type': terrain_body_data['type'],
+                            'position': terrain_body_data['position'],
+                            'size': terrain_body_data['size'],
+                            'height': terrain_body_data.get('height', terrain_body_data['size']),
+                            'friction': terrain_body_data.get('friction', 0.7),
+                            'properties': terrain_body_data.get('properties', {}),
+                            'source': 'terrain_generation'
+                        })
+                        
+                        if body:
+                            self.obstacle_bodies[terrain_id] = body
+                            bodies_created += 1
+                            
+                except Exception as e:
+                    print(f"⚠️ Error creating physics body for terrain segment {i}: {e}")
+            
+            if bodies_created > 0:
+                print(f"🏗️ Created {bodies_created} terrain physics bodies")
+            
+        except Exception as e:
+            print(f"❌ Error creating terrain physics bodies: {e}")
+    
+    def _create_single_terrain_body(self, terrain_data):
+        """Create a Box2D physics body for a single terrain segment."""
+        try:
+            position = terrain_data['position']
+            size = terrain_data['size']
+            height = terrain_data.get('height', size)
+            friction = terrain_data.get('friction', 0.7)
+            
+            # Create static body for terrain
+            terrain_body = self.world.CreateStaticBody(position=position)
+            
+            # Create terrain as a box (representing elevated ground)
+            fixture = terrain_body.CreateFixture(
+                shape=b2.b2PolygonShape(box=(size/2, height/2)),
+                density=0.0,  # Static body
+                friction=friction,
+                restitution=0.1,  # Slight bounce for natural feel
+                filter=b2.b2Filter(
+                    categoryBits=self.OBSTACLE_CATEGORY,
+                    maskBits=self.AGENT_CATEGORY  # Collide with agents
+                )
+            )
+            
+            # Store terrain type on the body for identification
+            terrain_body.userData = {
+                'type': 'terrain',
+                'terrain_type': terrain_data['type'],
+                'terrain_id': terrain_data['id'],
+                'elevation': height,
+                'properties': terrain_data.get('properties', {})
+            }
+            
+            return terrain_body
+            
+        except Exception as e:
+            print(f"⚠️ Error creating terrain body: {e}")
+            return None
+
+    def change_terrain_style(self, new_style: str):
+        """Change the terrain style and regenerate the terrain."""
+        # Robot-scale terrain styles
+        robot_terrain_styles = [
+            'flat', 'gentle_hills', 'obstacle_course', 'slopes_and_ramps', 
+            'rough_terrain', 'varied', 'mixed'
+        ]
+        
+        if new_style not in robot_terrain_styles:
+            print(f"⚠️ Unknown terrain style '{new_style}'. Available styles: {robot_terrain_styles}")
+            return False
+        
+        print(f"🏞️ Changing terrain from '{self.terrain_style}' to '{new_style}'...")
+        
+        # Clean up existing terrain
+        self._cleanup_all_terrain()
+        
+        # Update style and regenerate
+        self.terrain_style = new_style
+        self._generate_realistic_terrain()
+        
+        print(f"✅ Terrain changed to '{new_style}' style")
+        return True
+
+    def _cleanup_all_terrain(self):
+        """Remove all existing terrain physics bodies."""
+        try:
+            for terrain_id, body in self.obstacle_bodies.items():
+                try:
+                    if body:
+                        self.world.DestroyBody(body)
+                except Exception as e:
+                    print(f"⚠️ Error destroying terrain body {terrain_id}: {e}")
+            
+            self.obstacle_bodies.clear()
+            self.terrain_collision_bodies.clear()
+            self.terrain_mesh = None
+            
+            print(f"🧹 Cleaned up all existing terrain")
+            
+        except Exception as e:
+            print(f"❌ Error cleaning up terrain: {e}")
 
     def _initialize_ecosystem_roles(self):
         """Initialize ecosystem roles for all agents based on their characteristics."""
@@ -4150,42 +4327,35 @@ class TrainingEnvironment:
             return {'distance': float('inf'), 'food_type': 'error calculating', 'food_position': None, 'signed_x_distance': float('inf')}
 
     def _create_obstacle_physics_bodies(self):
-        """Create Box2D physics bodies for obstacles that don't have them yet."""
+        """Create Box2D physics bodies for obstacles that don't have them yet. 
+        NOTE: This is kept for backward compatibility but static world generation is now preferred."""
         try:
             if not hasattr(self, 'obstacle_bodies'):
                 self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
             
-            # Get obstacles from environmental system
+            # MODIFIED: Reduced dynamic obstacle creation since we now use static world generation
+            # Only create physics bodies for any remaining dynamic obstacles (minimal)
             obstacles_to_create = []
             
-            # Environmental system obstacles
+            # NOTE: Environmental system and evolution engine obstacle spawning has been disabled
+            # Static obstacles are created once during initialization via _generate_static_world()
+            
+            # Only process existing moving obstacles or special dynamic obstacles if any exist
             if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
                 for i, obstacle in enumerate(self.environmental_system.obstacles):
-                    obstacle_id = f"env_{i}_{obstacle['type']}"
-                    if obstacle_id not in self.obstacle_bodies:
-                        obstacles_to_create.append({
-                            'id': obstacle_id,
-                            'type': obstacle['type'],
-                            'position': obstacle['position'],
-                            'size': 2.0,  # Default size
-                            'source': 'environmental'
-                        })
-            
-            # Evolution engine obstacles
-            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
-                for i, obstacle in enumerate(self.evolution_engine.environment_obstacles):
-                    if obstacle.get('active', True):
-                        obstacle_id = f"evo_{i}_{obstacle['type']}"
+                    # Only create physics bodies for moving obstacles that weren't created statically
+                    if hasattr(obstacle, 'movement_pattern') and obstacle.movement_pattern:
+                        obstacle_id = f"moving_{i}_{obstacle.type.value if hasattr(obstacle, 'type') else 'unknown'}"
                         if obstacle_id not in self.obstacle_bodies:
                             obstacles_to_create.append({
                                 'id': obstacle_id,
-                                'type': obstacle['type'],
-                                'position': obstacle['position'],
-                                'size': obstacle.get('size', 2.0),
-                                'source': 'evolution'
+                                'type': obstacle.type.value if hasattr(obstacle, 'type') else 'boulder',
+                                'position': obstacle.position,
+                                'size': obstacle.size,
+                                'source': 'environmental_moving'
                             })
             
-            # Create physics bodies for new obstacles
+            # Create physics bodies for any remaining dynamic obstacles
             bodies_created = 0
             for obstacle_data in obstacles_to_create:
                 try:
@@ -4194,10 +4364,10 @@ class TrainingEnvironment:
                         self.obstacle_bodies[obstacle_data['id']] = body
                         bodies_created += 1
                 except Exception as e:
-                    print(f"⚠️ Error creating physics body for obstacle {obstacle_data['id']}: {e}")
+                    print(f"⚠️ Error creating physics body for dynamic obstacle {obstacle_data['id']}: {e}")
             
             if bodies_created > 0:
-                print(f"🗿 Created {bodies_created} obstacle physics bodies. Total active: {len(self.obstacle_bodies)}")
+                print(f"🏃 Created {bodies_created} dynamic obstacle physics bodies. Total active: {len(self.obstacle_bodies)}")
             
             # Clean up bodies for obstacles that no longer exist
             self._cleanup_removed_obstacles()
@@ -4317,7 +4487,29 @@ class TrainingEnvironment:
         try:
             obstacles_for_ui = []
             
-            # Add obstacles that have physics bodies
+            # Add terrain segments from the generated terrain
+            if hasattr(self, 'terrain_collision_bodies'):
+                for terrain_body in self.terrain_collision_bodies:
+                    terrain_type = terrain_body.get('type', 'terrain_segment')
+                    position = terrain_body.get('position', (0, 0))
+                    size = terrain_body.get('size', 2.0)
+                    height = terrain_body.get('height', size)
+                    
+                    # Convert position tuple to array for JavaScript
+                    position_array = [position[0], position[1]]
+                    
+                    # Add terrain to UI data
+                    obstacles_for_ui.append({
+                        'type': terrain_type,
+                        'position': position_array,
+                        'size': size,
+                        'height': height,
+                        'source': 'terrain_generation',
+                        'danger_level': 0.2,  # Terrain is natural, less dangerous
+                        'active': True
+                    })
+            
+            # Add obstacles that have physics bodies (including any remaining dynamic ones)
             if hasattr(self, 'obstacle_bodies'):
                 for obstacle_id, body in self.obstacle_bodies.items():
                     if body and hasattr(body, 'userData') and body.userData:
@@ -4339,11 +4531,24 @@ class TrainingEnvironment:
                                     y_coords = [v[1] for v in vertices]
                                     size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
                         
+                        # Convert position tuple to array for JavaScript
+                        position_array = [position[0], position[1]]
+                        
+                        # Add danger level based on obstacle type
+                        danger_level = 0.5  # Default
+                        if obstacle_type == 'pit':
+                            danger_level = 0.8  # High danger
+                        elif obstacle_type == 'wall':
+                            danger_level = 0.3  # Low danger
+                        elif obstacle_type == 'boulder':
+                            danger_level = 0.6  # Medium danger
+                        
                         obstacles_for_ui.append({
                             'id': obstacle_id,
                             'type': obstacle_type,
-                            'position': position,
+                            'position': position_array,  # JavaScript expects array [x, y]
                             'size': size,
+                            'danger_level': danger_level,  # JavaScript expects this for coloring
                             'active': True
                         })
             
@@ -4548,6 +4753,108 @@ def switch_learning_approach():
         return jsonify({'status': 'success', 'agent_id': agent_id, 'approach': approach})
     else:
         return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'}), 500
+
+@app.route('/change_terrain_style', methods=['POST'])
+def change_terrain_style():
+    """Change the terrain generation style and regenerate the terrain."""
+    try:
+        data = request.get_json()
+        if not data or 'style' not in data:
+            return jsonify({'status': 'error', 'message': 'Missing style parameter'}), 400
+        
+        new_style = data['style']
+        
+        # Get available robot-scale terrain styles
+        robot_terrain_styles = [
+            'flat', 'gentle_hills', 'obstacle_course', 'slopes_and_ramps', 
+            'rough_terrain', 'varied', 'mixed'
+        ]
+        
+        if new_style not in robot_terrain_styles:
+            return jsonify({
+                'status': 'error', 
+                'message': f'Unknown style. Available: {robot_terrain_styles}'
+            }), 400
+        
+        # Change the terrain style
+        success = env.change_terrain_style(new_style)
+        
+        if success:
+            # Robot-scale terrain style descriptions
+            style_descriptions = {
+                'flat': 'Mostly flat terrain with occasional small features',
+                'gentle_hills': 'Small, navigable hills and gentle slopes',
+                'obstacle_course': 'Various sized obstacles and challenges',
+                'slopes_and_ramps': 'Terrain focused on slopes and ramps',
+                'rough_terrain': 'Rough, uneven terrain',
+                'varied': 'Varied terrain with all feature types',
+                'mixed': 'Balanced mixed terrain good for robot training'
+            }
+            
+            return jsonify({
+                'status': 'success', 
+                'message': f'Terrain changed to {new_style}',
+                'style': new_style,
+                'description': style_descriptions.get(new_style, 'Robot-scale terrain'),
+                'terrain_bodies_created': len(env.terrain_collision_bodies)
+            })
+        else:
+            return jsonify({'status': 'error', 'message': 'Failed to change terrain style'}), 500
+            
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/get_terrain_styles', methods=['GET'])
+def get_terrain_styles():
+    """Get available robot-scale terrain styles."""
+    try:
+        # Robot-scale terrain styles with descriptions
+        robot_terrain_styles = {
+            'flat': {
+                'name': 'flat',
+                'description': 'Mostly flat terrain with occasional small features',
+                'style': 'flat'
+            },
+            'gentle_hills': {
+                'name': 'gentle_hills',
+                'description': 'Small, navigable hills and gentle slopes',
+                'style': 'gentle_hills'
+            },
+            'obstacle_course': {
+                'name': 'obstacle_course',
+                'description': 'Various sized obstacles and challenges',
+                'style': 'obstacle_course'
+            },
+            'slopes_and_ramps': {
+                'name': 'slopes_and_ramps',
+                'description': 'Terrain focused on slopes and ramps',
+                'style': 'slopes_and_ramps'
+            },
+            'rough_terrain': {
+                'name': 'rough_terrain',
+                'description': 'Rough, uneven terrain',
+                'style': 'rough_terrain'
+            },
+            'varied': {
+                'name': 'varied',
+                'description': 'Varied terrain with all feature types',
+                'style': 'varied'
+            },
+            'mixed': {
+                'name': 'mixed',
+                'description': 'Balanced mixed terrain good for robot training',
+                'style': 'mixed'
+            }
+        }
+        
+        return jsonify({
+            'status': 'success',
+            'styles': robot_terrain_styles,
+            'current_style': env.terrain_style if hasattr(env, 'terrain_style') else 'mixed'
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/evolution_event', methods=['POST'])
 def evolution_event():

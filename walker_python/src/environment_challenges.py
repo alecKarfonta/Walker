@@ -30,18 +30,8 @@ class EnvironmentalSystem:
             if old_weather != self.weather:
                 print(f"🌦️ Weather changed to {self.weather.value}")
         
-        # Spawn obstacles randomly
-        if random.random() < 0.1:  # 10% chance
-            obstacle = {
-                'type': random.choice(['boulder', 'pit', 'wall']),
-                'position': (random.uniform(-50, 50), random.uniform(0, 20)),
-                'created': generation
-            }
-            self.obstacles.append(obstacle)
-            print(f"🗿 New {obstacle['type']} obstacle spawned")
-        
-        # Remove old obstacles
-        self.obstacles = [obs for obs in self.obstacles if generation - obs['created'] < 20]
+        # DISABLED: Dynamic obstacle spawning replaced by static world generation
+        # Obstacles are now generated at launch and persist throughout the simulation
     
     def get_effects(self, position: Tuple[float, float]) -> Dict[str, float]:
         """Get environmental effects at position"""

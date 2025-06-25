@@ -149,30 +149,11 @@ class EnvironmentalChallengeSystem:
         return updates
     
     def _update_obstacles(self, season_effects: Dict) -> Dict[str, Any]:
-        """Update obstacle spawning and removal."""
+        """Update obstacle spawning and removal - DISABLED: Using static world generation."""
         updates = {'obstacles_added': 0, 'obstacles_removed': 0}
         
-        # Remove expired obstacles
-        initial_count = len(self.obstacles)
-        self.obstacles = [obs for obs in self.obstacles if self._should_keep_obstacle(obs)]
-        removed_count = initial_count - len(self.obstacles)
-        updates['obstacles_removed'] = removed_count
-        
-        # Spawn new obstacles
-        spawn_rate = self.obstacle_spawn_rate * season_effects.get('obstacles', 1.0)
-        
-        while len(self.obstacles) < self.max_obstacles and random.random() < spawn_rate:
-            obstacle = self._create_random_obstacle()
-            self.obstacles.append(obstacle)
-            updates['obstacles_added'] += 1
-            
-            self._log_event('obstacle_spawned', {
-                'type': obstacle.type.value,
-                'position': obstacle.position,
-                'size': obstacle.size
-            })
-        
-        # Update moving obstacles
+        # DISABLED: Dynamic obstacle spawning replaced by static world generation
+        # Only update existing moving obstacles if any exist
         for obstacle in self.obstacles:
             if obstacle.movement_pattern:
                 self._update_obstacle_movement(obstacle)
