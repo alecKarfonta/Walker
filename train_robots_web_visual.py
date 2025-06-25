@@ -334,7 +334,7 @@ HTML_TEMPLATE = """
             <button id="resetView" style="position:absolute; top:10px; left:10px; z-index:50;">Reset View</button>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
             <button id="testCarnivoreFeeding" onclick="testCarnivoreFeeding()" style="position:absolute; top:10px; left:250px; z-index:50; background:#FF4444; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Test Carnivore</button>
-            <div id="focus-indicator" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); z-index:50; background:rgba(231, 76, 60, 0.95); color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:2px solid rgba(255,255,255,0.2);">
+            <div id="focus-indicator" style="display:none; position:absolute; top:1%; left:50%; transform:translate(-50%, -50%); z-index:50; background:rgba(231, 76, 60, 0.95); color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:2px solid rgba(255,255,255,0.2);">
                 🎯 Focused on Agent: <span id="focused-agent-id">-</span>
             </div>
         </div>
@@ -909,8 +909,8 @@ HTML_TEMPLATE = """
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Closest Food:</span>
-                            <span class="detail-value" style="color: ${ecosystem.closest_food_distance === Infinity || ecosystem.closest_food_distance > 50 ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
-                                ${ecosystem.closest_food_distance === Infinity ? 'None available' : ecosystem.closest_food_distance.toFixed(1) + 'm'}
+                            <span class="detail-value" style="color: ${ecosystem.closest_food_distance >= 999999 || ecosystem.closest_food_distance > 50 ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
+                                ${ecosystem.closest_food_distance >= 999999 ? 'None available' : ecosystem.closest_food_distance.toFixed(1) + 'm'}
                             </span>
                         </div>
                         <div class="detail-row">
@@ -1151,12 +1151,15 @@ HTML_TEMPLATE = """
                 ctx.fill();
                 ctx.stroke();
                 
-                // Add danger indicator for high-danger obstacles
+                // Add danger indicator for high-danger obstacles - fix text flipping
                 if (dangerLevel > 0.5) {
+                    ctx.save();
+                    ctx.scale(1, -1); // Counter the Y-axis flip for text
                     ctx.fillStyle = '#FF0000';
                     ctx.font = `${size/3}px Arial`;
                     ctx.textAlign = 'center';
-                    ctx.fillText('⚠', x, y + size/6);
+                    ctx.fillText('⚠', x, -(y + size/6));
+                    ctx.restore();
                 }
             });
         }
@@ -1222,7 +1225,9 @@ HTML_TEMPLATE = """
                     ctx.fill();
                     ctx.stroke();
                     
-                    // Draw resource type icon
+                    // Draw resource type icon - fix text flipping
+                    ctx.save();
+                    ctx.scale(1, -1); // Counter the Y-axis flip for text
                     ctx.fillStyle = '#FFFFFF';
                     ctx.font = '0.8px Arial';
                     ctx.textAlign = 'center';
@@ -1232,7 +1237,8 @@ HTML_TEMPLATE = """
                         'insects': '🐛',
                         'seeds': '🌰'
                     };
-                    ctx.fillText(typeIcons[food.type] || '🍃', x, y + 0.3);
+                    ctx.fillText(typeIcons[food.type] || '🍃', x, -(y + 0.3));
+                    ctx.restore();
                     
                     // Depletion warning animations disabled for performance
                     
@@ -1249,11 +1255,14 @@ HTML_TEMPLATE = """
                     ctx.fillStyle = ratio > 0.5 ? '#4CAF50' : ratio > 0.2 ? '#FF9800' : '#F44336';
                     ctx.fillRect(x - barWidth/2, barY, barWidth * ratio, barHeight);
                     
-                    // Amount text
+                    // Amount text - fix text flipping
+                    ctx.save();
+                    ctx.scale(1, -1); // Counter the Y-axis flip for text
                     ctx.fillStyle = '#FFFFFF';
                     ctx.font = '0.4px Arial';
                     ctx.textAlign = 'center';
-                    ctx.fillText(`${amount.toFixed(0)}/${maxCapacity.toFixed(0)}`, x, barY - 0.2);
+                    ctx.fillText(`${amount.toFixed(0)}/${maxCapacity.toFixed(0)}`, x, -(barY - 0.2));
+                    ctx.restore();
                 });
             }
         }
@@ -1352,11 +1361,14 @@ HTML_TEMPLATE = """
                     ctx.setLineDash([]);
                     ctx.globalAlpha = 1.0;
                     
-                    // Energy gain indicator at robot position
+                    // Energy gain indicator at robot position - fix text flipping
+                    ctx.save();
+                    ctx.scale(1, -1); // Counter the Y-axis flip for text
                     ctx.fillStyle = lineColor;
                     ctx.font = '0.6px Arial';
                     ctx.textAlign = 'center';
-                                         ctx.fillText(`+${consumption.energy_gained.toFixed(1)}`, agentPos[0], agentPos[1] - 1.5);
+                    ctx.fillText(`+${consumption.energy_gained.toFixed(1)}`, agentPos[0], -(agentPos[1] - 1.5));
+                    ctx.restore();
                  });
              }
         }
@@ -1390,28 +1402,36 @@ HTML_TEMPLATE = """
             };
             
             if (isFocused || speed > 0.5) {
+                // Fix text flipping by temporarily countering the Y-axis flip
+                ctx.save();
+                ctx.scale(1, -1); // Counter the Y-axis flip
                 ctx.fillStyle = '#FFFFFF';
                 ctx.font = '1px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText(roleSymbols[role] || '🤖', x, baseY + barSpacing * 2 + 0.8);
+                ctx.fillText(roleSymbols[role] || '🤖', x, -(baseY + barSpacing * 2 + 0.8));
+                ctx.restore();
             }
             
-                            // Status indicator for active agents
-                if (status !== 'idle' && speed > 0.1) {
-                    const statusSymbols = {
-                        'hunting': '🎯',
-                        'feeding': '🍃',
-                        'fleeing': '💨',
-                        'territorial': '🛡️',
-                        'moving': '➡️',
-                        'active': '⚡'
-                    };
-                    
-                    ctx.fillStyle = STATUS_COLORS[status] || '#FFFFFF';
-                    ctx.font = '0.8px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(statusSymbols[status] || '●', x + 1.5, y + 2.0);
-                }
+            // Status indicator for active agents
+            if (status !== 'idle' && speed > 0.1) {
+                const statusSymbols = {
+                    'hunting': '🎯',
+                    'feeding': '🍃',
+                    'fleeing': '💨',
+                    'territorial': '🛡️',
+                    'moving': '➡️',
+                    'active': '⚡'
+                };
+                
+                // Fix text flipping by temporarily countering the Y-axis flip
+                ctx.save();
+                ctx.scale(1, -1); // Counter the Y-axis flip
+                ctx.fillStyle = STATUS_COLORS[status] || '#FFFFFF';
+                ctx.font = '0.8px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(statusSymbols[status] || '●', x + 1.5, -(y + 2.0));
+                ctx.restore();
+            }
         }
         
         // Movement trail function removed for performance optimization
@@ -1771,7 +1791,8 @@ class TrainingEnvironment:
     """
     def __init__(self, num_agents=30, enable_evaluation=True):  # Reduced from 50 to 30 to save memory
         self.num_agents = num_agents
-        self.world = b2.b2World(gravity=(0, -9.8))
+        # CRITICAL FIX: Disable sleeping at the world level to prevent static bodies from going to sleep
+        self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
         self.dt = 1.0 / 60.0  # 60 FPS
 
         # World bounds for resetting fallen agents
@@ -2021,9 +2042,6 @@ class TrainingEnvironment:
         """Creates a static ground body."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
-        # Ensure the ground body is awake for proper collision detection with robots
-        ground_body.awake = True
-        
         # Calculate ground width to accommodate evolution engine spawn area
         # Evolution engine uses: max(800, population_size * min_spacing * 1.5)
         # With min_spacing = 12, this ensures ground covers the full spawn area
@@ -2144,9 +2162,6 @@ class TrainingEnvironment:
             # Create static body for terrain
             terrain_body = self.world.CreateStaticBody(position=position)
             
-            # Ensure the body is awake for proper collision detection with robots
-            terrain_body.awake = True
-            
             # Create terrain as a box (representing elevated ground)
             fixture = terrain_body.CreateFixture(
                 shape=b2.b2PolygonShape(box=(size/2, height/2)),
@@ -2155,7 +2170,7 @@ class TrainingEnvironment:
                 restitution=0.1,  # Slight bounce for natural feel
                 filter=b2.b2Filter(
                     categoryBits=self.OBSTACLE_CATEGORY,
-                    maskBits=self.AGENT_CATEGORY  # Collide with agents
+                    maskBits=self.AGENT_CATEGORY  # ONLY collide with agents, NOT other obstacles (performance optimization)
                 )
             )
             
@@ -3953,7 +3968,7 @@ class TrainingEnvironment:
         if not self.agents:
             return None
         
-        best_distance = -float('inf')
+        best_distance = -999999
         leader = None
         
         for agent in self.agents:
@@ -4227,12 +4242,14 @@ class TrainingEnvironment:
             except Exception as e:
                 print(f"⚠️  Error getting focused agent position: {e}")
                 self.focused_agent = None  # Clear invalid focus
-                self.camera_target = (0, 0)
+                # Keep camera at current position instead of resetting to origin
+                self.camera_target = self.camera_position
         else:
-            # If no agent is focused or focused agent is invalid, smoothly return to the origin
+            # If no agent is focused, keep camera at current position instead of returning to origin
             if self.focused_agent and (getattr(self.focused_agent, '_destroyed', False) or not self.focused_agent.body):
                 self.focused_agent = None  # Clear invalid focus
-            self.camera_target = (0, 0)
+            # Don't reset to (0, 0) - keep current position when focus is cleared
+            self.camera_target = self.camera_position
             
         # Smoothly interpolate camera position and zoom
         self.camera_position = (
@@ -4348,6 +4365,12 @@ class TrainingEnvironment:
         self._zoom_override = 1.0  # Send reset zoom to frontend
         print("🔍 SERVER: User zoom preferences reset")
     
+    def reset_camera_position(self):
+        """Reset camera position to origin (called by Reset View)."""
+        self.camera_position = (0, 0)
+        self.camera_target = (0, 0)
+        print("🎯 SERVER: Camera position reset to origin")
+    
     def clear_zoom_override(self):
         """Clear the zoom override flag after it's been sent."""
         if hasattr(self, '_zoom_override'):
@@ -4415,7 +4438,7 @@ class TrainingEnvironment:
         """
         try:
             if getattr(agent, '_destroyed', False) or not agent.body:
-                return {'distance': float('inf'), 'food_type': 'unknown', 'source_type': 'none', 'food_position': None, 'signed_x_distance': float('inf')}
+                return {'distance': 999999, 'food_type': 'unknown', 'source_type': 'none', 'food_position': None, 'signed_x_distance': 999999}
             
             agent_pos = (agent.body.position.x, agent.body.position.y)
             agent_id = str(agent.id)
@@ -4487,15 +4510,15 @@ class TrainingEnvironment:
             if not potential_food_sources:
                 # ROLE-SPECIFIC MESSAGES: Differentiate between no food and no valid targets
                 if agent_role == 'carnivore':
-                    return {'distance': float('inf'), 'food_type': 'no herbivore/scavenger/omnivore prey available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': float('inf')}
+                    return {'distance': 999999, 'food_type': 'no herbivore/scavenger/omnivore prey available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': 999999}
                 elif agent_role == 'scavenger':
-                    return {'distance': float('inf'), 'food_type': 'no weakened robots available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': float('inf')}
+                    return {'distance': 999999, 'food_type': 'no weakened robots available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': 999999}
                 else:
-                    return {'distance': float('inf'), 'food_type': 'no environmental food available', 'source_type': 'environment', 'food_position': None, 'signed_x_distance': float('inf')}
+                    return {'distance': 999999, 'food_type': 'no environmental food available', 'source_type': 'environment', 'food_position': None, 'signed_x_distance': 999999}
             
             # Find the nearest/most attractive food source for this agent type
             best_target = None
-            best_score = float('inf')
+            best_score = 999999
             
             for target in potential_food_sources:
                 target_pos = target['position']
@@ -4517,7 +4540,7 @@ class TrainingEnvironment:
                     best_distance = effective_distance
             
             if best_target is None:
-                return {'distance': float('inf'), 'food_type': 'none found', 'source_type': 'none', 'food_position': None, 'signed_x_distance': float('inf')}
+                return {'distance': 999999, 'food_type': 'none found', 'source_type': 'none', 'food_position': None, 'signed_x_distance': 999999}
             
             # Calculate signed x-axis distance (positive = right, negative = left)
             target_pos = best_target['position']
@@ -4541,7 +4564,7 @@ class TrainingEnvironment:
             
         except Exception as e:
             print(f"⚠️ Error calculating closest food distance for agent {getattr(agent, 'id', 'unknown')}: {e}")
-            return {'distance': float('inf'), 'food_type': 'error calculating', 'food_position': None, 'signed_x_distance': float('inf')}
+            return {'distance': 999999, 'food_type': 'error calculating', 'food_position': None, 'signed_x_distance': 999999}
 
     def _create_obstacle_physics_bodies(self):
         """Create Box2D physics bodies for obstacles that don't have them yet. 
@@ -4602,9 +4625,6 @@ class TrainingEnvironment:
             # Create static body for obstacle
             obstacle_body = self.world.CreateStaticBody(position=position)
             
-            # Ensure the body is awake for proper collision detection with robots
-            obstacle_body.awake = True
-            
             # Choose shape based on obstacle type
             if obstacle_type in ['boulder', 'wall']:
                 # Rectangular obstacles
@@ -4616,10 +4636,10 @@ class TrainingEnvironment:
                     density=0.0,  # Static body
                     friction=0.7,
                     restitution=0.2,
-                    filter=b2.b2Filter(
-                        categoryBits=self.OBSTACLE_CATEGORY,
-                        maskBits=self.AGENT_CATEGORY  # Collide with agents
-                    )
+                                    filter=b2.b2Filter(
+                    categoryBits=self.OBSTACLE_CATEGORY,
+                    maskBits=self.AGENT_CATEGORY  # ONLY collide with agents, NOT other obstacles (performance optimization)
+                )
                 )
                 
             elif obstacle_type == 'pit':
@@ -5020,9 +5040,10 @@ def update_zoom():
 
 @app.route('/reset_view', methods=['POST'])
 def reset_view():
-    # Clear focus and reset zoom preferences
+    # Clear focus, reset zoom preferences, and reset camera position
     env.focus_on_agent(None)
     env.reset_user_zoom()
+    env.reset_camera_position()
     
     return jsonify({'status': 'success', 'message': 'View reset'})
 
