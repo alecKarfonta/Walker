@@ -14,13 +14,13 @@ A Python recreation of the Walker project - a simulated environment for training
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd walker_python
+git clone https://github.com/alecKarfonta/Walker
+cd Walker
 ```
 
-2. Install dependencies:
+2. Build
 ```bash
-pip install -r requirements.txt
+docker compose up -d --build
 ```
 
 ## Usage
