@@ -1,4 +1,0 @@
-<TextureAtlas imagePath="sheet.png">
-	<SubTexture name="playButtonDown.png" x="0" y="101" width="255" height="99"/>
-	<SubTexture name="playButtonUp.png" x="0" y="0" width="255" height="99"/>
-</TextureAtlas>
