@@ -1,11 +1,11 @@
 # Walker Python
 
-A Python recreation of the Walker project - a reinforcement learning environment for training physics-based robots using evolutionary algorithms.
+A Python recreation of the Walker project - a simulated environment for training populations of based robots using reinforcement learning evolutionary algorithms.
 
 ## Features
 
-- **Physics Simulation**: Realistic 2D physics using Pymunk (Python port of Chipmunk)
-- **Reinforcement Learning**: Q-learning agents with discrete state/action spaces
+- **Physics Simulation**: Realistic 2D physics using Box2d
+- **Reinforcement Learning**: Various implementations of Q-Learning
 - **Evolutionary Algorithm**: Population-based evolution with genetic operators
 - **Real-time Visualization**: Pygame-based rendering and debugging
 - **Interactive GUI**: Parameter adjustment and simulation control
@@ -47,45 +47,3 @@ walker_python/
 ├── requirements.txt    # Python dependencies
 └── run.py             # Main entry point
 ```
-
-## Development Status
-
-### Phase 1: Core Physics Engine ✅
-- [x] Physics world setup with Pymunk
-- [x] Body factory for creating different body types
-- [x] Contact handler for collision detection
-- [x] Ground terrain generation
-- [x] Basic physics simulation
-
-### Phase 2: Agent System (In Progress)
-- [ ] Base agent architecture
-- [ ] Q-learning implementation
-- [ ] Basic robot design
-- [ ] Learning algorithm testing
-
-### Phase 3: Population Management (Planned)
-- [ ] Population controller
-- [ ] Evolution algorithms
-- [ ] Selection strategies
-
-### Phase 4: Rendering System (Planned)
-- [ ] Basic rendering pipeline
-- [ ] Camera system
-- [ ] Debug visualization
-
-### Phase 5: User Interface (Planned)
-- [ ] GUI framework setup
-- [ ] Control windows
-- [ ] Interactive elements
-
-## Technology Stack
-
-- **Python 3.9+**: Main programming language
-- **Pymunk**: 2D physics engine (Python port of Chipmunk)
-- **Pygame**: Graphics and input handling
-- **NumPy**: Numerical computations
-- **Pandas**: Data handling
-
-## License
-
-[Add your license here] 
