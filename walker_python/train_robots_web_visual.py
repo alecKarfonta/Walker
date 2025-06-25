@@ -1643,29 +1643,37 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def convert_numpy_types(obj):
-    """Convert numpy types to JSON-serializable types."""
-    if isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, dict):
-        # Create a copy of the dictionary to avoid "dictionary changed size during iteration" error
-        # This happens when Q-learning agents are actively updating the Q-table while we read it
-        try:
-            dict_copy = dict(obj)  # Make a shallow copy
-            return {key: convert_numpy_types(value) for key, value in dict_copy.items()}
-        except RuntimeError:
-            # If we still get a RuntimeError, return an empty dict as fallback
-            return {}
-    elif isinstance(obj, list):
-        return [convert_numpy_types(item) for item in obj]
-    elif isinstance(obj, tuple):
-        return tuple(convert_numpy_types(item) for item in obj)
+def safe_convert_numeric(value):
+    """Convert numpy numeric types to JSON-serializable types without recursion."""
+    if isinstance(value, np.integer):
+        return int(value)
+    elif isinstance(value, np.floating):
+        return float(value)
+    elif isinstance(value, np.ndarray):
+        return value.tolist()
+    elif isinstance(value, (int, float, str, bool)) or value is None:
+        return value
     else:
-        return obj
+        # For other types, try to convert to float if possible, otherwise return as-is
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return value
+
+def safe_convert_list(lst):
+    """Convert a list of potentially numpy values efficiently."""
+    if not lst:
+        return lst
+    return [safe_convert_numeric(item) for item in lst]
+
+def safe_convert_position(pos):
+    """Convert a position tuple/list safely."""
+    if hasattr(pos, 'x') and hasattr(pos, 'y'):
+        # Box2D vector
+        return (float(pos.x), float(pos.y))
+    elif isinstance(pos, (tuple, list)) and len(pos) >= 2:
+        return (safe_convert_numeric(pos[0]), safe_convert_numeric(pos[1]))
+    return pos
 
 class TrainingEnvironment:
     """
@@ -3315,7 +3323,7 @@ class TrainingEnvironment:
                     print(f"⚠️  Error creating robot details: {e}")
                     robot_details = []
 
-                # 5. Get full agent data for robot details panel with enhanced visualization data
+                # 5. Get minimal agent data for rendering + detailed data for focused agent only
                 agents_data = []
                 try:
                     for agent in current_agents:
@@ -3323,64 +3331,70 @@ class TrainingEnvironment:
                             continue
                             
                         agent_id = agent.id
+                        is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
                         
-                        # Get ecosystem and health data
-                        agent_status = self.agent_statuses.get(agent_id, {})
-                        agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
-                        
-                        # Calculate speed for visualization
-                        velocity = agent.body.linearVelocity
-                        speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
-                        
-                        # Get closest food distance for this agent's food type
-                        closest_food_info = self._get_closest_food_distance_for_agent(agent)
-                        
-                        agent_data = {
+                        # Basic data for all agents (needed for rendering)
+                        basic_agent_data = {
                             'id': agent.id,
                             'body': {
-                                'x': convert_numpy_types(agent.body.position.x),
-                                'y': convert_numpy_types(agent.body.position.y),
+                                'x': safe_convert_numeric(agent.body.position.x),
+                                'y': safe_convert_numeric(agent.body.position.y),
                                 'velocity': {
-                                    'x': convert_numpy_types(agent.body.linearVelocity.x),
-                                    'y': convert_numpy_types(agent.body.linearVelocity.y)
+                                    'x': safe_convert_numeric(agent.body.linearVelocity.x),
+                                    'y': safe_convert_numeric(agent.body.linearVelocity.y)
                                 }
                             },
                             'upper_arm': {
-                                'x': convert_numpy_types(agent.upper_arm.position.x) if agent.upper_arm else 0,
-                                'y': convert_numpy_types(agent.upper_arm.position.y) if agent.upper_arm else 0
+                                'x': safe_convert_numeric(agent.upper_arm.position.x) if agent.upper_arm else 0,
+                                'y': safe_convert_numeric(agent.upper_arm.position.y) if agent.upper_arm else 0
                             },
                             'lower_arm': {
-                                'x': convert_numpy_types(agent.lower_arm.position.x) if agent.lower_arm else 0,
-                                'y': convert_numpy_types(agent.lower_arm.position.y) if agent.lower_arm else 0
+                                'x': safe_convert_numeric(agent.lower_arm.position.x) if agent.lower_arm else 0,
+                                'y': safe_convert_numeric(agent.lower_arm.position.y) if agent.lower_arm else 0
                             },
-                            'total_reward': convert_numpy_types(agent.total_reward),
-                            'steps': convert_numpy_types(agent.steps),
-                            'current_action': convert_numpy_types(agent.current_action_tuple),
-                            'state': convert_numpy_types(agent.current_state),
-                            'q_table': convert_numpy_types(agent.q_table.q_values if hasattr(agent.q_table, 'q_values') else {}),
-                            'action_history': convert_numpy_types(agent.action_history),
-                            'best_reward': convert_numpy_types(getattr(agent, 'best_reward_received', 0.0)),
-                            'worst_reward': convert_numpy_types(getattr(agent, 'worst_reward_received', 0.0)),
-                            'awake': agent.body.awake if agent.body else False,
-                            'learning_approach': getattr(agent, 'learning_approach', 'basic_q_learning'),
-                            # Enhanced visualization data
+                            'total_reward': safe_convert_numeric(agent.total_reward),
+                            # Basic ecosystem data for rendering
                             'ecosystem': {
-                                'role': agent_status.get('role', 'omnivore'),
-                                'status': agent_status.get('status', 'idle'),
-                                'health': convert_numpy_types(agent_health['health']),
-                                'energy': convert_numpy_types(agent_health['energy']),
-                                'speed': convert_numpy_types(speed),
-                                'speed_factor': convert_numpy_types(agent_status.get('speed_factor', 1.0)),
-                                'alliances': agent_status.get('alliances', []),
-                                'territories': agent_status.get('territories', []),
-                                'closest_food_distance': convert_numpy_types(closest_food_info['distance']),
-                                'closest_food_signed_x_distance': convert_numpy_types(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
-                                'closest_food_type': closest_food_info['food_type'],
-                                'closest_food_source': closest_food_info.get('source_type', 'environment'),
-                                'closest_food_position': closest_food_info.get('food_position', None)
+                                'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
+                                'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                                'health': safe_convert_numeric(self.agent_health.get(agent_id, {'health': 1.0})['health']),
+                                'energy': safe_convert_numeric(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
+                                'speed': safe_convert_numeric((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
                             }
                         }
-                        agents_data.append(agent_data)
+                        agents_data.append(basic_agent_data)
+                        
+                        # Add detailed data for focused agent
+                        if is_focused:
+                            agent_status = self.agent_statuses.get(agent_id, {})
+                            agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
+                            closest_food_info = self._get_closest_food_distance_for_agent(agent)
+                            
+                            # Add detailed data to the basic agent data
+                            basic_agent_data.update({
+                                'steps': safe_convert_numeric(agent.steps),
+                                'current_action': safe_convert_list(agent.current_action_tuple),
+                                'state': safe_convert_list(agent.current_state),
+                                'q_table': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0,
+                                'action_history': safe_convert_list(agent.action_history[-10:]) if agent.action_history else [],
+                                'best_reward': safe_convert_numeric(getattr(agent, 'best_reward_received', 0.0)),
+                                'worst_reward': safe_convert_numeric(getattr(agent, 'worst_reward_received', 0.0)),
+                                'awake': agent.body.awake if agent.body else False,
+                                'learning_approach': getattr(agent, 'learning_approach', 'basic_q_learning'),
+                            })
+                            
+                            # Add detailed ecosystem data
+                            basic_agent_data['ecosystem'].update({
+                                'speed_factor': safe_convert_numeric(agent_status.get('speed_factor', 1.0)),
+                                'alliances': agent_status.get('alliances', []),
+                                'territories': agent_status.get('territories', []),
+                                'closest_food_distance': safe_convert_numeric(closest_food_info['distance']),
+                                'closest_food_signed_x_distance': safe_convert_numeric(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
+                                'closest_food_type': closest_food_info['food_type'],
+                                'closest_food_source': closest_food_info.get('source_type', 'environment'),
+                                'closest_food_position': safe_convert_position(closest_food_info.get('food_position', None))
+                            })
+                            
                 except Exception as e:
                     print(f"⚠️  Error creating agents data: {e}")
                     agents_data = []
