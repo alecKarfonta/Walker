@@ -4458,11 +4458,14 @@ class TrainingEnvironment:
             if agent_role not in ['carnivore', 'scavenger']:  # CARNIVORES AND SCAVENGERS ARE PURE ROBOT CONSUMERS - NO environmental food
                 for food in food_sources:
                     if food.amount > 0.1:  # Only consider food that can actually be consumed
+                        food_pos = food.position
+                        distance = ((agent_pos[0] - food_pos[0])**2 + (agent_pos[1] - food_pos[1])**2)**0.5
                         potential_food_sources.append({
                             'position': food.position,
                             'type': food.food_type,
                             'source': 'environment',
-                            'amount': food.amount
+                            'amount': food.amount,
+                            'distance': distance
                         })
             
             # For carnivores and scavengers, add other agents as potential prey
@@ -4489,58 +4492,38 @@ class TrainingEnvironment:
                         if other_health <= 0.1:
                             continue  # Don't target dying robots
                     
-                    # Distance check for hunting range
+                    # Calculate distance for all potential prey
                     distance = ((agent_pos[0] - other_pos[0])**2 + (agent_pos[1] - other_pos[1])**2)**0.5
-                    if distance < 15.0:  # Within hunting/perception range
-                        # Proper attractiveness based on role restrictions
-                        if agent_role == 'scavenger':
-                            prey_attractiveness = 3.0 if other_energy < 0.1 else 1.0  # Scavengers prefer very weak prey
-                        elif agent_role == 'carnivore':
-                            prey_attractiveness = 1.5 if other_health > 0.7 else 1.0  # Carnivores prefer healthy prey
-                        else:
-                            prey_attractiveness = 1.0
-                        
-                        potential_food_sources.append({
-                            'position': other_pos,
-                            'type': 'robot',  # Other agents are robots, not "meat"
-                            'source': 'prey',
-                            'prey_id': other_agent.id,
-                            'prey_energy': other_energy,
-                            'prey_health': other_health,
-                            'attractiveness': prey_attractiveness
-                        })
+                    
+                    potential_food_sources.append({
+                        'position': other_pos,
+                        'type': 'robot',  # Other agents are robots, not "meat"
+                        'source': 'prey',
+                        'prey_id': other_agent.id,
+                        'prey_energy': other_energy,
+                        'prey_health': other_health,
+                        'distance': distance
+                    })
             
             if not potential_food_sources:
                 # ROLE-SPECIFIC MESSAGES: Differentiate between no food and no valid targets
                 if agent_role == 'carnivore':
-                    return {'distance': 999999, 'food_type': 'no herbivore/scavenger/omnivore prey available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': 999999}
+                    return {'distance': 999999, 'food_type': 'no valid prey (herbivore/scavenger/omnivore) found', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': 999999}
                 elif agent_role == 'scavenger':
-                    return {'distance': 999999, 'food_type': 'no weakened robots available', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': 999999}
+                    return {'distance': 999999, 'food_type': 'no weakened robots (energy < 30%) found', 'source_type': 'prey', 'food_position': None, 'signed_x_distance': 999999}
                 else:
-                    return {'distance': 999999, 'food_type': 'no environmental food available', 'source_type': 'environment', 'food_position': None, 'signed_x_distance': 999999}
+                    return {'distance': 999999, 'food_type': 'no environmental food sources found', 'source_type': 'environment', 'food_position': None, 'signed_x_distance': 999999}
             
-            # Find the nearest/most attractive food source for this agent type
+            # Find the nearest food source for this agent type
             best_target = None
-            best_score = 999999
+            best_distance = 999999
             
             for target in potential_food_sources:
-                target_pos = target['position']
-                distance = ((agent_pos[0] - target_pos[0])**2 + (agent_pos[1] - target_pos[1])**2)**0.5
+                distance = target['distance']
                 
-                # For predators, factor in prey attractiveness
-                if target.get('source') == 'prey':
-                    attractiveness = target.get('attractiveness', 1.0)
-                    # Lower score = better target (distance reduced by attractiveness)
-                    score = distance / attractiveness
-                    effective_distance = distance  # Keep actual distance for display
-                else:
-                    score = distance
-                    effective_distance = distance
-                
-                if score < best_score:
-                    best_score = score
+                if distance < best_distance:
+                    best_distance = distance
                     best_target = target
-                    best_distance = effective_distance
             
             if best_target is None:
                 return {'distance': 999999, 'food_type': 'none found', 'source_type': 'none', 'food_position': None, 'signed_x_distance': 999999}
