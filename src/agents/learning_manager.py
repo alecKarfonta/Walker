@@ -455,14 +455,23 @@ class LearningManager:
                                         False
                                     )
                                     
-                                    # Debug: Log experience storage (every 100 experiences)
-                                    if hasattr(deep_q_learner, 'memory') and len(deep_q_learner.memory) % 100 == 0:
-                                        print(f"💾 Agent {agent.id}: Stored experience #{len(deep_q_learner.memory)} (reward: {reward:.3f})")
-                                
-                                # Store current state for next step
-                                agent._deep_prev_state = extended_state_array
-                                agent._deep_prev_action = action_idx
-                                agent._deep_prev_reward = getattr(agent, 'total_reward', 0.0)
+                                    # Record reward signal for evaluation
+                                    try:
+                                        from src.evaluation.reward_signal_integration import reward_signal_adapter
+                                        reward_signal_adapter.record_reward_signal(
+                                            agent_id=str(agent.id),
+                                            state=tuple(agent._deep_prev_state) if hasattr(agent._deep_prev_state, '__iter__') else (agent._deep_prev_state,),
+                                            action=agent._deep_prev_action,
+                                            reward=reward
+                                        )
+                                    except (ImportError, AttributeError):
+                                        # Silently handle if reward signal system not available
+                                        pass
+                                    
+                                    # Store current state for next step
+                                    agent._deep_prev_state = extended_state_array
+                                    agent._deep_prev_action = action_idx
+                                    agent._deep_prev_reward = getattr(agent, 'total_reward', 0.0)
                                 
                         except Exception as e:
                             # Log experience collection errors instead of silent fail

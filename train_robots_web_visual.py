@@ -2029,6 +2029,43 @@ class TrainingEnvironment:
             print(f"⚠️ Robot Memory Pool initialization failed: {e}")
             self.robot_memory_pool = None
 
+        # Q-learning evaluation system
+        self.q_learning_evaluator = None
+        self.q_learning_adapter = None
+        try:
+            from src.evaluation.q_learning_integration import create_evaluator_for_training_environment
+            self.q_learning_evaluator = create_evaluator_for_training_environment(self)
+            print("🧠 Q-Learning evaluation system initialized")
+        except ImportError as e:
+            print(f"⚠️ Q-learning evaluation not available: {e}")
+
+        # Reward signal evaluation system
+        self.reward_signal_evaluator = None
+        self.reward_signal_adapter = None
+        try:
+            from src.evaluation.reward_signal_integration import reward_signal_adapter
+            self.reward_signal_adapter = reward_signal_adapter
+            
+            # Register all existing agents with the reward signal evaluator
+            for agent in self.agents:
+                if not getattr(agent, '_destroyed', False):
+                    # Determine agent type from learning approach or fallback to default
+                    agent_type = getattr(agent, 'learning_approach', 'evolutionary')
+                    self.reward_signal_adapter.register_agent(
+                        agent.id,
+                        agent_type,
+                        metadata={
+                            'physical_params': str(agent.physical_params) if hasattr(agent, 'physical_params') else None,
+                            'created_at': time.time()
+                        }
+                    )
+            
+            print(f"📊 Reward signal evaluation system initialized - tracking {len(self.agents)} agents")
+        except ImportError as e:
+            print(f"⚠️ Reward signal evaluation not available: {e}")
+        except Exception as e:
+            print(f"⚠️ Reward signal evaluation initialization failed: {e}")
+
         print(f"🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
         print(f"   Evolution: {self.evolution_config.population_size} agents, {self.evolution_config.elite_size} elite")
@@ -2940,7 +2977,6 @@ class TrainingEnvironment:
                     restore_learning=True  # Try to restore previous learning if available
                 )
                 logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool")
-                return new_agent
             else:
                 # Fallback: Create new agent directly
                 from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
@@ -2953,7 +2989,24 @@ class TrainingEnvironment:
                     physical_params=random_params
                 )
                 logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
-                return new_agent
+            
+            # Register new agent with reward signal adapter
+            if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
+                try:
+                    agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
+                    self.reward_signal_adapter.register_agent(
+                        new_agent.id,
+                        agent_type,
+                        metadata={
+                            'physical_params': str(new_agent.physical_params) if hasattr(new_agent, 'physical_params') else None,
+                            'created_at': time.time(),
+                            'source': 'replacement'
+                        }
+                    )
+                except Exception as e:
+                    print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
+            
+            return new_agent
             
         except Exception as e:
             print(f"❌ Error creating replacement agent: {e}")
@@ -4179,6 +4232,23 @@ class TrainingEnvironment:
             physical_params=random_params
         )
         self.agents.append(new_agent)
+        
+        # Register new agent with reward signal adapter
+        if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
+            try:
+                agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
+                self.reward_signal_adapter.register_agent(
+                    new_agent.id,
+                    agent_type,
+                    metadata={
+                        'physical_params': str(new_agent.physical_params) if hasattr(new_agent, 'physical_params') else None,
+                        'created_at': time.time(),
+                        'source': 'spawned'
+                    }
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to register spawned agent {new_agent.id} with reward signal adapter: {e}")
+        
         print(f"🐣 Spawned new agent {new_agent.id} with random parameters. Total agents: {len(self.agents)}")
 
     def clone_best_agent(self):
@@ -5257,6 +5327,285 @@ def test_carnivore_feeding():
             return jsonify({'status': 'error', 'message': 'Training environment not available'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Test failed: {str(e)}'})
+
+@app.route('/q_learning_status', methods=['GET'])
+def get_q_learning_status():
+    """Get comprehensive Q-learning evaluation status."""
+    try:
+        from src.evaluation.q_learning_integration import get_q_learning_status_for_api
+        status = get_q_learning_status_for_api(env)
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': f'Q-learning status error: {str(e)}'})
+
+@app.route('/q_learning_agent/<agent_id>', methods=['GET'])
+def get_agent_q_learning_metrics(agent_id):
+    """Get detailed Q-learning metrics for a specific agent."""
+    try:
+        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
+            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
+        
+        metrics = env.q_learning_evaluator.get_agent_metrics(agent_id)
+        if metrics:
+            return jsonify({'status': 'success', 'metrics': metrics.to_dict()})
+        else:
+            return jsonify({'status': 'error', 'message': f'No metrics found for agent {agent_id}'}), 404
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/q_learning_agent/<agent_id>/diagnostics', methods=['GET'])
+def get_agent_q_learning_diagnostics(agent_id):
+    """Get Q-learning diagnostics and recommendations for a specific agent."""
+    try:
+        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
+            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
+        
+        diagnostics = env.q_learning_evaluator.get_learning_diagnostics(agent_id)
+        return jsonify({'status': 'success', 'diagnostics': diagnostics})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/q_learning_comparison', methods=['GET'])
+def get_q_learning_type_comparison():
+    """Get comparative analysis of Q-learning performance across agent types."""
+    try:
+        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
+            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
+        
+        comparison = env.q_learning_evaluator.get_type_comparison()
+        return jsonify({'status': 'success', 'comparison': comparison})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/q_learning_summary', methods=['GET'])
+def get_q_learning_summary():
+    """Get comprehensive Q-learning summary report."""
+    try:
+        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
+            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
+        
+        summary = env.q_learning_evaluator.generate_summary_report()
+        return jsonify({'status': 'success', 'summary': summary})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/reward_signal_status', methods=['GET'])
+def get_reward_signal_status():
+    """Get overall reward signal evaluation status."""
+    try:
+        from src.evaluation.reward_signal_integration import reward_signal_adapter
+        status = reward_signal_adapter.get_system_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Error getting reward signal status: {e}")
+        return jsonify({'error': str(e), 'timestamp': time.time()})
+
+@app.route('/reward_signal_summary', methods=['GET'])
+def get_reward_signal_summary():
+    """Get comprehensive reward signal quality summary."""
+    try:
+        from src.evaluation.reward_signal_integration import reward_signal_adapter
+        summary = reward_signal_adapter.get_reward_comparative_report()
+        return jsonify(summary)
+    except Exception as e:
+        logger.error(f"Error getting reward signal summary: {e}")
+        return jsonify({'error': str(e), 'timestamp': time.time()})
+
+@app.route('/reward_signal_agent/<agent_id>', methods=['GET'])
+def get_agent_reward_signal_metrics(agent_id):
+    """Get reward signal metrics for a specific agent."""
+    try:
+        from src.evaluation.reward_signal_integration import reward_signal_adapter
+        metrics = reward_signal_adapter.get_agent_reward_metrics(agent_id)
+        
+        if metrics:
+            return jsonify({
+                'agent_id': agent_id,
+                'metrics': metrics.to_dict(),
+                'timestamp': time.time()
+            })
+        else:
+            return jsonify({
+                'agent_id': agent_id,
+                'status': 'no_data',
+                'message': 'No reward signal data available for this agent',
+                'timestamp': time.time()
+            })
+    except Exception as e:
+        logger.error(f"Error getting reward signal metrics for agent {agent_id}: {e}")
+        return jsonify({'error': str(e), 'agent_id': agent_id, 'timestamp': time.time()})
+
+@app.route('/reward_signal_agent/<agent_id>/diagnostics', methods=['GET'])
+def get_agent_reward_signal_diagnostics(agent_id):
+    """Get detailed reward signal diagnostics for a specific agent."""
+    try:
+        from src.evaluation.reward_signal_integration import reward_signal_adapter
+        diagnostics = reward_signal_adapter.get_agent_diagnostics(agent_id)
+        return jsonify(diagnostics)
+    except Exception as e:
+        logger.error(f"Error getting reward signal diagnostics for agent {agent_id}: {e}")
+        return jsonify({'error': str(e), 'agent_id': agent_id, 'timestamp': time.time()})
+
+@app.route('/reward_signal_comparison', methods=['GET'])
+def get_reward_signal_comparison():
+    """Get comparative analysis of reward signal quality across agents."""
+    try:
+        from src.evaluation.reward_signal_integration import reward_signal_adapter
+        all_metrics = reward_signal_adapter.get_all_reward_metrics()
+        
+        if not all_metrics:
+            return jsonify({
+                'status': 'no_data',
+                'message': 'No reward signal data available',
+                'timestamp': time.time()
+            })
+        
+        # Organize by quality tiers
+        quality_tiers = {
+            'excellent': [],
+            'good': [],
+            'fair': [],
+            'poor': [],
+            'very_poor': []
+        }
+        
+        for agent_id, metrics in all_metrics.items():
+            if metrics.quality_score >= 0.8:
+                tier = 'excellent'
+            elif metrics.quality_score >= 0.6:
+                tier = 'good'
+            elif metrics.quality_score >= 0.4:
+                tier = 'fair'
+            elif metrics.quality_score >= 0.2:
+                tier = 'poor'
+            else:
+                tier = 'very_poor'
+            
+            quality_tiers[tier].append({
+                'agent_id': agent_id,
+                'quality_score': metrics.quality_score,
+                'signal_to_noise_ratio': metrics.signal_to_noise_ratio,
+                'reward_consistency': metrics.reward_consistency,
+                'exploration_incentive': metrics.exploration_incentive,
+                'main_issues': [issue.value for issue in metrics.quality_issues[:3]]
+            })
+        
+        # Sort each tier by quality score
+        for tier in quality_tiers.values():
+            tier.sort(key=lambda x: x['quality_score'], reverse=True)
+        
+        return jsonify({
+            'quality_tiers': quality_tiers,
+            'tier_counts': {tier: len(agents) for tier, agents in quality_tiers.items()},
+            'total_agents': len(all_metrics),
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting reward signal comparison: {e}")
+        return jsonify({'error': str(e), 'timestamp': time.time()})
+
+@app.route('/performance_status')
+def get_performance_status():
+    """Enhanced performance status with Q-learning metrics."""
+    try:
+        # Get basic performance status
+        performance_data = {
+            'entities': {
+                'world_bodies': len(env.world.bodies) if env.world else 0,
+                'food_sources': len(getattr(env.ecosystem_dynamics, 'food_sources', [])),
+                'static_bodies': len(getattr(env, 'terrain_collision_bodies', [])),
+                'dynamic_bodies': len([a for a in env.agents if not getattr(a, '_destroyed', False)]),
+                'total_agents': len(env.agents),
+                'active_agents': len([a for a in env.agents if not getattr(a, '_destroyed', False)])
+            },
+            'performance': {
+                'step_count': getattr(env, 'step_count', 0),
+                'memory_mb': 0.0,  # Will be filled by system monitoring
+                'cpu_percent': 0.0,  # Will be filled by system monitoring
+                'fps': getattr(env, 'fps', 0.0)
+            }
+        }
+        
+        # Add system resource information
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            performance_data['performance']['memory_mb'] = process.memory_info().rss / 1024 / 1024
+            performance_data['performance']['cpu_percent'] = process.cpu_percent()
+        except:
+            pass
+        
+        # Add Q-learning evaluation data if available
+        if hasattr(env, 'q_learning_evaluator') and env.q_learning_evaluator is not None:
+            try:
+                q_metrics = env.q_learning_evaluator.get_all_agent_metrics()
+                q_comparison = env.q_learning_evaluator.get_type_comparison()
+                
+                performance_data['q_learning'] = {
+                    'agents_monitored': len(q_metrics),
+                    'agent_types': list(q_comparison.keys()),
+                    'overall_stats': {
+                        'avg_prediction_mae': float(sum(m.value_prediction_mae for m in q_metrics.values()) / len(q_metrics)) if q_metrics else 0.0,
+                        'avg_convergence_score': float(sum(m.convergence_score for m in q_metrics.values()) / len(q_metrics)) if q_metrics else 0.0,
+                        'agents_with_issues': len([m for m in q_metrics.values() if m.learning_issues]),
+                        'agents_learning_well': len([m for m in q_metrics.values() if m.learning_efficiency_score > 0.6])
+                    },
+                    'type_performance': q_comparison
+                }
+            except Exception as e:
+                performance_data['q_learning'] = {'error': str(e)}
+        else:
+            performance_data['q_learning'] = {'status': 'not_initialized'}
+        
+        # Add reward signal evaluation data if available
+        try:
+            from src.evaluation.reward_signal_integration import reward_signal_adapter
+            reward_status = reward_signal_adapter.get_system_status()
+            reward_metrics = reward_signal_adapter.get_all_reward_metrics()
+            
+            if reward_metrics:
+                # Calculate aggregate statistics
+                avg_quality = sum(m.quality_score for m in reward_metrics.values()) / len(reward_metrics)
+                avg_snr = sum(m.signal_to_noise_ratio for m in reward_metrics.values()) / len(reward_metrics)
+                avg_consistency = sum(m.reward_consistency for m in reward_metrics.values()) / len(reward_metrics)
+                
+                # Count quality issues
+                all_issues = []
+                for metrics in reward_metrics.values():
+                    all_issues.extend([issue.value for issue in metrics.quality_issues])
+                
+                issue_counts = {}
+                for issue in all_issues:
+                    issue_counts[issue] = issue_counts.get(issue, 0) + 1
+                
+                performance_data['reward_signals'] = {
+                    'agents_monitored': len(reward_metrics),
+                    'total_rewards_recorded': reward_status['total_rewards_recorded'],
+                    'overall_stats': {
+                        'avg_quality_score': float(avg_quality),
+                        'avg_signal_to_noise_ratio': float(avg_snr),
+                        'avg_consistency': float(avg_consistency),
+                        'agents_with_good_rewards': len([m for m in reward_metrics.values() if m.quality_score > 0.6]),
+                        'agents_with_issues': len([m for m in reward_metrics.values() if m.quality_issues]),
+                        'sparse_reward_agents': len([m for m in reward_metrics.values() if m.reward_sparsity > 0.8])
+                    },
+                    'common_issues': issue_counts,
+                    'status': 'active' if reward_status['active'] else 'inactive'
+                }
+            else:
+                performance_data['reward_signals'] = {
+                    'status': 'no_data',
+                    'agents_monitored': 0,
+                    'total_rewards_recorded': reward_status.get('total_rewards_recorded', 0)
+                }
+        except Exception as e:
+            performance_data['reward_signals'] = {'error': str(e)}
+        
+        return jsonify(performance_data)
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 def main():
     # Set a different port for the web server to avoid conflicts

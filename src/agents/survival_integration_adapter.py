@@ -193,6 +193,7 @@ class SurvivalQLearningAdapter:
     def _gather_agent_data_for_learning(self) -> Dict[str, Any]:
         """Gather agent data for learning rate adjustment."""
         return {
+            'agent_id': self.agent.id,
             'energy_level': self._get_current_energy_level(),
             'health_level': self._get_current_health_level(),
             'steps_alive': self.agent.steps,
