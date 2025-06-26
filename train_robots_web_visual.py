@@ -3384,6 +3384,9 @@ class TrainingEnvironment:
             # Update enhanced learning systems (after current_agents is defined)
             if hasattr(self, 'learning_manager') and self.learning_manager:
                 try:
+                    # Create a safe copy of current agents for this section
+                    current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
+                    
                     # Update agent performance for elite identification
                     for agent in current_agents:
                         if not getattr(agent, '_destroyed', False) and agent.body:

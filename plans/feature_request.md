@@ -3,6 +3,11 @@ User Requests
 
 - [x] ✅ **COMPLETELY OVERHAULED**: Realistic Terrain Generation System
 
+- [ ] I want to be able to scroll the Population summary windows
+
+- [ ] When a robot is destroyed show text where they died to explain what happened. have it linger for 5s. 
+
+
 **FIXED**: Replaced random obstacle scattering with sophisticated terrain generation featuring actual landscape features:
 
 🏞️ **New Realistic Terrain System**:
