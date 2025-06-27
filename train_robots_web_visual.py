@@ -4166,9 +4166,10 @@ class TrainingEnvironment:
                             }
                         }
                         
-                        # CRITICAL FIX: Add detailed food info for focused agent even if outside viewport
+                        # CRITICAL FIX: Add detailed info for focused agent even if outside viewport
                         if is_focused:
                             try:
+                                # Add detailed food info
                                 closest_food_info = self._get_closest_food_distance_for_agent(agent)
                                 basic_all_agent_data['ecosystem'].update({
                                     'closest_food_distance': float(closest_food_info['distance']),
@@ -4177,8 +4178,36 @@ class TrainingEnvironment:
                                     'closest_food_source': closest_food_info.get('source_type', 'environment'),
                                     'closest_food_position': [float(closest_food_info['food_position'][0]), float(closest_food_info['food_position'][1])] if closest_food_info.get('food_position') is not None else None
                                 })
+                                
+                                # Add detailed reward and step info 
+                                recent_reward = float(getattr(agent, 'last_reward', getattr(agent, 'immediate_reward', 0.0)))
+                                basic_all_agent_data.update({
+                                    'steps': int(agent.steps) if hasattr(agent, 'steps') else 0,
+                                    'recent_reward': recent_reward,
+                                    'best_reward': float(getattr(agent, 'best_reward_received', 0.0)),
+                                    'worst_reward': float(getattr(agent, 'worst_reward_received', 0.0)),
+                                    'learning_approach': str(getattr(agent, 'learning_approach', 'basic_q_learning')),
+                                })
+                                
+                                # Add reward components if available
+                                reward_components = getattr(agent, 'reward_components', None)
+                                if reward_components:
+                                    basic_all_agent_data['reward_components'] = reward_components
+                                    
+                                # Add arm positions for focused agent (for angle calculations)
+                                if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                                    basic_all_agent_data['upper_arm'] = {
+                                        'x': float(agent.upper_arm.position.x),
+                                        'y': float(agent.upper_arm.position.y)
+                                    }
+                                if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                                    basic_all_agent_data['lower_arm'] = {
+                                        'x': float(agent.lower_arm.position.x), 
+                                        'y': float(agent.lower_arm.position.y)
+                                    }
+                                    
                             except Exception as e:
-                                print(f"⚠️ Error getting food info for focused agent {agent_id}: {e}")
+                                print(f"⚠️ Error getting detailed info for focused agent {agent_id}: {e}")
                         
                         all_agents_data.append(basic_all_agent_data)
                         
