@@ -776,8 +776,9 @@ HTML_TEMPLATE = """
                 const roleDistribution = {};
                 let totalAgents = 0;
                 
-                if (data.agents) {
-                    data.agents.forEach(agent => {
+                // FIXED: Use all_agents for population summary (not affected by viewport culling)
+                if (data.all_agents) {
+                    data.all_agents.forEach(agent => {
                         const role = agent.ecosystem?.role || 'omnivore';
                         roleDistribution[role] = (roleDistribution[role] || 0) + 1;
                         totalAgents++;
@@ -843,8 +844,8 @@ HTML_TEMPLATE = """
                 return;
             }
             
-            // Find the focused agent
-            const agent = data.agents.find(a => a.id === focusedAgentId);
+            // Find the focused agent - use all_agents to ensure we find it even if outside viewport
+            const agent = (data.all_agents || data.agents).find(a => a.id === focusedAgentId);
             if (!agent) {
                 robotDetailsPanel.innerHTML = '<div class="robot-details-title">🤖 Robot Details</div><div class="robot-details-content">Robot not found</div>';
                 return;
@@ -1387,13 +1388,13 @@ HTML_TEMPLATE = """
         // Alliance connections function removed
         
         function drawFoodLines(data) {
-            if (!data.agents || !focusedAgentId) {
+            if ((!data.all_agents && !data.agents) || !focusedAgentId) {
                 console.log("🎯 No agents or no focused agent, skipping food lines");
                 return;
             }
             
-            // Only draw food line for the focused robot
-            const focusedAgent = data.agents.find(agent => agent.id === focusedAgentId);
+            // Only draw food line for the focused robot - use all_agents to find it even if outside viewport
+            const focusedAgent = (data.all_agents || data.agents).find(agent => agent.id === focusedAgentId);
             if (!focusedAgent) {
                 console.log(`🎯 Focused agent ${focusedAgentId} not found in agent list`);
                 return;
@@ -1414,7 +1415,6 @@ HTML_TEMPLATE = """
                 const robotPos = [focusedAgent.body.x, focusedAgent.body.y];
                 const [foodX, foodY] = foodPosition;
                 
-                console.log(`🎯 Drawing food line from robot ${robotPos} to food ${foodPosition}`);
                 
                 // Calculate distance for coloring
                 const distance = signedXDistance !== undefined ? Math.abs(signedXDistance) : 
@@ -1453,7 +1453,6 @@ HTML_TEMPLATE = """
                 ctx.lineTo(foodX, foodY);
                 ctx.stroke();
                 
-                console.log(`🎯 Food line drawn successfully`);
             } else {
                 console.log(`🎯 No valid food position for agent ${focusedAgentId}`);
             }
@@ -1559,12 +1558,13 @@ HTML_TEMPLATE = """
             }
             lastFetchTime = now;
             
-            // Send canvas dimensions and culling preference for viewport culling
+            // Send canvas dimensions, camera position, and culling preference for viewport culling
             const canvasWidth = canvas.width;
             const canvasHeight = canvas.height;
             const cullingParam = viewportCullingEnabled ? '&viewport_culling=true' : '&viewport_culling=false';
+            const cameraParam = `&camera_x=${cameraPosition.x}&camera_y=${cameraPosition.y}`;
             
-            fetch(`./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}${cullingParam}`)
+            fetch(`./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}${cullingParam}${cameraParam}`)
                 .then(response => response.json())
                 .then(data => {
                     window.lastData = data; // Store latest data globally
@@ -3874,7 +3874,7 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"⚠️ Error generating performance report: {e}")
 
-    def get_status(self, canvas_width=1200, canvas_height=800, viewport_culling=True):
+    def get_status(self, canvas_width=1200, canvas_height=800, viewport_culling=True, camera_x=0.0, camera_y=0.0):
         """
         Returns the current state of the simulation for rendering with enhanced safety and optional viewport culling.
         
@@ -3901,8 +3901,8 @@ class TrainingEnvironment:
                 current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
                 
                 if viewport_culling:
-                    # Calculate viewport bounds for culling using actual canvas dimensions
-                    viewport_bounds = self._calculate_viewport_bounds(canvas_width, canvas_height)
+                    # Calculate viewport bounds for culling using actual canvas dimensions and frontend camera position
+                    viewport_bounds = self._calculate_viewport_bounds(canvas_width, canvas_height, camera_x, camera_y)
                     # Filter agents by viewport for performance optimization
                     viewport_agents = self._filter_agents_by_viewport(current_agents, viewport_bounds)
                 else:
@@ -4772,10 +4772,13 @@ class TrainingEnvironment:
             'zoom_override': getattr(self, '_zoom_override', None)  # Only send zoom when we want to override
         }
 
-    def _calculate_viewport_bounds(self, canvas_width=1200, canvas_height=800):
-        """Calculate the world-space bounds of the current viewport using ACTUAL frontend zoom level."""
-        # Get camera parameters
-        cam_x, cam_y = self.camera_position
+    def _calculate_viewport_bounds(self, canvas_width=1200, canvas_height=800, camera_x=None, camera_y=None):
+        """Calculate the world-space bounds of the current viewport using ACTUAL frontend zoom level and camera position."""
+        # Get camera parameters - use provided camera position if available (from frontend)
+        if camera_x is not None and camera_y is not None:
+            cam_x, cam_y = camera_x, camera_y  # Use frontend camera position
+        else:
+            cam_x, cam_y = self.camera_position  # Fallback to backend camera position
         # CRITICAL FIX: Use actual frontend zoom level, not backend camera zoom
         zoom = getattr(self, 'user_zoom_level', 1.0)  # Use the actual frontend zoom level
         
@@ -5438,7 +5441,10 @@ def status():
     canvas_width = request.args.get('canvas_width', type=int, default=1200)
     canvas_height = request.args.get('canvas_height', type=int, default=800)
     viewport_culling = request.args.get('viewport_culling', default='true').lower() == 'true'
-    return jsonify(env.get_status(canvas_width, canvas_height, viewport_culling))
+    # CRITICAL FIX: Get current frontend camera position for accurate viewport culling
+    camera_x = request.args.get('camera_x', type=float, default=0.0)
+    camera_y = request.args.get('camera_y', type=float, default=0.0)
+    return jsonify(env.get_status(canvas_width, canvas_height, viewport_culling, camera_x, camera_y))
 
 # Add missing reward signal endpoints to training system's Flask app
 @app.route('/reward_signal_status')
