@@ -852,7 +852,10 @@ HTML_TEMPLATE = """
             }
             
             // Check if agent is outside viewport (limited data available)
-            const isOutsideViewport = !data.agents.find(a => a.id === focusedAgentId);
+            // Better logic: check if agent has detailed data (like arm positions) that would only be available if in viewport
+            const hasDetailedData = agent.upper_arm && agent.lower_arm && 
+                                   agent.upper_arm.x !== undefined && agent.upper_arm.y !== undefined;
+            const isOutsideViewport = data.viewport_culling && data.viewport_culling.enabled && !hasDetailedData;
             const viewportWarning = isOutsideViewport ? `
                 <div style="background: rgba(255, 152, 0, 0.1); border: 1px solid #FF9800; border-radius: 4px; padding: 6px; margin-bottom: 8px; font-size: 11px;">
                     <span style="color: #FF9800;">⚠️ Robot outside viewport - Limited data available. Pan camera to robot for full details.</span>
@@ -4162,6 +4165,21 @@ class TrainingEnvironment:
                                 'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
                             }
                         }
+                        
+                        # CRITICAL FIX: Add detailed food info for focused agent even if outside viewport
+                        if is_focused:
+                            try:
+                                closest_food_info = self._get_closest_food_distance_for_agent(agent)
+                                basic_all_agent_data['ecosystem'].update({
+                                    'closest_food_distance': float(closest_food_info['distance']),
+                                    'closest_food_signed_x_distance': float(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
+                                    'closest_food_type': closest_food_info['food_type'],
+                                    'closest_food_source': closest_food_info.get('source_type', 'environment'),
+                                    'closest_food_position': [float(closest_food_info['food_position'][0]), float(closest_food_info['food_position'][1])] if closest_food_info.get('food_position') is not None else None
+                                })
+                            except Exception as e:
+                                print(f"⚠️ Error getting food info for focused agent {agent_id}: {e}")
+                        
                         all_agents_data.append(basic_all_agent_data)
                         
                 except Exception as e:
