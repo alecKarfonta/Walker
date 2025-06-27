@@ -1862,8 +1862,40 @@ class TrainingEnvironment:
             logger=None
         )
 
-        # Create initial diverse population
+        # Initialize reward signal evaluation system BEFORE creating agents
+        self.reward_signal_evaluator = None
+        self.reward_signal_adapter = None
+        try:
+            from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+            self.reward_signal_adapter = get_reward_signal_adapter()
+            print("📊 Reward signal evaluation system initialized (before agent creation)")
+        except ImportError as e:
+            print(f"⚠️ Reward signal evaluation not available: {e}")
+        except Exception as e:
+            print(f"⚠️ Reward signal evaluation initialization failed: {e}")
+
+        # Create initial diverse population (agents can now use training env's adapter)
         self.agents = self.evolution_engine.initialize_population()
+
+        # Add training environment reference to all newly created agents
+        if self.reward_signal_adapter:
+            for agent in self.agents:
+                if not getattr(agent, '_destroyed', False):
+                    agent._training_env = self
+                    # Register agent with reward signal adapter
+                    try:
+                        agent_type = getattr(agent, 'learning_approach', 'evolutionary')
+                        self.reward_signal_adapter.register_agent(
+                            agent.id,
+                            agent_type,
+                            metadata={
+                                'physical_params': str(agent.physical_params) if hasattr(agent, 'physical_params') else None,
+                                'created_at': time.time()
+                            }
+                        )
+                    except Exception as e:
+                        print(f"⚠️ Failed to register agent {agent.id}: {e}")
+            print(f"🔗 Added training environment reference to {len(self.agents)} agents")
 
         # Statistics and state
         self.step_count = 0
@@ -2039,32 +2071,7 @@ class TrainingEnvironment:
         except ImportError as e:
             print(f"⚠️ Q-learning evaluation not available: {e}")
 
-        # Reward signal evaluation system
-        self.reward_signal_evaluator = None
-        self.reward_signal_adapter = None
-        try:
-            from src.evaluation.reward_signal_integration import reward_signal_adapter
-            self.reward_signal_adapter = reward_signal_adapter
-            
-            # Register all existing agents with the reward signal evaluator
-            for agent in self.agents:
-                if not getattr(agent, '_destroyed', False):
-                    # Determine agent type from learning approach or fallback to default
-                    agent_type = getattr(agent, 'learning_approach', 'evolutionary')
-                    self.reward_signal_adapter.register_agent(
-                        agent.id,
-                        agent_type,
-                        metadata={
-                            'physical_params': str(agent.physical_params) if hasattr(agent, 'physical_params') else None,
-                            'created_at': time.time()
-                        }
-                    )
-            
-            print(f"📊 Reward signal evaluation system initialized - tracking {len(self.agents)} agents")
-        except ImportError as e:
-            print(f"⚠️ Reward signal evaluation not available: {e}")
-        except Exception as e:
-            print(f"⚠️ Reward signal evaluation initialization failed: {e}")
+        # Reward signal evaluation system already initialized earlier before agent creation
 
         print(f"🧬 Enhanced Training Environment initialized:")
         print(f"   Population: {len(self.agents)} diverse agents")
@@ -2322,12 +2329,13 @@ class TrainingEnvironment:
         from src.agents.learning_manager import LearningApproach
         import random
         
-        # Available learning approaches with weights (HEAVILY favor Deep Q-Learning)
+        # ANALYSIS: Only attention deep Q-learning for comprehensive review
         learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.10),      # 10% - Simple baseline
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.20),   # 20% - Advanced tabular
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.30),   # 30% - Survival-focused
-            (LearningApproach.DEEP_Q_LEARNING, 0.40),       # 40% - Neural networks (INCREASED!)
+            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Disabled for analysis
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Disabled for analysis
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Disabled for analysis
+            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Disabled for analysis
+            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Focus on attention analysis
         ]
         
         # Create weighted list for random selection
@@ -2395,12 +2403,13 @@ class TrainingEnvironment:
         from src.agents.learning_manager import LearningApproach
         import random
         
-        # Available learning approaches with weights (HEAVILY favor Deep Q-Learning for replacements)
+        # FIXED: Conservative distribution for replacements (fewer neural networks than initial)
         learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.10),      # 10% - Simple baseline
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.20),   # 20% - Advanced tabular
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.30),   # 30% - Survival-focused
-            (LearningApproach.DEEP_Q_LEARNING, 0.40),       # 40% - Neural networks (INCREASED!)
+            (LearningApproach.BASIC_Q_LEARNING, 0.0),      # 30% - Simple baseline
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.0),   # 60% - Advanced tabular (FAST)
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.0),   # 8% - Survival-focused
+            (LearningApproach.DEEP_Q_LEARNING, 0.0),       # 2% - Neural networks (very conservative)
+            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.0), # 0% - No attention networks for replacements (to prevent creation)
         ]
         
         # Create weighted list for random selection
@@ -2426,6 +2435,8 @@ class TrainingEnvironment:
                 # Special logging for Deep Q-Learning to track creation
                 if selected_approach == LearningApproach.DEEP_Q_LEARNING:
                     print(f"   🧠 DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Neural network active!")
+                elif selected_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
+                    print(f"   🔍 ATTENTION DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Attention mechanism active!")
             else:
                 print(f"   ❌ Failed to assign {selected_approach.value} to replacement agent {agent.id[:8]}")
                 
@@ -2990,9 +3001,12 @@ class TrainingEnvironment:
                 )
                 logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
             
-            # Register new agent with reward signal adapter
+            # Add training environment reference and register with reward signal adapter
             if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
                 try:
+                    # Add training environment reference to agent
+                    new_agent._training_env = self
+                    
                     agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
                     self.reward_signal_adapter.register_agent(
                         new_agent.id,
@@ -3532,9 +3546,9 @@ class TrainingEnvironment:
                 last_mlflow_log = current_time
             
             # Check for periodic learning
-            if current_time - self.last_learning_time >= self.learning_interval:
-                self.perform_periodic_learning()
-                self.last_learning_time = current_time
+            #if current_time - self.last_learning_time >= self.learning_interval:
+            #    self.perform_periodic_learning()
+            #    self.last_learning_time = current_time
             
             # Check for automatic evolution (with safety)
             if (self.auto_evolution_enabled and 
@@ -3765,22 +3779,22 @@ class TrainingEnvironment:
                         basic_agent_data = {
                             'id': agent.id,
                             'body': {
-                                'x': safe_convert_numeric(agent.body.position.x),
-                                'y': safe_convert_numeric(agent.body.position.y),
+                                'x': float(agent.body.position.x),
+                                'y': float(agent.body.position.y),
                                 'velocity': {
-                                    'x': safe_convert_numeric(agent.body.linearVelocity.x),
-                                    'y': safe_convert_numeric(agent.body.linearVelocity.y)
+                                    'x': float(agent.body.linearVelocity.x),
+                                    'y': float(agent.body.linearVelocity.y)
                                 }
                             },
                             'upper_arm': {
-                                'x': safe_convert_numeric(agent.upper_arm.position.x) if agent.upper_arm else 0,
-                                'y': safe_convert_numeric(agent.upper_arm.position.y) if agent.upper_arm else 0
+                                'x': float(agent.upper_arm.position.x) if agent.upper_arm else 0,
+                                'y': float(agent.upper_arm.position.y) if agent.upper_arm else 0
                             },
                             'lower_arm': {
-                                'x': safe_convert_numeric(agent.lower_arm.position.x) if agent.lower_arm else 0,
-                                'y': safe_convert_numeric(agent.lower_arm.position.y) if agent.lower_arm else 0
+                                'x': float(agent.lower_arm.position.x) if agent.lower_arm else 0,
+                                'y': float(agent.lower_arm.position.y) if agent.lower_arm else 0
                             },
-                            'total_reward': safe_convert_numeric(agent.total_reward),
+                            'total_reward': float(agent.total_reward),
                             # Basic ecosystem data for rendering
                             'ecosystem': {
                                 'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
@@ -4984,626 +4998,524 @@ class TrainingEnvironment:
         carnivore.body.position = (random.uniform(-30, 30), 5.0)
         self.agent_energy_levels[carnivore.id] = carnivore_initial_energy
 
-# --- Main Execution ---
-app = Flask(__name__)
-socketio = SocketIO(app, async_mode='threading')
-env = TrainingEnvironment(num_agents=30)  # Reduced from 50 to 30 for memory stability
+    def _create_obstacle_physics_bodies(self):
+        """Create Box2D physics bodies for obstacles that don't have them yet. 
+        NOTE: This is kept for backward compatibility but static world generation is now preferred."""
+        try:
+            if not hasattr(self, 'obstacle_bodies'):
+                self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
+            
+            # MODIFIED: Reduced dynamic obstacle creation since we now use static world generation
+            # Only create physics bodies for any remaining dynamic obstacles (minimal)
+            obstacles_to_create = []
+            
+            # NOTE: Environmental system and evolution engine obstacle spawning has been disabled
+            # Static obstacles are created once during initialization via _generate_static_world()
+            
+            # Only process existing moving obstacles or special dynamic obstacles if any exist
+            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
+                for i, obstacle in enumerate(self.environmental_system.obstacles):
+                    # Only create physics bodies for moving obstacles that weren't created statically
+                    if hasattr(obstacle, 'movement_pattern') and obstacle.movement_pattern:
+                        obstacle_id = f"moving_{i}_{obstacle.type.value if hasattr(obstacle, 'type') else 'unknown'}"
+                        if obstacle_id not in self.obstacle_bodies:
+                            obstacles_to_create.append({
+                                'id': obstacle_id,
+                                'type': obstacle.type.value if hasattr(obstacle, 'type') else 'boulder',
+                                'position': obstacle.position,
+                                'size': obstacle.size,
+                                'source': 'environmental_moving'
+                            })
+            
+            # Create physics bodies for any remaining dynamic obstacles
+            bodies_created = 0
+            for obstacle_data in obstacles_to_create:
+                try:
+                    body = self._create_single_obstacle_body(obstacle_data)
+                    if body:
+                        self.obstacle_bodies[obstacle_data['id']] = body
+                        bodies_created += 1
+                except Exception as e:
+                    print(f"⚠️ Error creating physics body for dynamic obstacle {obstacle_data['id']}: {e}")
+            
+            if bodies_created > 0:
+                print(f"🏃 Created {bodies_created} dynamic obstacle physics bodies. Total active: {len(self.obstacle_bodies)}")
+            
+            # Clean up bodies for obstacles that no longer exist
+            self._cleanup_removed_obstacles()
+            
+        except Exception as e:
+            print(f"⚠️ Error in obstacle physics body creation: {e}")
+    
+    def _create_single_obstacle_body(self, obstacle_data):
+        """Create a Box2D physics body for a single obstacle."""
+        try:
+            obstacle_type = obstacle_data['type']
+            position = obstacle_data['position']
+            size = obstacle_data.get('size', 2.0)
+            
+            # Create static body for obstacle
+            obstacle_body = self.world.CreateStaticBody(position=position)
+            
+            # Choose shape based on obstacle type
+            if obstacle_type in ['boulder', 'wall']:
+                # Rectangular obstacles
+                width = size if obstacle_type == 'boulder' else min(size, 1.0)  # Walls are thinner
+                height = size if obstacle_type == 'boulder' else max(size, 3.0)  # Walls are taller
+                
+                fixture = obstacle_body.CreateFixture(
+                    shape=b2.b2PolygonShape(box=(width/2, height/2)),
+                    density=0.0,  # Static body
+                    friction=0.7,
+                    restitution=0.2,
+                                    filter=b2.b2Filter(
+                    categoryBits=self.OBSTACLE_CATEGORY,
+                    maskBits=self.AGENT_CATEGORY  # ONLY collide with agents, NOT other obstacles (performance optimization)
+                )
+                )
+                
+            elif obstacle_type == 'pit':
+                # Create pit as a low rectangular obstacle
+                fixture = obstacle_body.CreateFixture(
+                    shape=b2.b2PolygonShape(box=(size/2, 0.5)),  # Low height for pit
+                    density=0.0,
+                    friction=0.3,  # Slippery
+                    restitution=0.0,
+                    filter=b2.b2Filter(
+                        categoryBits=self.OBSTACLE_CATEGORY,
+                        maskBits=self.AGENT_CATEGORY
+                    )
+                )
+                
+            else:
+                # Default: circular obstacle for other types
+                fixture = obstacle_body.CreateFixture(
+                    shape=b2.b2CircleShape(radius=size/2),
+                    density=0.0,
+                    friction=0.5,
+                    restitution=0.3,
+                    filter=b2.b2Filter(
+                        categoryBits=self.OBSTACLE_CATEGORY,
+                        maskBits=self.AGENT_CATEGORY
+                    )
+                )
+            
+            # Store obstacle type on the body for identification
+            obstacle_body.userData = {
+                'type': 'obstacle',
+                'obstacle_type': obstacle_type,
+                'obstacle_id': obstacle_data['id']
+            }
+            
+            return obstacle_body
+            
+        except Exception as e:
+            print(f"⚠️ Error creating obstacle body: {e}")
+            return None
+    
+    def _cleanup_removed_obstacles(self):
+        """Remove physics bodies for obstacles that no longer exist."""
+        try:
+            if not hasattr(self, 'obstacle_bodies'):
+                return
+            
+            # Get current obstacle IDs
+            current_obstacle_ids = set()
+            
+            # Environmental obstacles
+            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
+                for i, obstacle in enumerate(self.environmental_system.obstacles):
+                    current_obstacle_ids.add(f"env_{i}_{obstacle['type']}")
+            
+            # Evolution obstacles
+            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
+                for i, obstacle in enumerate(self.evolution_engine.environment_obstacles):
+                    if obstacle.get('active', True):
+                        current_obstacle_ids.add(f"evo_{i}_{obstacle['type']}")
+            
+            # Remove bodies for obstacles that no longer exist
+            bodies_to_remove = []
+            for obstacle_id, body in self.obstacle_bodies.items():
+                if obstacle_id not in current_obstacle_ids:
+                    bodies_to_remove.append(obstacle_id)
+            
+            removed_count = 0
+            for obstacle_id in bodies_to_remove:
+                try:
+                    body = self.obstacle_bodies.pop(obstacle_id)
+                    self.world.DestroyBody(body)
+                    removed_count += 1
+                except Exception as e:
+                    print(f"⚠️ Error removing obstacle body {obstacle_id}: {e}")
+            
+            if removed_count > 0:
+                print(f"🗑️ Removed {removed_count} obsolete obstacle bodies")
+                
+        except Exception as e:
+            print(f"⚠️ Error cleaning up obstacle bodies: {e}")
+    
+    def _get_obstacle_data_for_ui(self):
+        """Get obstacle data for the web UI visualization."""
+        try:
+            obstacles_for_ui = []
+            
+            # Add terrain segments from the generated terrain
+            if hasattr(self, 'terrain_collision_bodies'):
+                for terrain_body in self.terrain_collision_bodies:
+                    terrain_type = terrain_body.get('type', 'terrain_segment')
+                    position = terrain_body.get('position', (0, 0))
+                    size = terrain_body.get('size', 2.0)
+                    height = terrain_body.get('height', size)
+                    
+                    # Convert position tuple to array for JavaScript
+                    position_array = [position[0], position[1]]
+                    
+                    # Add terrain to UI data
+                    obstacles_for_ui.append({
+                        'type': terrain_type,
+                        'position': position_array,
+                        'size': size,
+                        'height': height,
+                        'source': 'terrain_generation',
+                        'danger_level': 0.2,  # Terrain is natural, less dangerous
+                        'active': True
+                    })
+            
+            # Add obstacles that have physics bodies (including any remaining dynamic ones)
+            if hasattr(self, 'obstacle_bodies'):
+                for obstacle_id, body in self.obstacle_bodies.items():
+                    if body and hasattr(body, 'userData') and body.userData:
+                        obstacle_type = body.userData.get('obstacle_type', 'unknown')
+                        position = (body.position.x, body.position.y)
+                        
+                        # Determine size based on fixtures
+                        size = 2.0  # Default
+                        if body.fixtures:
+                            fixture = body.fixtures[0]
+                            shape = fixture.shape
+                            if hasattr(shape, 'radius'):  # Circle
+                                size = shape.radius * 2
+                            elif hasattr(shape, 'vertices'):  # Polygon
+                                # Approximate size from polygon bounds
+                                vertices = shape.vertices
+                                if vertices:
+                                    x_coords = [v[0] for v in vertices]
+                                    y_coords = [v[1] for v in vertices]
+                                    size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
+                        
+                        # Convert position tuple to array for JavaScript
+                        position_array = [position[0], position[1]]
+                        
+                        # Add danger level based on obstacle type
+                        danger_level = 0.5  # Default
+                        if obstacle_type == 'pit':
+                            danger_level = 0.8  # High danger
+                        elif obstacle_type == 'wall':
+                            danger_level = 0.3  # Low danger
+                        elif obstacle_type == 'boulder':
+                            danger_level = 0.6  # Medium danger
+                        
+                        obstacles_for_ui.append({
+                            'id': obstacle_id,
+                            'type': obstacle_type,
+                            'position': position_array,  # JavaScript expects array [x, y]
+                            'size': size,
+                            'danger_level': danger_level,  # JavaScript expects this for coloring
+                            'active': True
+                        })
+            
+            return obstacles_for_ui
+            
+        except Exception as e:
+            print(f"⚠️ Error getting obstacle data for UI: {e}")
+            return []
 
+    def _cleanup_performance_data(self):
+        """Clean up accumulated performance data to prevent memory growth."""
+        try:
+            # Clean up Q-learning history data
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False):
+                    continue
+                    
+                # Limit action history
+                if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
+                    agent.action_history = agent.action_history[-50:]
+                
+                # Clean up Q-table data if it exists and has history
+                if hasattr(agent, 'q_table'):
+                    if hasattr(agent.q_table, 'q_value_history') and len(agent.q_table.q_value_history) > 100:
+                        agent.q_table.q_value_history = agent.q_table.q_value_history[-100:]
+                    
+                    # Clean up visit counts for very large Q-tables
+                    if hasattr(agent.q_table, 'visit_counts') and hasattr(agent.q_table.visit_counts, '__len__'):
+                        try:
+                            if len(agent.q_table.visit_counts) > 5000:
+                                # Reset visit counts for least visited state-actions
+                                pass  # Skip complex cleanup for now
+                        except:
+                            pass
+                
+                # Clean up replay buffer if too large
+                if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
+                    buffer_capacity = getattr(agent.replay_buffer, 'capacity', 3000)
+                    if len(agent.replay_buffer.buffer) > buffer_capacity * 0.9:
+                        # Remove oldest 25% of experiences
+                        old_size = len(agent.replay_buffer.buffer)
+                        remove_count = old_size // 4
+                        for _ in range(remove_count):
+                            if agent.replay_buffer.buffer:
+                                agent.replay_buffer.buffer.popleft()
+            
+            # Clean up old robot stats for destroyed agents
+            active_agent_ids = {agent.id for agent in self.agents if not getattr(agent, '_destroyed', False)}
+            old_stats_keys = [k for k in self.robot_stats.keys() if k not in active_agent_ids]
+            for old_key in old_stats_keys[:10]:  # Remove up to 10 old entries at a time
+                del self.robot_stats[old_key]
+            
+            # Clean up ecosystem data
+            if hasattr(self.ecosystem_dynamics, 'food_sources'):
+                # Remove depleted food sources
+                self.ecosystem_dynamics.food_sources = [
+                    f for f in self.ecosystem_dynamics.food_sources if f.amount > 0.05
+                ]
+            
+            # Memory pool handles its own cleanup automatically
+            print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
+            
+        except Exception as e:
+            print(f"⚠️ Error during performance cleanup: {e}")
+
+# Create Flask app and SocketIO instance
+app = Flask(__name__)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+# Create training environment instance
+env = TrainingEnvironment()
+
+# Add missing main web interface route
 @app.route('/')
 def index():
+    """Serve the main web interface."""
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/status')
 def status():
-    # Suppress logging for status endpoint to reduce noise
+    """Get current training status for the web interface."""
     return jsonify(env.get_status())
 
-@app.route('/start', methods=['POST'])
-def start_training():
-    print("🚀 Starting training via web endpoint")
-    env.start()
-    return jsonify({'status': 'Training started'})
-
-@app.route('/stop', methods=['POST'])
-def stop_training():
-    env.stop()
-    return jsonify({'status': 'success'})
-
-@app.route('/click', methods=['POST'])
-def handle_click():
-    """Handles a click event from the frontend."""
-    data = request.get_json()
-    agent_id = data.get('agent_id')
-    print(f"🖱️ SERVER: Received click for agent_id: {agent_id}")
-
-    if agent_id is not None:
-        # Find the agent by ID
-        agent_to_focus = next((agent for agent in env.agents if agent.id == agent_id), None)
-        if agent_to_focus:
-            env.focus_on_agent(agent_to_focus)
-            return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
+# Add missing reward signal endpoints to training system's Flask app
+@app.route('/reward_signal_status')
+def reward_signal_status():
+    """Get reward signal status from training environment's adapter instance."""
+    try:
+        if hasattr(env, 'reward_signal_adapter') and env.reward_signal_adapter:
+            status = env.reward_signal_adapter.get_system_status()
+            return jsonify(status)
         else:
-            env.focus_on_agent(None) # Clear focus if agent not found
-            return jsonify({'status': 'error', 'message': f'Agent {agent_id} not found', 'agent_id': None})
-    else:
-        # If no agent_id is provided, it's a click on empty space, so clear focus
-        env.focus_on_agent(None)
-        return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
+            return jsonify({'error': 'Reward signal adapter not available'}), 503
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/reward_signal_metrics')
+def reward_signal_metrics():
+    """Get reward signal metrics from training environment's adapter instance."""
+    try:
+        if hasattr(env, 'reward_signal_adapter') and env.reward_signal_adapter:
+            metrics = env.reward_signal_adapter.get_all_reward_metrics()
+            return jsonify(metrics)
+        else:
+            return jsonify({'error': 'Reward signal adapter not available'}), 503
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/metrics')
+def metrics():
+    """Prometheus metrics endpoint for training system data."""
+    try:
+        if not hasattr(env, 'reward_signal_adapter') or not env.reward_signal_adapter:
+            return "# No reward signal adapter available\n", 200, {'Content-Type': 'text/plain'}
+        
+        # Get system status and metrics
+        status = env.reward_signal_adapter.get_system_status()
+        reward_metrics = env.reward_signal_adapter.get_all_reward_metrics()
+        
+        # Build Prometheus metrics format
+        metrics_output = []
+        
+        # System-level metrics
+        metrics_output.append(f"# HELP walker_total_agents Total number of agents registered")
+        metrics_output.append(f"# TYPE walker_total_agents gauge")
+        metrics_output.append(f"walker_total_agents {status.get('total_agents', 0)}")
+        
+        metrics_output.append(f"# HELP walker_total_rewards Total number of rewards recorded")
+        metrics_output.append(f"# TYPE walker_total_rewards counter")
+        metrics_output.append(f"walker_total_rewards {status.get('total_rewards_recorded', 0)}")
+        
+        metrics_output.append(f"# HELP walker_agents_with_metrics Number of agents with quality metrics")
+        metrics_output.append(f"# TYPE walker_agents_with_metrics gauge")
+        metrics_output.append(f"walker_agents_with_metrics {status.get('agents_with_metrics', 0)}")
+        
+        # Per-agent reward quality metrics (if any)
+        if reward_metrics:
+            metrics_output.append(f"# HELP walker_reward_quality_score Reward quality score per agent")
+            metrics_output.append(f"# TYPE walker_reward_quality_score gauge")
+            
+            metrics_output.append(f"# HELP walker_reward_signal_to_noise Signal to noise ratio per agent") 
+            metrics_output.append(f"# TYPE walker_reward_signal_to_noise gauge")
+            
+            for agent_id, metrics in reward_metrics.items():
+                agent_id_clean = agent_id.replace('-', '_')  # Prometheus-safe agent ID
+                metrics_output.append(f'walker_reward_quality_score{{agent_id="{agent_id_clean}"}} {metrics.quality_score:.4f}')
+                metrics_output.append(f'walker_reward_signal_to_noise{{agent_id="{agent_id_clean}"}} {metrics.signal_to_noise_ratio:.4f}')
+        
+        # Training system health
+        metrics_output.append(f"# HELP walker_system_active Training system active status")
+        metrics_output.append(f"# TYPE walker_system_active gauge")
+        metrics_output.append(f"walker_system_active {1 if status.get('active', False) else 0}")
+        
+        return "\n".join(metrics_output) + "\n", 200, {'Content-Type': 'text/plain'}
+        
+    except Exception as e:
+        # Return basic error metric
+        error_output = [
+            "# HELP walker_metrics_error Metrics collection error",
+            "# TYPE walker_metrics_error gauge", 
+            f"walker_metrics_error 1",
+            f"# Error: {str(e)}"
+        ]
+        return "\n".join(error_output) + "\n", 200, {'Content-Type': 'text/plain'}
+
+# Add missing interactive endpoints that the frontend JavaScript expects
+@app.route('/click', methods=['POST'])
+def click():
+    """Handle click events from the frontend for agent focusing."""
+    try:
+        data = request.get_json()
+        agent_id = data.get('agent_id')
+        
+        if agent_id:
+            # Find the agent by ID
+            agent_to_focus = next((agent for agent in env.agents if agent.id == agent_id), None)
+            if agent_to_focus:
+                env.focus_on_agent(agent_to_focus)
+                return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
+            else:
+                env.focus_on_agent(None)  # Clear focus if agent not found
+                return jsonify({'status': 'error', 'message': f'Agent {agent_id} not found', 'agent_id': None})
+        else:
+            # Clear focus if no agent_id provided
+            env.focus_on_agent(None)
+            return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/get_agent_at_position', methods=['POST'])
 def get_agent_at_position():
-    """Gets the agent at a specific mouse position."""
-    data = request.get_json()
-    if not data or 'x' not in data or 'y' not in data:
-        return jsonify({'status': 'error', 'message': 'Missing coordinates'}), 400
-    
-    world_x = data['x']
-    world_y = data['y']
-    
-    agent = env.get_agent_at_position(world_x, world_y)
-    agent_id = agent.id if agent else None
-    
-    return jsonify({
-        'status': 'success',
-        'agent_id': agent_id
-    })
+    """Get agent information at a specific world position."""
+    try:
+        data = request.get_json()
+        world_x = data.get('x', 0)  # Frontend sends 'x', not 'world_x'
+        world_y = data.get('y', 0)  # Frontend sends 'y', not 'world_y'
+        
+        agent = env.get_agent_at_position(world_x, world_y)
+        if agent:
+            return jsonify({
+                'status': 'success',
+                'agent_id': agent.id,  # Frontend expects 'agent_id' directly, not nested
+                'position': [agent.body.position.x, agent.body.position.y] if agent.body else [0, 0]
+            })
+        else:
+            return jsonify({'status': 'error', 'message': 'No agent found at position', 'agent_id': None})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e), 'agent_id': None}), 500
 
 @app.route('/move_agent', methods=['POST'])
 def move_agent():
-    data = request.get_json()
-    if not data or 'agent_id' not in data or 'x' not in data or 'y' not in data:
-        return jsonify({'status': 'error', 'message': 'Missing agent_id or coordinates'}), 400
-    
-    agent_id = data['agent_id']
-    x = data['x']
-    y = data['y']
-    
-    success = env.move_agent(agent_id, x, y)
-    
-    if success:
-        return jsonify({'status': 'success', 'agent_id': agent_id})
-    else:
-        return jsonify({'status': 'error', 'message': f'Failed to move agent {agent_id}'}), 500
-
-@app.route('/update_agent_params', methods=['POST'])
-def update_agent_params():
-    params = request.get_json()
-    if not params:
-        return jsonify({'status': 'error', 'message': 'No parameters provided'}), 400
-    
-    # Check if we should target a specific agent
-    target_agent_id = None
-    if 'target_agent_id' in params:
-        target_agent_id = params.pop('target_agent_id')
-    
-    success = env.update_agent_params(params, target_agent_id)
-    
-    if success:
-        return jsonify({'status': 'success', 'updated_params': params})
-    else:
-        return jsonify({'status': 'error', 'message': 'Failed to update parameters'}), 500
+    """Move an agent to a specific world position."""
+    try:
+        data = request.get_json()
+        agent_id = data.get('agent_id')
+        x = data.get('x', 0)
+        y = data.get('y', 0)
+        
+        success = env.move_agent(agent_id, x, y)
+        if success:
+            return jsonify({'status': 'success', 'message': f'Agent {agent_id} moved to ({x}, {y})'})
+        else:
+            return jsonify({'status': 'error', 'message': f'Failed to move agent {agent_id}'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/update_zoom', methods=['POST'])
 def update_zoom():
-    data = request.get_json()
-    if not data or 'zoom' not in data:
-        return jsonify({'status': 'error', 'message': 'No zoom level provided'}), 400
-    
-    zoom_level = data['zoom']
-    env.update_user_zoom(zoom_level)
-    
-    return jsonify({'status': 'success', 'zoom': env.user_zoom_level})
+    """Update the user's zoom level preference."""
+    try:
+        data = request.get_json()
+        zoom_level = data.get('zoom', 1.0)
+        
+        env.update_user_zoom(zoom_level)
+        return jsonify({'status': 'success', 'zoom': zoom_level})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/reset_view', methods=['POST'])
 def reset_view():
-    # Clear focus, reset zoom preferences, and reset camera position
-    env.focus_on_agent(None)
-    env.reset_user_zoom()
-    env.reset_camera_position()
-    
-    return jsonify({'status': 'success', 'message': 'View reset'})
+    """Reset camera view to default position and zoom."""
+    try:
+        env.reset_camera_position()
+        env.reset_user_zoom()
+        return jsonify({'status': 'success', 'message': 'View reset to default'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/clear_zoom_override', methods=['POST'])
 def clear_zoom_override():
-    env.clear_zoom_override()
-    return jsonify({'status': 'success'})
+    """Clear zoom override flag after frontend receives it."""
+    try:
+        env.clear_zoom_override()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/update_agent_params', methods=['POST'])
+def update_agent_params():
+    """Update agent parameters."""
+    try:
+        data = request.get_json()
+        params = data.get('params', {})
+        target_agent_id = data.get('target_agent_id')
+        
+        result = env.update_agent_params(params, target_agent_id)
+        return jsonify({'status': 'success', 'updated_params': result})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/switch_learning_approach', methods=['POST'])
 def switch_learning_approach():
     """Switch an agent's learning approach."""
-    data = request.get_json()
-    if not data or 'agent_id' not in data or 'approach' not in data:
-        return jsonify({'status': 'error', 'message': 'Missing agent_id or approach'}), 400
-    
-    agent_id = data['agent_id']
-    approach = data['approach']
-    
-    success = env.switch_agent_learning_approach(agent_id, approach)
-    
-    if success:
-        return jsonify({'status': 'success', 'agent_id': agent_id, 'approach': approach})
-    else:
-        return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'}), 500
-
-@app.route('/change_terrain_style', methods=['POST'])
-def change_terrain_style():
-    """Change the terrain generation style and regenerate the terrain."""
     try:
         data = request.get_json()
-        if not data or 'style' not in data:
-            return jsonify({'status': 'error', 'message': 'Missing style parameter'}), 400
+        agent_id = data.get('agent_id')
+        approach = data.get('approach')
         
-        new_style = data['style']
+        if not agent_id or not approach:
+            return jsonify({'status': 'error', 'message': 'agent_id and approach are required'}), 400
         
-        # Get available robot-scale terrain styles
-        robot_terrain_styles = [
-            'flat', 'gentle_hills', 'obstacle_course', 'slopes_and_ramps', 
-            'rough_terrain', 'varied', 'mixed'
-        ]
-        
-        if new_style not in robot_terrain_styles:
-            return jsonify({
-                'status': 'error', 
-                'message': f'Unknown style. Available: {robot_terrain_styles}'
-            }), 400
-        
-        # Change the terrain style
-        success = env.change_terrain_style(new_style)
-        
+        success = env.switch_agent_learning_approach(agent_id, approach)
         if success:
-            # Robot-scale terrain style descriptions
-            style_descriptions = {
-                'flat': 'Mostly flat terrain with occasional small features',
-                'gentle_hills': 'Small, navigable hills and gentle slopes',
-                'obstacle_course': 'Various sized obstacles and challenges',
-                'slopes_and_ramps': 'Terrain focused on slopes and ramps',
-                'rough_terrain': 'Rough, uneven terrain',
-                'varied': 'Varied terrain with all feature types',
-                'mixed': 'Balanced mixed terrain good for robot training'
-            }
-            
-            return jsonify({
-                'status': 'success', 
-                'message': f'Terrain changed to {new_style}',
-                'style': new_style,
-                'description': style_descriptions.get(new_style, 'Robot-scale terrain'),
-                'terrain_bodies_created': len(env.terrain_collision_bodies)
-            })
+            return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
         else:
-            return jsonify({'status': 'error', 'message': 'Failed to change terrain style'}), 500
-            
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/get_terrain_styles', methods=['GET'])
-def get_terrain_styles():
-    """Get available robot-scale terrain styles."""
-    try:
-        # Robot-scale terrain styles with descriptions
-        robot_terrain_styles = {
-            'flat': {
-                'name': 'flat',
-                'description': 'Mostly flat terrain with occasional small features',
-                'style': 'flat'
-            },
-            'gentle_hills': {
-                'name': 'gentle_hills',
-                'description': 'Small, navigable hills and gentle slopes',
-                'style': 'gentle_hills'
-            },
-            'obstacle_course': {
-                'name': 'obstacle_course',
-                'description': 'Various sized obstacles and challenges',
-                'style': 'obstacle_course'
-            },
-            'slopes_and_ramps': {
-                'name': 'slopes_and_ramps',
-                'description': 'Terrain focused on slopes and ramps',
-                'style': 'slopes_and_ramps'
-            },
-            'rough_terrain': {
-                'name': 'rough_terrain',
-                'description': 'Rough, uneven terrain',
-                'style': 'rough_terrain'
-            },
-            'varied': {
-                'name': 'varied',
-                'description': 'Varied terrain with all feature types',
-                'style': 'varied'
-            },
-            'mixed': {
-                'name': 'mixed',
-                'description': 'Balanced mixed terrain good for robot training',
-                'style': 'mixed'
-            }
-        }
-        
-        return jsonify({
-            'status': 'success',
-            'styles': robot_terrain_styles,
-            'current_style': env.terrain_style if hasattr(env, 'terrain_style') else 'mixed'
-        })
-        
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/evolution_event', methods=['POST'])
-def evolution_event():
-    data = request.get_json()
-    if not data or 'event' not in data:
-        return jsonify({'status': 'error', 'message': 'No event specified'}), 400
-    
-    event = data['event']
-    
-    try:
-        if event == 'spawn':
-            env.spawn_agent()
-        elif event == 'clone':
-            env.clone_best_agent()
-        elif event == 'evolve':
-            env.trigger_evolution()  # Use new evolution method
-        elif event == 'learn_from_leader':
-            env.perform_periodic_learning()
-        elif event == 'toggle_auto_evolution':
-            enabled = env.toggle_auto_evolution()
-            return jsonify({'status': 'success', 'event': event, 'auto_evolution_enabled': enabled})
-        else:
-            return jsonify({'status': 'error', 'message': f'Unknown event: {event}'}), 400
-        
-        return jsonify({'status': 'success', 'event': event})
-    except Exception as e:
-        print(f"❌ Evolution event '{event}' failed: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/evolution_status', methods=['GET'])
-def evolution_status():
-    """Get current evolution status."""
-    try:
-        status = env.get_evolution_status()
-        return jsonify({'status': 'success', 'evolution_status': status})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/get_diverse_agents', methods=['GET'])
-def get_diverse_agents():
-    """Get diverse representatives from the population."""
-    try:
-        count = request.args.get('count', 5, type=int)
-        diverse_agents = env.evolution_engine.get_diverse_representatives(count)
-        
-        agent_info = []
-        for agent in diverse_agents:
-            info = {
-                'id': agent.id,
-                'fitness': agent.get_evolutionary_fitness(),
-                'generation': agent.generation,
-                'diversity_metrics': agent.get_diversity_metrics(),
-                'physical_summary': {
-                    'body_size': f"{agent.physical_params.body_width:.2f}x{agent.physical_params.body_height:.2f}",
-                    'wheel_radius': agent.physical_params.wheel_radius,
-                    'motor_torque': agent.physical_params.motor_torque,
-                    'learning_rate': agent.physical_params.learning_rate,
-                    'epsilon': agent.physical_params.epsilon
-                }
-            }
-            agent_info.append(info)
-        
-        return jsonify({'status': 'success', 'diverse_agents': agent_info})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/evaluation_metrics', methods=['GET'])
-def get_evaluation_metrics():
-    """Get comprehensive evaluation metrics."""
-    try:
-        if not env.enable_evaluation or not env.metrics_collector:
-            return jsonify({'status': 'error', 'message': 'Evaluation framework not enabled'}), 400
-        
-        metrics_summary = env.metrics_collector.get_current_metrics_summary()
-        return jsonify({'status': 'success', 'metrics': metrics_summary})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/evaluation_diagnostics', methods=['GET'])
-def get_evaluation_diagnostics():
-    """Get training diagnostics and recommendations."""
-    try:
-        if not env.enable_evaluation or not env.metrics_collector:
-            return jsonify({'status': 'error', 'message': 'Evaluation framework not enabled'}), 400
-        
-        diagnostics = env.metrics_collector.get_training_diagnostics()
-        return jsonify({'status': 'success', 'diagnostics': diagnostics})
+            return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/test_carnivore_feeding', methods=['POST'])
 def test_carnivore_feeding():
-    """Test endpoint to verify carnivore feeding mechanics"""
+    """Test carnivore feeding mechanics."""
     try:
-        if env:
-            env.test_carnivore_feeding()
-            return jsonify({'status': 'success', 'message': 'Carnivore feeding test completed - check console for results'})
-        else:
-            return jsonify({'status': 'error', 'message': 'Training environment not available'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Test failed: {str(e)}'})
-
-@app.route('/q_learning_status', methods=['GET'])
-def get_q_learning_status():
-    """Get comprehensive Q-learning evaluation status."""
-    try:
-        from src.evaluation.q_learning_integration import get_q_learning_status_for_api
-        status = get_q_learning_status_for_api(env)
-        return jsonify(status)
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': f'Q-learning status error: {str(e)}'})
-
-@app.route('/q_learning_agent/<agent_id>', methods=['GET'])
-def get_agent_q_learning_metrics(agent_id):
-    """Get detailed Q-learning metrics for a specific agent."""
-    try:
-        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
-            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
-        
-        metrics = env.q_learning_evaluator.get_agent_metrics(agent_id)
-        if metrics:
-            return jsonify({'status': 'success', 'metrics': metrics.to_dict()})
-        else:
-            return jsonify({'status': 'error', 'message': f'No metrics found for agent {agent_id}'}), 404
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/q_learning_agent/<agent_id>/diagnostics', methods=['GET'])
-def get_agent_q_learning_diagnostics(agent_id):
-    """Get Q-learning diagnostics and recommendations for a specific agent."""
-    try:
-        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
-            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
-        
-        diagnostics = env.q_learning_evaluator.get_learning_diagnostics(agent_id)
-        return jsonify({'status': 'success', 'diagnostics': diagnostics})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/q_learning_comparison', methods=['GET'])
-def get_q_learning_type_comparison():
-    """Get comparative analysis of Q-learning performance across agent types."""
-    try:
-        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
-            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
-        
-        comparison = env.q_learning_evaluator.get_type_comparison()
-        return jsonify({'status': 'success', 'comparison': comparison})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/q_learning_summary', methods=['GET'])
-def get_q_learning_summary():
-    """Get comprehensive Q-learning summary report."""
-    try:
-        if not hasattr(env, 'q_learning_evaluator') or env.q_learning_evaluator is None:
-            return jsonify({'status': 'error', 'message': 'Q-learning evaluator not initialized'}), 400
-        
-        summary = env.q_learning_evaluator.generate_summary_report()
-        return jsonify({'status': 'success', 'summary': summary})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/reward_signal_status', methods=['GET'])
-def get_reward_signal_status():
-    """Get overall reward signal evaluation status."""
-    try:
-        from src.evaluation.reward_signal_integration import reward_signal_adapter
-        status = reward_signal_adapter.get_system_status()
-        return jsonify(status)
-    except Exception as e:
-        logger.error(f"Error getting reward signal status: {e}")
-        return jsonify({'error': str(e), 'timestamp': time.time()})
-
-@app.route('/reward_signal_summary', methods=['GET'])
-def get_reward_signal_summary():
-    """Get comprehensive reward signal quality summary."""
-    try:
-        from src.evaluation.reward_signal_integration import reward_signal_adapter
-        summary = reward_signal_adapter.get_reward_comparative_report()
-        return jsonify(summary)
-    except Exception as e:
-        logger.error(f"Error getting reward signal summary: {e}")
-        return jsonify({'error': str(e), 'timestamp': time.time()})
-
-@app.route('/reward_signal_agent/<agent_id>', methods=['GET'])
-def get_agent_reward_signal_metrics(agent_id):
-    """Get reward signal metrics for a specific agent."""
-    try:
-        from src.evaluation.reward_signal_integration import reward_signal_adapter
-        metrics = reward_signal_adapter.get_agent_reward_metrics(agent_id)
-        
-        if metrics:
-            return jsonify({
-                'agent_id': agent_id,
-                'metrics': metrics.to_dict(),
-                'timestamp': time.time()
-            })
-        else:
-            return jsonify({
-                'agent_id': agent_id,
-                'status': 'no_data',
-                'message': 'No reward signal data available for this agent',
-                'timestamp': time.time()
-            })
-    except Exception as e:
-        logger.error(f"Error getting reward signal metrics for agent {agent_id}: {e}")
-        return jsonify({'error': str(e), 'agent_id': agent_id, 'timestamp': time.time()})
-
-@app.route('/reward_signal_agent/<agent_id>/diagnostics', methods=['GET'])
-def get_agent_reward_signal_diagnostics(agent_id):
-    """Get detailed reward signal diagnostics for a specific agent."""
-    try:
-        from src.evaluation.reward_signal_integration import reward_signal_adapter
-        diagnostics = reward_signal_adapter.get_agent_diagnostics(agent_id)
-        return jsonify(diagnostics)
-    except Exception as e:
-        logger.error(f"Error getting reward signal diagnostics for agent {agent_id}: {e}")
-        return jsonify({'error': str(e), 'agent_id': agent_id, 'timestamp': time.time()})
-
-@app.route('/reward_signal_comparison', methods=['GET'])
-def get_reward_signal_comparison():
-    """Get comparative analysis of reward signal quality across agents."""
-    try:
-        from src.evaluation.reward_signal_integration import reward_signal_adapter
-        all_metrics = reward_signal_adapter.get_all_reward_metrics()
-        
-        if not all_metrics:
-            return jsonify({
-                'status': 'no_data',
-                'message': 'No reward signal data available',
-                'timestamp': time.time()
-            })
-        
-        # Organize by quality tiers
-        quality_tiers = {
-            'excellent': [],
-            'good': [],
-            'fair': [],
-            'poor': [],
-            'very_poor': []
-        }
-        
-        for agent_id, metrics in all_metrics.items():
-            if metrics.quality_score >= 0.8:
-                tier = 'excellent'
-            elif metrics.quality_score >= 0.6:
-                tier = 'good'
-            elif metrics.quality_score >= 0.4:
-                tier = 'fair'
-            elif metrics.quality_score >= 0.2:
-                tier = 'poor'
-            else:
-                tier = 'very_poor'
-            
-            quality_tiers[tier].append({
-                'agent_id': agent_id,
-                'quality_score': metrics.quality_score,
-                'signal_to_noise_ratio': metrics.signal_to_noise_ratio,
-                'reward_consistency': metrics.reward_consistency,
-                'exploration_incentive': metrics.exploration_incentive,
-                'main_issues': [issue.value for issue in metrics.quality_issues[:3]]
-            })
-        
-        # Sort each tier by quality score
-        for tier in quality_tiers.values():
-            tier.sort(key=lambda x: x['quality_score'], reverse=True)
-        
-        return jsonify({
-            'quality_tiers': quality_tiers,
-            'tier_counts': {tier: len(agents) for tier, agents in quality_tiers.items()},
-            'total_agents': len(all_metrics),
-            'timestamp': time.time()
-        })
-        
-    except Exception as e:
-        logger.error(f"Error getting reward signal comparison: {e}")
-        return jsonify({'error': str(e), 'timestamp': time.time()})
-
-@app.route('/performance_status')
-def get_performance_status():
-    """Enhanced performance status with Q-learning metrics."""
-    try:
-        # Get basic performance status
-        performance_data = {
-            'entities': {
-                'world_bodies': len(env.world.bodies) if env.world else 0,
-                'food_sources': len(getattr(env.ecosystem_dynamics, 'food_sources', [])),
-                'static_bodies': len(getattr(env, 'terrain_collision_bodies', [])),
-                'dynamic_bodies': len([a for a in env.agents if not getattr(a, '_destroyed', False)]),
-                'total_agents': len(env.agents),
-                'active_agents': len([a for a in env.agents if not getattr(a, '_destroyed', False)])
-            },
-            'performance': {
-                'step_count': getattr(env, 'step_count', 0),
-                'memory_mb': 0.0,  # Will be filled by system monitoring
-                'cpu_percent': 0.0,  # Will be filled by system monitoring
-                'fps': getattr(env, 'fps', 0.0)
-            }
-        }
-        
-        # Add system resource information
-        try:
-            import psutil
-            import os
-            process = psutil.Process(os.getpid())
-            performance_data['performance']['memory_mb'] = process.memory_info().rss / 1024 / 1024
-            performance_data['performance']['cpu_percent'] = process.cpu_percent()
-        except:
-            pass
-        
-        # Add Q-learning evaluation data if available
-        if hasattr(env, 'q_learning_evaluator') and env.q_learning_evaluator is not None:
-            try:
-                q_metrics = env.q_learning_evaluator.get_all_agent_metrics()
-                q_comparison = env.q_learning_evaluator.get_type_comparison()
-                
-                performance_data['q_learning'] = {
-                    'agents_monitored': len(q_metrics),
-                    'agent_types': list(q_comparison.keys()),
-                    'overall_stats': {
-                        'avg_prediction_mae': float(sum(m.value_prediction_mae for m in q_metrics.values()) / len(q_metrics)) if q_metrics else 0.0,
-                        'avg_convergence_score': float(sum(m.convergence_score for m in q_metrics.values()) / len(q_metrics)) if q_metrics else 0.0,
-                        'agents_with_issues': len([m for m in q_metrics.values() if m.learning_issues]),
-                        'agents_learning_well': len([m for m in q_metrics.values() if m.learning_efficiency_score > 0.6])
-                    },
-                    'type_performance': q_comparison
-                }
-            except Exception as e:
-                performance_data['q_learning'] = {'error': str(e)}
-        else:
-            performance_data['q_learning'] = {'status': 'not_initialized'}
-        
-        # Add reward signal evaluation data if available
-        try:
-            from src.evaluation.reward_signal_integration import reward_signal_adapter
-            reward_status = reward_signal_adapter.get_system_status()
-            reward_metrics = reward_signal_adapter.get_all_reward_metrics()
-            
-            if reward_metrics:
-                # Calculate aggregate statistics
-                avg_quality = sum(m.quality_score for m in reward_metrics.values()) / len(reward_metrics)
-                avg_snr = sum(m.signal_to_noise_ratio for m in reward_metrics.values()) / len(reward_metrics)
-                avg_consistency = sum(m.reward_consistency for m in reward_metrics.values()) / len(reward_metrics)
-                
-                # Count quality issues
-                all_issues = []
-                for metrics in reward_metrics.values():
-                    all_issues.extend([issue.value for issue in metrics.quality_issues])
-                
-                issue_counts = {}
-                for issue in all_issues:
-                    issue_counts[issue] = issue_counts.get(issue, 0) + 1
-                
-                performance_data['reward_signals'] = {
-                    'agents_monitored': len(reward_metrics),
-                    'total_rewards_recorded': reward_status['total_rewards_recorded'],
-                    'overall_stats': {
-                        'avg_quality_score': float(avg_quality),
-                        'avg_signal_to_noise_ratio': float(avg_snr),
-                        'avg_consistency': float(avg_consistency),
-                        'agents_with_good_rewards': len([m for m in reward_metrics.values() if m.quality_score > 0.6]),
-                        'agents_with_issues': len([m for m in reward_metrics.values() if m.quality_issues]),
-                        'sparse_reward_agents': len([m for m in reward_metrics.values() if m.reward_sparsity > 0.8])
-                    },
-                    'common_issues': issue_counts,
-                    'status': 'active' if reward_status['active'] else 'inactive'
-                }
-            else:
-                performance_data['reward_signals'] = {
-                    'status': 'no_data',
-                    'agents_monitored': 0,
-                    'total_rewards_recorded': reward_status.get('total_rewards_recorded', 0)
-                }
-        except Exception as e:
-            performance_data['reward_signals'] = {'error': str(e)}
-        
-        return jsonify(performance_data)
+        env.test_carnivore_feeding()
+        return jsonify({'status': 'success', 'message': 'Carnivore feeding test executed'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 

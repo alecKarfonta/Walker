@@ -10,9 +10,26 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
 
-# Handle numpy import gracefully
+# Handle numpy import gracefully and add missing entropy function
 try:
     import numpy as np
+    # Add entropy function to numpy if it doesn't exist
+    if not hasattr(np, 'entropy'):
+        def entropy(data):
+            if not data: return 0.0
+            # Calculate entropy of reward distribution
+            counts = {}
+            for x in data:
+                rounded = round(x, 3)  # Round for binning
+                counts[rounded] = counts.get(rounded, 0) + 1
+            total = len(data)
+            entropy_val = 0.0
+            for count in counts.values():
+                p = count / total
+                if p > 0:
+                    entropy_val -= p * math.log2(p)
+            return entropy_val
+        np.entropy = entropy
 except ImportError:
     # Basic numpy substitute for statistical operations
     class NumpySubstitute:
@@ -180,21 +197,48 @@ class RewardSignalEvaluator:
         if timestamp is None:
             timestamp = time.time()
         
-        # Store the data
-        self.agent_rewards[agent_id].append(reward)
-        self.agent_states[agent_id].append(state)
-        self.agent_actions[agent_id].append(action)
-        self.agent_timestamps[agent_id].append(timestamp)
-        
-        # Store for state-action consistency analysis
-        state_key = tuple(state) if hasattr(state, '__iter__') else state
-        action_key = (state_key, action)
-        self.state_action_rewards[agent_id][action_key].append(reward)
-        
-        # Periodic evaluation
-        if len(self.agent_rewards[agent_id]) >= self.min_samples:
-            if len(self.agent_rewards[agent_id]) % 100 == 0:  # Evaluate every 100 samples
-                self._evaluate_agent_reward_quality(agent_id)
+        try:
+            # Store the data
+            self.agent_rewards[agent_id].append(reward)
+            self.agent_states[agent_id].append(state)
+            self.agent_actions[agent_id].append(action)
+            self.agent_timestamps[agent_id].append(timestamp)
+            
+            # Store for state-action consistency analysis with improved state handling
+            try:
+                # Handle different state types more robustly
+                if hasattr(state, '__iter__') and not isinstance(state, (str, bytes)):
+                    # For iterables (lists, tuples, numpy arrays), convert to tuple
+                    if hasattr(state, 'tolist'):  # numpy array
+                        state_key = tuple(state.tolist())
+                    else:
+                        state_key = tuple(state)
+                elif hasattr(state, '__dict__'):
+                    # For objects with attributes, use a string representation
+                    state_key = str(state)
+                else:
+                    # For simple types (int, float, string)
+                    state_key = state
+                    
+                action_key = (state_key, action)
+                self.state_action_rewards[agent_id][action_key].append(reward)
+                
+            except Exception as state_error:
+                # If state conversion fails, use a fallback but still record the reward
+                print(f"⚠️ State conversion failed for agent {agent_id}: {state_error}")
+                fallback_key = (f"state_hash_{hash(str(state))}", action)
+                self.state_action_rewards[agent_id][fallback_key].append(reward)
+            
+            # Periodic evaluation
+            if len(self.agent_rewards[agent_id]) >= self.min_samples:
+                if len(self.agent_rewards[agent_id]) % 100 == 0:  # Evaluate every 100 samples
+                    self._evaluate_agent_reward_quality(agent_id)
+                    
+        except Exception as e:
+            print(f"❌ Failed to record reward for agent {agent_id}: {e}")
+            print(f"   State type: {type(state)}, Action: {action}, Reward: {reward}")
+            # Don't let recording failures break the system
+            pass
     
     def _evaluate_agent_reward_quality(self, agent_id: str) -> RewardSignalMetrics:
         """Evaluate reward signal quality for an agent."""

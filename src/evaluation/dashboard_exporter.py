@@ -585,8 +585,9 @@ class DashboardExporter:
     def _update_reward_signal_metrics(self):
         """Update reward signal quality metrics in current metrics cache."""
         try:
-            # Import reward signal adapter
-            from .reward_signal_integration import reward_signal_adapter
+            # Import reward signal adapter (ensure we get the singleton instance)
+            from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+            reward_signal_adapter = get_reward_signal_adapter()
             
             # Get all reward signal metrics
             all_reward_metrics = reward_signal_adapter.get_all_reward_metrics()

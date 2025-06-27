@@ -5,10 +5,14 @@ Allows dynamic switching between different Q-learning approaches for individual 
 
 import time
 import numpy as np
+import logging
 from typing import Dict, Any, List, Optional, Union
 from enum import Enum
 from .q_table import EnhancedQTable, SparseQTable
 from .survival_q_integration_patch import SurvivalAwareQLearning
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
 
 
 class LearningApproach(Enum):
@@ -41,6 +45,9 @@ class LearningManager:
         
         # Deep learning training coordination
         self._agents_currently_training: set = set()
+        
+        # Individual network creation counter for logging
+        self._network_creation_count = 0
         
         # Performance tracking for comparison
         self.approach_performance: Dict[LearningApproach, Dict[str, float]] = {
@@ -185,36 +192,64 @@ class LearningManager:
             elif to_approach == LearningApproach.DEEP_Q_LEARNING:
                 return self._setup_deep_q_learning(agent)
             
-            elif to_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING and self.attention_deep_q_available:
-                from .attention_deep_q_learning import AttentionDeepQLearning
+            elif to_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
+                if not self.attention_deep_q_available:
+                    print(f"❌ Attention Deep Q-Learning not available. Falling back to Deep Q-Learning for agent {agent.id}")
+                    return self._setup_deep_q_learning(agent)
                 
-                # Get continuous state representation
-                state_data = self._get_agent_state_data(agent)
-                state_vector = self._convert_to_continuous_state(state_data)
+                agent_id = agent.id
                 
-                # Initialize attention-based deep Q-learning
-                attention_dqn = AttentionDeepQLearning(
-                    state_dim=len(state_vector),
-                    action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
-                    learning_rate=0.001
-                )
+                # Check if agent already has its own attention network to prevent recreation
+                if hasattr(agent, '_attention_dqn') and agent._attention_dqn is not None:
+                    print(f"🔍 Agent {agent_id[:8]} already has its own Attention Deep Q-Learning network")
+                    agent.learning_approach = to_approach.value
+                    return True
                 
-                # Store reference and replace action selection
-                agent._attention_dqn = attention_dqn
-                agent._original_choose_action = getattr(agent, 'choose_action', None)
-                
-                # Replace action selection method
-                def attention_choose_action():
+                try:
+                    
+                    from .attention_deep_q_learning import AttentionDeepQLearning
+                    
+                    # Get continuous state representation
                     state_data = self._get_agent_state_data(agent)
                     state_vector = self._convert_to_continuous_state(state_data)
-                    action = agent._attention_dqn.choose_action(state_vector, state_data)
-                    return action
-                
-                agent.choose_action = attention_choose_action
-                agent.learning_approach = to_approach.value
-                
-                print(f"🔍 Agent {agent.id} now using Attention Deep Q-Learning")
-                return True
+                    
+                    # Create individual attention network for this agent
+                    self._network_creation_count += 1
+                    print(f"🧠 Creating individual Attention Network #{self._network_creation_count} for agent {agent_id[:8]}")
+                    
+                    attention_dqn = AttentionDeepQLearning(
+                        state_dim=len(state_vector),
+                        action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
+                        learning_rate=0.001
+                    )
+                    
+                    # Store in agent only (no global sharing)
+                    agent._attention_dqn = attention_dqn
+                    agent._original_choose_action = getattr(agent, 'choose_action', None)
+                    
+                    # Replace action selection method with individual network
+                    def attention_choose_action():
+                        if not hasattr(agent, '_attention_dqn') or agent._attention_dqn is None:
+                            # Fallback to prevent crashes if network is missing
+                            if agent._original_choose_action:
+                                return agent._original_choose_action()
+                            return 0
+                        
+                        state_data = self._get_agent_state_data(agent)
+                        state_vector = self._convert_to_continuous_state(state_data)
+                        action = agent._attention_dqn.choose_action(state_vector, state_data)
+                        return action
+                    
+                    agent.choose_action = attention_choose_action
+                    agent.learning_approach = to_approach.value
+                    
+                    print(f"✅ Agent {agent_id[:8]} now using Attention Deep Q-Learning (Network #{self._network_creation_count})")
+                    return True
+                    
+                except Exception as e:
+                    print(f"❌ Failed to setup Attention Deep Q-Learning for agent {agent_id[:8]}: {e}")
+                    print(f"🔄 Falling back to Deep Q-Learning for agent {agent_id[:8]}")
+                    return self._setup_deep_q_learning(agent)
             
             elif to_approach == LearningApproach.ELITE_IMITATION_LEARNING and self.elite_imitation_available:
                 # Store original action selection
@@ -268,6 +303,24 @@ class LearningManager:
             if hasattr(agent, '_original_step_method'):
                 agent.step = agent._original_step_method
                 delattr(agent, '_original_step_method')
+            
+            # CRITICAL FIX: Clean up attention deep Q-learning networks
+            if hasattr(agent, '_attention_dqn'):
+                try:
+                    # Clear GPU memory if using CUDA
+                    if hasattr(agent._attention_dqn, 'device') and 'cuda' in str(agent._attention_dqn.device):
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    del agent._attention_dqn
+                    print(f"🧹 Cleaned up attention network for agent {agent_id}")
+                except Exception as e:
+                    print(f"⚠️ Error cleaning attention network for agent {agent_id}: {e}")
+            
+            # Restore original choose_action method
+            if hasattr(agent, '_original_choose_action'):
+                agent.choose_action = agent._original_choose_action
+                delattr(agent, '_original_choose_action')
             
             # Clean up survival-specific attributes
             if hasattr(agent, '_prev_survival_state'):
@@ -386,10 +439,11 @@ class LearningManager:
             self.agent_adapters[agent.id] = deep_q_learner
             
             # Initialize experience collection (lightweight) vs training (heavy) separation
+            # PHYSICS ENGINE OPTIMIZED: 60 FPS = 16.67ms per step
             agent._deep_step_count = 0
-            agent._deep_experience_collection_freq = 10    # Collect experience every 10 steps (reduced frequency)
-            agent._deep_training_freq = 15000             # Train every 15,000 steps (much less frequent) 
-            agent._deep_min_buffer_size = 5000            # Minimum 5k experiences (reduced from 10k)
+            agent._deep_experience_collection_freq = 10   # Collect every 10 steps = 6 times/second
+            agent._deep_training_freq = 3000               # Train every 300 steps = every 5 seconds  
+            agent._deep_min_buffer_size = 3000            # Start training after 1,000 experiences
             agent._deep_ready_to_train = False            # No training until buffer is full
             agent._deep_prev_state = None
             agent._deep_prev_action = None                # Initialize previous action
@@ -408,14 +462,14 @@ class LearningManager:
                     # Initialize deep learning attributes if needed
                     if not hasattr(agent, '_deep_step_count'):
                         agent._deep_step_count = 0
-                        agent._deep_experience_collection_freq = 10
-                        agent._deep_training_freq = 15000
-                        agent._deep_min_buffer_size = 5000
+                        agent._deep_experience_collection_freq = 10   # Collect every 10 steps = 6 times/second
+                        agent._deep_training_freq = 3000               # Train every 300 steps = every 5 seconds
+                        agent._deep_min_buffer_size = 3000            # Start training after 1,000 experiences
                         agent._deep_ready_to_train = False
                         agent._deep_prev_state = None
                         agent._deep_prev_action = None
                         agent._deep_prev_reward = 0.0
-                        print(f"🔧 Deep Q-Learning attributes initialized for Agent {agent.id}")
+                        print(f"🔧 Deep Q-Learning attributes initialized for Agent {agent.id} (Physics Engine Optimized)")
                     
                     agent._deep_step_count += 1
                     
@@ -502,11 +556,11 @@ class LearningManager:
                         # Training coordination - prevent multiple agents training simultaneously
                         # (initialized in __init__ method)
                         
-                        # Skip training if too many agents are already training
-                        if len(self._agents_currently_training) >= 2:  # Max 2 agents training simultaneously
-                            # Defer training by small random amount
+                        # Skip training if any agent is already training (prevent GPU overload)
+                        if len(self._agents_currently_training) >= 1:  # Max 1 agent training at a time
+                            # Defer training by larger random amount to spread out training
                             import random
-                            agent._deep_step_count -= random.randint(100, 500)
+                            agent._deep_step_count -= random.randint(1000, 3000)
                             return result
                         
                         # Add this agent to training set
@@ -943,23 +997,60 @@ class LearningManager:
     def _convert_to_continuous_state(self, state_data: Dict[str, Any]) -> np.ndarray:
         """Convert state data to continuous vector for neural networks."""
         try:
-            # Use the attention deep Q-learning state representation if available
-            if self.attention_deep_q_available:
-                from .attention_deep_q_learning import AttentionDeepQLearning
-                temp_dqn = AttentionDeepQLearning()
-                return temp_dqn.get_enhanced_state_representation(state_data)
-            else:
-                # Fallback to simple state vector
-                return np.array([
-                    state_data.get('position', (0, 0))[0] / 100.0,
-                    state_data.get('position', (0, 0))[1] / 100.0,
-                    state_data.get('energy', 1.0),
-                    state_data.get('health', 1.0),
-                    state_data.get('body_angle', 0.0) / np.pi
-                ], dtype=np.float32)
+            # FIXED: Use standalone state representation function instead of creating new instances
+            return self._get_enhanced_state_representation_static(state_data)
         except Exception as e:
-            logger.warning(f"Error converting to continuous state: {e}")
-            return np.zeros(5, dtype=np.float32)
+            print(f"⚠️ Error converting to continuous state: {e}")
+            return np.zeros(15, dtype=np.float32)
+    
+    def _get_enhanced_state_representation_static(self, agent_data: Dict[str, Any]) -> np.ndarray:
+        """Standalone state representation function that doesn't require instantiating classes."""
+        try:
+            # Physical features (8 dimensions)
+            position_x = agent_data.get('position', (0, 0))[0] / 100.0  # Normalize
+            position_y = agent_data.get('position', (0, 0))[1] / 100.0
+            velocity_x = agent_data.get('velocity', (0, 0))[0] / 10.0
+            velocity_y = agent_data.get('velocity', (0, 0))[1] / 10.0
+            
+            arm_angles = agent_data.get('arm_angles', {'shoulder': 0, 'elbow': 0})
+            shoulder_angle = arm_angles['shoulder'] / np.pi  # Normalize to [-1, 1]
+            elbow_angle = arm_angles['elbow'] / np.pi
+            
+            body_angle = agent_data.get('body_angle', 0) / np.pi
+            stability = 1.0 - abs(body_angle)  # Higher is more stable
+            
+            physical = [position_x, position_y, velocity_x, velocity_y, 
+                       shoulder_angle, elbow_angle, body_angle, stability]
+            
+            # Energy features (2 dimensions)
+            energy = agent_data.get('energy', 1.0)
+            health = agent_data.get('health', 1.0)
+            energy_features = [energy, health]
+            
+            # Food features (3 dimensions)
+            food_info = agent_data.get('nearest_food', {'distance': float('inf'), 'direction': 0, 'type': 0})
+            food_distance = min(1.0, food_info['distance'] / 50.0)  # Normalize and cap
+            food_direction = food_info['direction'] / np.pi  # Normalize to [-1, 1]
+            food_type = food_info.get('type', 0) / 3.0  # Normalize food type
+            food_features = [food_distance, food_direction, food_type]
+            
+            # Social features (2 dimensions)
+            nearby_agents = min(1.0, agent_data.get('nearby_agents', 0) / 10.0)  # Normalize
+            competition = agent_data.get('competition_pressure', 0.5)
+            social_features = [nearby_agents, competition]
+            
+            # Combine all features (15 dimensions total)
+            state = np.array(physical + energy_features + food_features + social_features, dtype=np.float32)
+            
+            # Ensure no NaN or infinite values
+            state = np.nan_to_num(state, nan=0.0, posinf=1.0, neginf=-1.0)
+            
+            return state
+            
+        except Exception as e:
+            print(f"⚠️ Error creating state representation: {e}")
+            # Return default state
+            return np.zeros(15, dtype=np.float32)
     
     def _get_agent_context(self, agent) -> Dict[str, Any]:
         """Get contextual information for elite imitation learning."""

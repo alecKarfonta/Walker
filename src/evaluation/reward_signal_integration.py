@@ -50,8 +50,18 @@ class RewardSignalIntegrationAdapter:
         if agent_id not in self.registered_agents:
             self.register_agent(agent_id, "auto_detected")
         
+        # Debug logging for first few calls
+        if self.registered_agents[agent_id]['reward_count'] < 5:
+            print(f"🔧 DEBUG: Recording reward {self.registered_agents[agent_id]['reward_count']+1} for agent {agent_id}: {reward}")
+        
         # Record in evaluator
-        self.evaluator.record_reward(agent_id, state, action, reward, timestamp)
+        try:
+            self.evaluator.record_reward(agent_id, state, action, reward, timestamp)
+            # Debug: confirm evaluator call succeeded
+            if self.registered_agents[agent_id]['reward_count'] < 5:
+                print(f"  ✅ Successfully called evaluator.record_reward")
+        except Exception as e:
+            print(f"❌ Failed to record in evaluator for agent {agent_id}: {e}")
         
         # Update tracking
         self.registered_agents[agent_id]['reward_count'] += 1
@@ -230,8 +240,18 @@ class RewardSignalIntegrationAdapter:
         print("▶️ Reward Signal Integration Adapter enabled")
 
 
-# Global instance for easy integration
-reward_signal_adapter = RewardSignalIntegrationAdapter()
+# Singleton pattern to ensure only one instance exists
+_reward_signal_adapter_instance = None
+
+def get_reward_signal_adapter():
+    """Get the singleton reward signal adapter instance."""
+    global _reward_signal_adapter_instance
+    if _reward_signal_adapter_instance is None:
+        _reward_signal_adapter_instance = RewardSignalIntegrationAdapter()
+    return _reward_signal_adapter_instance
+
+# Global instance for easy integration (uses singleton)
+reward_signal_adapter = get_reward_signal_adapter()
 
 
 # Helper functions for easy integration

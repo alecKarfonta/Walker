@@ -197,6 +197,29 @@ class RobotMemoryPool:
                     except Exception as e:
                         print(f"⚠️ Could not save deep learning state: {e}")
             
+            # CRITICAL FIX: Save attention deep learning specific state
+            elif learning_approach == "attention_deep_q_learning":
+                if hasattr(robot, '_attention_dqn') and robot._attention_dqn is not None:
+                    try:
+                        # Save attention neural network weights
+                        snapshot.neural_network_weights = robot._attention_dqn.state_dict()
+                        
+                        # Save experience buffer (limit size to prevent memory issues)
+                        if hasattr(robot._attention_dqn, 'memory') and len(robot._attention_dqn.memory) > 0:
+                            buffer_size = min(10000, len(robot._attention_dqn.memory))  # Limit to 10k experiences
+                            snapshot.experience_buffer = list(robot._attention_dqn.memory.buffer)[-buffer_size:]
+                        
+                        # Save attention learning statistics
+                        snapshot.deep_learning_stats = {
+                            'training_steps': getattr(robot._attention_dqn, '_training_steps', 0),
+                            'epsilon': getattr(robot._attention_dqn, 'epsilon', 1.0),
+                            'loss_history': getattr(robot._attention_dqn, '_loss_history', [])[-100:],  # Last 100 losses
+                            'attention_entropy': getattr(robot._attention_dqn, '_attention_entropy', 0.0)
+                        }
+                        print(f"💾 Saved attention network state for robot {robot.id}")
+                    except Exception as e:
+                        print(f"⚠️ Could not save attention learning state: {e}")
+            
             self.pool_stats['learning_states_saved'] += 1
             print(f"💾 Saved {learning_approach} state for robot {robot.id}")
             return snapshot
@@ -260,7 +283,8 @@ class RobotMemoryPool:
                     'basic_q_learning': LearningApproach.BASIC_Q_LEARNING,
                     'enhanced_q_learning': LearningApproach.ENHANCED_Q_LEARNING,
                     'survival_q_learning': LearningApproach.SURVIVAL_Q_LEARNING,
-                    'deep_q_learning': LearningApproach.DEEP_Q_LEARNING
+                    'deep_q_learning': LearningApproach.DEEP_Q_LEARNING,
+                    'attention_deep_q_learning': LearningApproach.ATTENTION_DEEP_Q_LEARNING  # CRITICAL FIX
                 }
                 
                 if snapshot.learning_approach in approach_map:
@@ -303,6 +327,29 @@ class RobotMemoryPool:
                                     setattr(deep_adapter, f'_{key}', value)
                     except Exception as e:
                         print(f"⚠️ Could not restore deep learning state: {e}")
+            
+            # CRITICAL FIX: Restore attention deep learning state
+            elif snapshot.learning_approach == "attention_deep_q_learning":
+                if hasattr(robot, '_attention_dqn') and robot._attention_dqn is not None:
+                    try:
+                        # Restore attention neural network weights
+                        if snapshot.neural_network_weights:
+                            robot._attention_dqn.load_state_dict(snapshot.neural_network_weights)
+                            print(f"♻️ Restored attention network weights for robot {robot.id}")
+                        
+                        # Restore experience buffer
+                        if snapshot.experience_buffer and hasattr(robot._attention_dqn, 'memory'):
+                            for experience_tuple in snapshot.experience_buffer:
+                                robot._attention_dqn.memory.push(*experience_tuple)
+                        
+                        # Restore attention learning statistics
+                        if snapshot.deep_learning_stats:
+                            for key, value in snapshot.deep_learning_stats.items():
+                                if hasattr(robot._attention_dqn, f'_{key}'):
+                                    setattr(robot._attention_dqn, f'_{key}', value)
+                        
+                    except Exception as e:
+                        print(f"⚠️ Could not restore attention learning state: {e}")
             
             self.pool_stats['learning_states_restored'] += 1
             print(f"♻️ Restored {snapshot.learning_approach} state for robot {robot.id}")

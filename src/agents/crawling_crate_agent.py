@@ -614,17 +614,34 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 use_adaptive_lr=True
             )
             
-            # Record reward signal for evaluation
+            # Record reward signal for evaluation using the training environment's adapter
             try:
-                from src.evaluation.reward_signal_integration import reward_signal_adapter
-                reward_signal_adapter.record_reward_signal(
-                    agent_id=str(self.id),
-                    state=experience.state,
-                    action=experience.action,
-                    reward=experience.reward
-                )
-            except (ImportError, AttributeError):
-                # Silently handle if reward signal system not available
+                # Try to get the training environment's adapter instance first
+                training_env = getattr(self, '_training_env', None)
+                if training_env and hasattr(training_env, 'reward_signal_adapter'):
+                    training_env.reward_signal_adapter.record_reward_signal(
+                        agent_id=str(self.id),
+                        state=experience.state,
+                        action=experience.action,
+                        reward=experience.reward
+                    )
+                else:
+                    # Fallback: use singleton instance to avoid multiple instance issue  
+                    from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+                    reward_signal_adapter = get_reward_signal_adapter()
+                    reward_signal_adapter.record_reward_signal(
+                        agent_id=str(self.id),
+                        state=experience.state,
+                        action=experience.action,
+                        reward=experience.reward
+                    )
+            except ImportError:
+                # Module not available, skip silently
+                pass
+            except Exception as e:
+                # Log other errors for debugging
+                if self.steps % 100 == 0:  # Only log errors occasionally to avoid spam
+                    print(f"⚠️ Reward signal recording failed for agent {self.id}: {e}")
                 pass
     
     def learn_from_replay(self):
@@ -727,17 +744,34 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                     use_adaptive_lr=True
                 )
                 
-                # Record reward signal for evaluation
+                # Record reward signal for evaluation using the training environment's adapter
                 try:
-                    from src.evaluation.reward_signal_integration import reward_signal_adapter
-                    reward_signal_adapter.record_reward_signal(
-                        agent_id=str(self.id),
-                        state=prev_state,
-                        action=prev_action,
-                        reward=reward
-                    )
-                except (ImportError, AttributeError):
-                    # Silently handle if reward signal system not available
+                    # Try to get the training environment's adapter instance
+                    training_env = getattr(self, '_training_env', None)
+                    if training_env and hasattr(training_env, 'reward_signal_adapter'):
+                        training_env.reward_signal_adapter.record_reward_signal(
+                            agent_id=str(self.id),
+                            state=prev_state,
+                            action=prev_action,
+                            reward=reward
+                        )
+                    else:
+                        # Fallback: use singleton instance to avoid multiple instance issue
+                        from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+                        reward_signal_adapter = get_reward_signal_adapter()
+                        reward_signal_adapter.record_reward_signal(
+                            agent_id=str(self.id),
+                            state=prev_state,
+                            action=prev_action,
+                            reward=reward
+                        )
+                except ImportError:
+                    # Module not available, skip silently
+                    pass
+                except Exception as e:
+                    # Log other errors for debugging
+                    if self.steps % 100 == 0:  # Only log errors occasionally
+                        print(f"⚠️ Reward signal recording failed for agent {self.id}: {e}")
                     pass
             
             # Choose new action using enhanced method

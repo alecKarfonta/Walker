@@ -34,7 +34,7 @@ scrape_configs:
   - job_name: 'walker-dashboard-api'
     scrape_interval: 30s
     scrape_timeout: 10s
-    metrics_path: '/api/metrics'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['walker-training-app:2322']
 
