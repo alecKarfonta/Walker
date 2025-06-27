@@ -279,16 +279,12 @@ class LearningManager:
                 
                 from .attention_deep_q_learning import AttentionDeepQLearning
                 
-                # Get state dimensions
-                state_data = self._get_agent_state_data(agent)
-                state_vector = self._convert_to_continuous_state(state_data)
-                
-                # Create individual attention network
+                # Create individual attention network with fixed dimensions (don't call _get_agent_state_data during setup)
                 self._network_creation_count += 1
                 print(f"🧠 Creating Attention Network #{self._network_creation_count} for agent {agent.id[:8]}")
                 
                 attention_dqn = AttentionDeepQLearning(
-                    state_dim=len(state_vector),
+                    state_dim=5,  # Fixed: [arm_angle, elbow_angle, food_distance, food_direction, ground_contact]
                     action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
                     learning_rate=0.001
                 )
@@ -882,83 +878,55 @@ class LearningManager:
         try:
             state_data = {}
             
-            # Physical state
-            if hasattr(agent, 'body') and agent.body:
-                state_data['position'] = (agent.body.position.x, agent.body.position.y)
-                state_data['velocity'] = (agent.body.linearVelocity.x, agent.body.linearVelocity.y)
-                state_data['body_angle'] = agent.body.angle
+            # Physical state - REQUIRE real body data
+            if not (hasattr(agent, 'body') and agent.body):
+                raise ValueError(f"Agent {agent.id} missing body physics data")
+                
+            state_data['position'] = (agent.body.position.x, agent.body.position.y)
+            state_data['velocity'] = (agent.body.linearVelocity.x, agent.body.linearVelocity.y)
+            state_data['body_angle'] = agent.body.angle
             
-            # Arm angles
-            if hasattr(agent, 'upper_arm') and hasattr(agent, 'lower_arm'):
-                state_data['arm_angles'] = {
-                    'shoulder': agent.upper_arm.angle if agent.upper_arm else 0,
-                    'elbow': agent.lower_arm.angle if agent.lower_arm else 0
-                }
+            # Arm angles - REQUIRE real arm data
+            if not (hasattr(agent, 'upper_arm') and agent.upper_arm and 
+                   hasattr(agent, 'lower_arm') and agent.lower_arm):
+                raise ValueError(f"Agent {agent.id} missing arm physics data")
+                
+            state_data['arm_angles'] = {
+                'shoulder': agent.upper_arm.angle,
+                'elbow': agent.lower_arm.angle
+            }
             
             # Energy and health
             state_data['energy'] = getattr(agent, 'energy_level', 1.0)
             state_data['health'] = getattr(agent, 'health_level', 1.0)
             
-            # Real food information from training environment
-            if training_environment and hasattr(training_environment, '_get_closest_food_distance_for_agent'):
-                try:
-                    food_info = training_environment._get_closest_food_distance_for_agent(agent)
-                    agent_pos = state_data.get('position', (0, 0))
-                    
-                    # Calculate direction vector to food
-                    food_position = food_info.get('food_position')
-                    if food_position:
-                        # Direction vector from agent to food
-                        dx = food_position[0] - agent_pos[0]
-                        dy = food_position[1] - agent_pos[1]
-                        
-                        # Normalize to unit vector
-                        distance = (dx**2 + dy**2)**0.5
-                        if distance > 0:
-                            direction_x = dx / distance
-                            direction_y = dy / distance
-                        else:
-                            direction_x, direction_y = 0.0, 0.0
-                    else:
-                        direction_x, direction_y = 0.0, 0.0
-                    
-                    state_data['nearest_food'] = {
-                        'distance': food_info.get('distance', 50.0),
-                        'direction_x': direction_x,
-                        'direction_y': direction_y,
-                        'type': food_info.get('food_type', 'unknown')
-                    }
-                except Exception as e:
-                    print(f"⚠️ Error getting real food data: {e}")
-                    # Fallback to default values
-                    state_data['nearest_food'] = {
-                        'distance': 50.0,
-                        'direction_x': 0.0,
-                        'direction_y': 0.0,
-                        'type': 'unknown'
-                    }
-            else:
-                # Default food information
-                state_data['nearest_food'] = {
-                    'distance': 50.0,
-                    'direction_x': 0.0,
-                    'direction_y': 0.0,
-                    'type': 'unknown'
-                }
+            # Real food information from training environment - REQUIRE training environment
+            if not training_environment:
+                raise ValueError(f"Agent {agent.id} missing training environment reference")
+                
+            food_info = training_environment._get_closest_food_distance_for_agent(agent)
+            
+            # Use signed_x_distance directly as direction (matches survival Q-learning approach)
+            # This eliminates the data format mismatch that caused KeyError fallbacks
+            state_data['nearest_food'] = {
+                'distance': food_info['distance'],
+                'direction': food_info['signed_x_distance'],  # Use signed x-distance as direction
+                'type': food_info['food_type']
+            }
             
             # Ground contact detection using Box2D physics
             ground_contact = self._detect_ground_contact(agent)
             state_data['ground_contact'] = ground_contact
             
             # Physics body for advanced ground detection
-            state_data['physics_body'] = agent.body if hasattr(agent, 'body') else None
+            state_data['physics_body'] = agent.body
             
             return state_data
             
         except Exception as e:
-            logger.warning(f"Error extracting agent state data: {e}")
-            return {}
-    
+            # NO FALLBACK VALUES - Let it fail so we can see the real problems
+            raise RuntimeError(f"Critical state extraction failure for agent {getattr(agent, 'id', 'unknown')}: {e}")
+            
     def _convert_to_continuous_state(self, state_data: Dict[str, Any]) -> np.ndarray:
         """Convert state data to continuous vector for neural networks."""
         try:
@@ -1020,15 +988,17 @@ class LearningManager:
     def _detect_ground_contact(self, agent) -> bool:
         """Detect if the agent is in contact with the ground using Box2D physics."""
         try:
-            if not hasattr(agent, 'body') or not agent.body:
+            if not (hasattr(agent, 'body') and agent.body):
                 return False
             
+            # Check if lower arm is in contact with ground
             if hasattr(agent, 'lower_arm') and agent.lower_arm:
                 for contact_edge in agent.lower_arm.contacts:
                     contact = contact_edge.contact
                     if contact.touching:
                         fixture_a = contact.fixtureA
                         fixture_b = contact.fixtureB
+                        # Check if contact is with ground (category bit 0x0001)
                         if ((fixture_a.filterData.categoryBits & 0x0001) or 
                             (fixture_b.filterData.categoryBits & 0x0001)):
                             return True
@@ -1036,11 +1006,10 @@ class LearningManager:
             return False
             
         except Exception as e:
-            # Fallback: Use simple position-based detection
+            # Simple fallback for ground contact only
             try:
                 if hasattr(agent, 'body') and agent.body:
-                    # Ground level approximation
-                    return agent.body.position.y <= 1.0
+                    return agent.body.position.y <= 1.0  # Ground level approximation
             except:
                 pass
             return False

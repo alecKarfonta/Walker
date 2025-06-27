@@ -2012,7 +2012,11 @@ class TrainingEnvironment:
             self.learning_manager = LearningManager(
                 ecosystem_interface=EcosystemInterface(self)
             )
-            print("🧠 Learning Manager initialized successfully")
+            # Set the training environment reference for food data access
+            self.learning_manager.set_training_environment(self)
+            # Inject training environment into all agents for state data extraction
+            self.learning_manager.inject_training_environment_into_agents(self.agents)
+            print("🧠 Learning Manager initialized successfully with training environment")
         except Exception as e:
             print(f"⚠️ Learning Manager initialization failed: {e}")
             self.learning_manager = None
@@ -3019,6 +3023,14 @@ class TrainingEnvironment:
                     )
                 except Exception as e:
                     print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
+            
+            # CRITICAL: Inject training environment through learning manager for state data access
+            if hasattr(self, 'learning_manager') and self.learning_manager:
+                try:
+                    self.learning_manager.inject_training_environment_into_agents([new_agent])
+                    print(f"🌍 Training environment injected into replacement agent {new_agent.id}")
+                except Exception as e:
+                    print(f"⚠️ Failed to inject training environment into replacement agent {new_agent.id}: {e}")
             
             return new_agent
             
