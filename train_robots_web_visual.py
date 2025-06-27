@@ -852,8 +852,7 @@ HTML_TEMPLATE = """
             const health = ecosystem.health || 1.0;
             const energy = ecosystem.energy || 1.0;
             const speed = ecosystem.speed || 0.0;
-            const alliances = ecosystem.alliances || [];
-            const territories = ecosystem.territories || [];
+            // Alliances and territories removed
             
             // Role symbols and colors
             const roleSymbols = {
@@ -899,14 +898,7 @@ HTML_TEMPLATE = """
                             <span class="detail-label">Speed:</span>
                             <span class="detail-value">${speed.toFixed(2)} m/s</span>
                         </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Alliances:</span>
-                            <span class="detail-value">${alliances.length > 0 ? alliances.length + ' allies' : 'None'}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Territories:</span>
-                            <span class="detail-value">${territories.length > 0 ? territories.length + ' claimed' : 'None'}</span>
-                        </div>
+                        <!-- Alliances and territories removed -->
                         <div class="detail-row">
                             <span class="detail-label">Closest Food:</span>
                             <span class="detail-value" style="color: ${ecosystem.closest_food_distance >= 999999 || ecosystem.closest_food_distance > 50 ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
@@ -1167,32 +1159,7 @@ HTML_TEMPLATE = """
         function drawEcosystemElements(data) {
             if (!ecosystemData) return;
             
-            // Draw territories
-            if (ecosystemData.territories) {
-                ecosystemData.territories.forEach(territory => {
-                    const [x, y] = territory.position;
-                    const size = territory.size;
-                    const contested = territory.contested;
-                    
-                    // Territory color based on type and resource value
-                    const alpha = Math.min(0.3, territory.resource_value * 0.2);
-                    let territoryColor = '#4CAF50'; // Default green
-                    
-                    switch (territory.type) {
-                        case 'feeding_ground': territoryColor = '#8BC34A'; break;
-                        case 'nesting_area': territoryColor = '#FF9800'; break;
-                        case 'water_source': territoryColor = '#2196F3'; break;
-                        case 'shelter': territoryColor = '#9C27B0'; break;
-                    }
-                    
-                    ctx.strokeStyle = contested ? '#FF0000' : territoryColor;
-                    ctx.lineWidth = contested ? 0.3 : 0.15;
-                    // Simplified territory boundary - no dashed lines for performance
-                    ctx.beginPath();
-                    ctx.arc(x, y, size/2, 0, 2 * Math.PI);
-                    ctx.stroke();
-                });
-            }
+            // Territories removed
             
             // Draw food sources
             if (ecosystemData.food_sources) {
@@ -1317,7 +1284,7 @@ HTML_TEMPLATE = """
                 
                 // Movement trails disabled for performance optimization
                 
-                // Alliance connections disabled for performance
+                // Alliance connections removed
             });
             
             // FEEDING ANIMATION: Draw consumption lines from robots to food with role-based colors
@@ -1436,7 +1403,7 @@ HTML_TEMPLATE = """
         
         // Movement trail function removed for performance optimization
         
-        // Alliance connections function removed for performance
+        // Alliance connections function removed
         
         function drawFoodLines(data) {
             if (!data.agents || !focusedAgentId) {
@@ -2026,9 +1993,13 @@ class TrainingEnvironment:
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
 
-        # Performance optimization tracking
+        # Performance optimization tracking with AGGRESSIVE cleanup
         self.last_performance_cleanup = time.time()
-        self.performance_cleanup_interval = 120.0  # Clean up every 2 minutes
+        self.performance_cleanup_interval = 60.0  # INCREASED from 120.0 to 60.0 - clean up every minute
+        
+        # Attention network specific cleanup
+        self.last_attention_cleanup = time.time()
+        self.attention_cleanup_interval = 30.0  # Clean attention data every 30 seconds
         
         # Web interface throttling
         self.last_web_interface_update = time.time()
@@ -2307,8 +2278,7 @@ class TrainingEnvironment:
                     'last_status_change': time.time(),
                     'energy': 1.0,  # 0.0 to 1.0
                     'speed_factor': 1.0,
-                    'alliances': [],
-                    'territories': []
+                                # Alliances and territories removed
                 }
                 
                 self.agent_health[agent.id] = {
@@ -2335,13 +2305,13 @@ class TrainingEnvironment:
         from src.agents.learning_manager import LearningApproach
         import random
         
-        # ANALYSIS: Only attention deep Q-learning for comprehensive review
+        # KEEP ALL ATTENTION NETWORKS: Focus on performance degradation analysis
         learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Disabled for analysis
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Disabled for analysis
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Disabled for analysis
-            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Disabled for analysis
-            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Focus on attention analysis
+            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Focus on attention analysis
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
+            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Focus on attention analysis
+            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Keep all attention networks, only use these for now
         ]
         
         # Create weighted list for random selection
@@ -2409,13 +2379,13 @@ class TrainingEnvironment:
         from src.agents.learning_manager import LearningApproach
         import random
         
-        # FIXED: Conservative distribution for replacements (fewer neural networks than initial)
+        # KEEP ATTENTION NETWORKS: Focus on degradation analysis for replacements too
         learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.0),      # 30% - Simple baseline
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.0),   # 60% - Advanced tabular (FAST)
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.0),   # 8% - Survival-focused
-            (LearningApproach.DEEP_Q_LEARNING, 0.0),       # 2% - Neural networks (very conservative)
-            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.0), # 0% - No attention networks for replacements (to prevent creation)
+            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Focus on attention analysis
+            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
+            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
+            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Focus on attention analysis
+            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Keep attention networks for replacements
         ]
         
         # Create weighted list for random selection
@@ -2450,7 +2420,7 @@ class TrainingEnvironment:
             print(f"   ❌ Error assigning learning approach to replacement agent {agent.id}: {e}")
 
     def _update_ecosystem_dynamics(self):
-        """Update ecosystem dynamics including agent interactions, territories, and predation."""
+        """Update ecosystem dynamics including agent interactions and predation."""
         try:
             current_time = time.time()
             
@@ -2482,8 +2452,8 @@ class TrainingEnvironment:
                 if agent_id in self.agent_health:
                     health_data = self.agent_health[agent_id]
                     
-                    # Energy decreases over time, affected by environmental factors
-                    energy_drain = 0.01 + environmental_effects.get('energy_cost', 0.0)
+                    # RESTORED: Normal energy drain since we're reusing networks
+                    energy_drain = 0.005 + environmental_effects.get('energy_cost', 0.0)  # Moderate rate
                     health_data['energy'] = max(0.0, health_data['energy'] - energy_drain)
                     
                     # Resource access affects energy recovery
@@ -2560,12 +2530,7 @@ class TrainingEnvironment:
                 status_data['status'] = 'hunting'
                 status_data['last_status_change'] = current_time
             
-            # Update alliances and territories from ecosystem
-            status_data['alliances'] = list(self.ecosystem_dynamics.alliances.get(agent_id, set()))
-            status_data['territories'] = [
-                {'type': t.territory_type.value, 'position': t.position, 'size': t.size}
-                for t in self.ecosystem_dynamics.territories if t.owner_id == agent_id
-            ]
+            # Alliances and territories removed
     
     def _simulate_predation_events(self):
         """Simulate predation events for visualization purposes."""
@@ -2736,8 +2701,8 @@ class TrainingEnvironment:
                             print(f"💚 {agent_id[:8]} is recovering health (energy: {current_energy:.2f})")
                     
                     elif current_energy < 0.1:
-                        # LOW ENERGY: Health degrades from starvation
-                        health_degradation = 0.002  # Health loss when starving
+                        # RESTORED: Normal health degradation since we're reusing networks
+                        health_degradation = 0.001  # Normal health loss when starving
                         self.agent_health[agent_id]['health'] = max(0.0, current_health - health_degradation)
                         if current_health - health_degradation <= 0.0:
                             print(f"💀 {agent_id[:8]} is starving to death (health: {current_health:.3f})")
@@ -2844,6 +2809,7 @@ class TrainingEnvironment:
                 
                 # Check for death by health loss ONLY - robots should only die when health reaches 0.0
                 current_health = self.agent_health.get(agent_id, {'health': 1.0})['health']
+                # FIXED: Allow death but reuse networks on replacement
                 if current_health <= 0.0:
                     # Only process death once per agent
                     if agent not in agents_to_replace:
@@ -2878,7 +2844,7 @@ class TrainingEnvironment:
                         else:
                             self.agent_statuses[agent_id]['status'] = 'hunting'  # Always hunting when not eating
             
-            # Replace dead agents with new ones
+            # FIXED: Replace dead agents while reusing their neural networks
             if agents_to_replace:
                 self._replace_dead_agents(agents_to_replace)
         
@@ -2935,12 +2901,30 @@ class TrainingEnvironment:
             traceback.print_exc()
     
     def _replace_dead_agents(self, dead_agents):
-        """Replace dead agents with new randomly generated agents."""
+        """Replace dead agents while transferring their neural networks to prevent network explosion."""
         with self._physics_lock:
             try:
                 for dead_agent in dead_agents:
-                    # Mark the dead agent for destruction
-                    self._agents_pending_destruction.append(dead_agent)
+                    # CRITICAL: Extract the attention network BEFORE destroying the agent
+                    attention_network = None
+                    if hasattr(dead_agent, '_attention_dqn') and dead_agent._attention_dqn:
+                        attention_network = dead_agent._attention_dqn
+                        # Clear the reference from dead agent to prevent destruction
+                        dead_agent._attention_dqn = None
+                        print(f"♻️ Extracted attention network from dead agent {dead_agent.id}")
+                    
+                    # CRITICAL: Return dead agent to memory pool IMMEDIATELY so it can be reused
+                    if self.robot_memory_pool:
+                        try:
+                            self.robot_memory_pool.return_robot(dead_agent, preserve_learning=True)
+                            print(f"♻️ Returned dead agent {dead_agent.id} to memory pool immediately")
+                        except Exception as e:
+                            print(f"⚠️ Failed to return dead agent {dead_agent.id} to memory pool: {e}")
+                            # Fallback: add to destruction queue
+                            self._agents_pending_destruction.append(dead_agent)
+                    else:
+                        # No memory pool available, use destruction queue
+                        self._agents_pending_destruction.append(dead_agent)
                     
                     # Remove from active agents list
                     if dead_agent in self.agents:
@@ -2954,8 +2938,27 @@ class TrainingEnvironment:
                         # Initialize new agent's ecosystem data
                         self._initialize_single_agent_ecosystem(replacement_agent)
                         
-                        # ✨ ASSIGN RANDOM LEARNING APPROACH TO REPLACEMENT AGENT
-                        self._assign_random_learning_approach_single(replacement_agent)
+                        # CRITICAL: Transfer the attention network instead of creating new one
+                        if attention_network:
+                            replacement_agent._attention_dqn = attention_network
+                            replacement_agent.learning_approach = 'attention_deep_q_learning'
+                            
+                            # CRITICAL: Reset target network synchronization after transfer
+                            if hasattr(attention_network, 'reset_target_network_sync'):
+                                attention_network.reset_target_network_sync()
+                                print(f"🎯 Target network resynced for transferred network")
+                            
+                            # Update learning manager's network tracking
+                            if hasattr(self, 'learning_manager') and self.learning_manager:
+                                # Register the transferred network
+                                self.learning_manager._attention_networks_in_use[replacement_agent.id] = attention_network
+                                if dead_agent.id in self.learning_manager._attention_networks_in_use:
+                                    del self.learning_manager._attention_networks_in_use[dead_agent.id]
+                            
+                            print(f"🧠 Transferred attention network to replacement agent {replacement_agent.id}")
+                        else:
+                            # Fallback: assign random approach if no network to transfer
+                            self._assign_random_learning_approach_single(replacement_agent)
                         
                         print(f"🐣 Spawned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
                 
@@ -3066,8 +3069,7 @@ class TrainingEnvironment:
                 'last_status_change': time.time(),
                 'energy': 1.0,
                 'speed_factor': 1.0,
-                'alliances': [],
-                'territories': []
+                # Alliances and territories removed
             }
             
             self.agent_health[agent_id] = {
@@ -3464,10 +3466,15 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️ Error logging resource usage: {e}")
             
-            # Performance cleanup every 2 minutes
+            # Performance cleanup every minute (increased frequency)
             if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
                 self._cleanup_performance_data()
                 self.last_performance_cleanup = current_time
+            
+            # PERFORMANCE: Frequent attention network cleanup every 30 seconds
+            if current_time - self.last_attention_cleanup > self.attention_cleanup_interval:
+                self._cleanup_attention_networks()
+                self.last_attention_cleanup = current_time
             
             # Update enhanced learning systems (after current_agents is defined)
             if hasattr(self, 'learning_manager') and self.learning_manager:
@@ -3849,8 +3856,7 @@ class TrainingEnvironment:
                             # Add detailed ecosystem data
                             basic_agent_data['ecosystem'].update({
                                 'speed_factor': safe_convert_numeric(agent_status.get('speed_factor', 1.0)),
-                                'alliances': agent_status.get('alliances', []),
-                                'territories': agent_status.get('territories', []),
+                                                # Alliances and territories removed
                                 'closest_food_distance': safe_convert_numeric(closest_food_info['distance']),
                                 'closest_food_signed_x_distance': safe_convert_numeric(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
                                 'closest_food_type': closest_food_info['food_type'],
@@ -3894,17 +3900,7 @@ class TrainingEnvironment:
                     # Enhanced visualization data
                     'ecosystem': {
                         'status': ecosystem_status,
-                        'territories': [
-                            {
-                                'type': t.territory_type.value,
-                                'position': t.position,
-                                'size': t.size,
-                                'resource_value': t.resource_value,
-                                'owner_id': t.owner_id,
-                                'contested': t.contested
-                            }
-                            for t in self.ecosystem_dynamics.territories
-                        ],
+                        # Territories removed
                         'food_sources': [
                             {
                                 'position': f.position,
@@ -4942,6 +4938,37 @@ class TrainingEnvironment:
             # Memory pool handles its own cleanup automatically
             print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
             
+            # AGGRESSIVE: Clean up attention network specific data
+            attention_networks_cleaned = 0
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False):
+                    continue
+                
+                # Clean up attention networks
+                if hasattr(agent, '_attention_dqn') and agent._attention_dqn:
+                    # Clean attention history
+                    if hasattr(agent._attention_dqn, 'attention_history'):
+                        old_size = len(agent._attention_dqn.attention_history)
+                        if old_size > 25:  # Keep only 25 most recent
+                            agent._attention_dqn.attention_history = deque(
+                                list(agent._attention_dqn.attention_history)[-25:], 
+                                maxlen=50
+                            )
+                            attention_networks_cleaned += 1
+                    
+                    # Aggressively clean experience replay buffer
+                    if hasattr(agent._attention_dqn, 'memory') and hasattr(agent._attention_dqn.memory, 'buffer'):
+                        buffer_size = len(agent._attention_dqn.memory.buffer)
+                        if buffer_size > 10000:  # Keep only 10k experiences max
+                            # Keep only most recent 10k experiences
+                            agent._attention_dqn.memory.buffer = deque(
+                                list(agent._attention_dqn.memory.buffer)[-10000:],
+                                maxlen=25000
+                            )
+            
+            if attention_networks_cleaned > 0:
+                print(f"🧹 Aggressively cleaned {attention_networks_cleaned} attention networks")
+            
         except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
 
@@ -5251,61 +5278,44 @@ class TrainingEnvironment:
             print(f"⚠️ Error getting obstacle data for UI: {e}")
             return []
 
-    def _cleanup_performance_data(self):
-        """Clean up accumulated performance data to prevent memory growth."""
+    def _cleanup_attention_networks(self):
+        """Dedicated cleanup for attention networks to prevent memory accumulation."""
         try:
-            # Clean up Q-learning history data
+            cleaned_count = 0
+            total_attention_records = 0
+            total_buffer_size = 0
+            
             for agent in self.agents:
                 if getattr(agent, '_destroyed', False):
                     continue
                     
-                # Limit action history
-                if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
-                    agent.action_history = agent.action_history[-50:]
-                
-                # Clean up Q-table data if it exists and has history
-                if hasattr(agent, 'q_table'):
-                    if hasattr(agent.q_table, 'q_value_history') and len(agent.q_table.q_value_history) > 100:
-                        agent.q_table.q_value_history = agent.q_table.q_value_history[-100:]
+                if hasattr(agent, '_attention_dqn') and agent._attention_dqn:
+                    # Track total attention records
+                    if hasattr(agent._attention_dqn, 'attention_history'):
+                        total_attention_records += len(agent._attention_dqn.attention_history)
                     
-                    # Clean up visit counts for very large Q-tables
-                    if hasattr(agent.q_table, 'visit_counts') and hasattr(agent.q_table.visit_counts, '__len__'):
-                        try:
-                            if len(agent.q_table.visit_counts) > 5000:
-                                # Reset visit counts for least visited state-actions
-                                pass  # Skip complex cleanup for now
-                        except:
-                            pass
+                    # Track total buffer size
+                    if hasattr(agent._attention_dqn, 'memory') and hasattr(agent._attention_dqn.memory, 'buffer'):
+                        total_buffer_size += len(agent._attention_dqn.memory.buffer)
+                    
+                    # Force cleanup if agent has cleanup method
+                    if hasattr(agent._attention_dqn, '_cleanup_attention_data'):
+                        agent._attention_dqn._cleanup_attention_data()
+                        cleaned_count += 1
+            
+            # Force GPU memory cleanup
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+            
+            if cleaned_count > 0:
+                print(f"🧹 Attention cleanup: {cleaned_count} networks, {total_attention_records} attention records, {total_buffer_size} buffer entries")
                 
-                # Clean up replay buffer if too large
-                if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
-                    buffer_capacity = getattr(agent.replay_buffer, 'capacity', 3000)
-                    if len(agent.replay_buffer.buffer) > buffer_capacity * 0.9:
-                        # Remove oldest 25% of experiences
-                        old_size = len(agent.replay_buffer.buffer)
-                        remove_count = old_size // 4
-                        for _ in range(remove_count):
-                            if agent.replay_buffer.buffer:
-                                agent.replay_buffer.buffer.popleft()
-            
-            # Clean up old robot stats for destroyed agents
-            active_agent_ids = {agent.id for agent in self.agents if not getattr(agent, '_destroyed', False)}
-            old_stats_keys = [k for k in self.robot_stats.keys() if k not in active_agent_ids]
-            for old_key in old_stats_keys[:10]:  # Remove up to 10 old entries at a time
-                del self.robot_stats[old_key]
-            
-            # Clean up ecosystem data
-            if hasattr(self.ecosystem_dynamics, 'food_sources'):
-                # Remove depleted food sources
-                self.ecosystem_dynamics.food_sources = [
-                    f for f in self.ecosystem_dynamics.food_sources if f.amount > 0.05
-                ]
-            
-            # Memory pool handles its own cleanup automatically
-            print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
-            
         except Exception as e:
-            print(f"⚠️ Error during performance cleanup: {e}")
+            print(f"⚠️ Error in attention network cleanup: {e}")
 
 # Create Flask app and SocketIO instance
 app = Flask(__name__)

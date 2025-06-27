@@ -11,6 +11,10 @@ User Requests
 
 - [ ] I think that the averaging in the episodic reward is too strong or something because 
 
+- [ ] Completelt random baseline agents
+
+
+
 **FIXED**: Replaced random obstacle scattering with sophisticated terrain generation featuring actual landscape features:
 
 🏞️ **New Realistic Terrain System**:

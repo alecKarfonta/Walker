@@ -173,14 +173,25 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
         # Copy weights to target network
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        # Attention analysis
-        self.attention_history = deque(maxlen=1000)
+        # Attention analysis - REDUCED SIZE for performance
+        self.attention_history = deque(maxlen=50)  # REDUCED from 1000 to 50
+        
+        # Performance optimization tracking
+        self._last_cleanup_time = time.time()
+        self._cleanup_interval = 30.0  # Clean up every 30 seconds
         
         print(f"🦾 Arm Control Attention-based Deep Q-Learning initialized with {self.device}")
         print(f"   📊 Network parameters: {sum(p.numel() for p in self.q_network.parameters()):,}")
+        print(f"   🧹 Attention history: {self.attention_history.maxlen} records (optimized)")
     
     def choose_action(self, state_vector: np.ndarray, agent_data: Dict[str, Any] = None) -> int:
         """Choose action with arm control attention-based analysis."""
+        # PERFORMANCE: Periodic cleanup of attention history
+        current_time = time.time()
+        if current_time - self._last_cleanup_time > self._cleanup_interval:
+            self._cleanup_attention_data()
+            self._last_cleanup_time = current_time
+        
         # Calculate epsilon
         epsilon = self._calculate_survival_epsilon(agent_data)
         
@@ -191,13 +202,13 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
                 q_values, attention_info = self.q_network(state_tensor)
                 action = q_values.argmax().item()
                 
-                # Store attention information for analysis
-                self.attention_history.append({
-                    'attention_weights': attention_info['attention_weights'].cpu().numpy(),
-                    'q_values': q_values.cpu().numpy(),
-                    'selected_action': action,
-                    'state': state_vector.copy()
-                })
+                # Store attention information for analysis - ONLY store essential data
+                if len(self.attention_history) < self.attention_history.maxlen:
+                    self.attention_history.append({
+                        'attention_weights': attention_info['attention_weights'].cpu().numpy(),
+                        'selected_action': action,
+                        'timestamp': current_time  # Add timestamp for cleanup
+                    })
             self.q_network.train()
             return action
         else:
@@ -350,4 +361,72 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
                 'food_targeting': np.mean(avg_attention[:, :, 2:4]) if len(avg_attention.shape) > 2 else 0.0,
                 'physics_contact': np.mean(avg_attention[:, :, 4:5]) if len(avg_attention.shape) > 2 else 0.0
             }
-        } 
+        }
+    
+    def _cleanup_attention_data(self):
+        """Clean up accumulated attention data to prevent memory growth."""
+        try:
+            # Clear old attention history entries (keep only recent ones)
+            current_time = time.time()
+            if hasattr(self, 'attention_history'):
+                # Remove entries older than 5 minutes
+                cutoff_time = current_time - 300.0
+                self.attention_history = deque([
+                    entry for entry in self.attention_history 
+                    if entry.get('timestamp', current_time) > cutoff_time
+                ], maxlen=50)
+            
+            # Force garbage collection of GPU memory if available
+            if self.device.type == 'cuda':
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
+            print(f"🧹 Cleaned attention data: {len(self.attention_history)} records remaining")
+            
+        except Exception as e:
+            print(f"⚠️ Error cleaning attention data: {e}")
+    
+    def reset_target_network_sync(self):
+        """Reset target network synchronization for transferred networks."""
+        try:
+            # Force immediate target network sync with main network
+            self.target_network.load_state_dict(self.q_network.state_dict())
+            
+            # Reset step counter to ensure proper target update timing
+            # Keep training progress but reset target sync timing
+            self.steps_done = self.steps_done % self.target_update_freq
+            
+            print(f"🎯 Target network resynced after transfer (next update in {self.target_update_freq - self.steps_done} steps)")
+            
+        except Exception as e:
+            print(f"⚠️ Error resetting target network sync: {e}")
+    
+    def get_network_sync_status(self) -> Dict[str, Any]:
+        """Get information about main and target network synchronization."""
+        try:
+            steps_until_sync = self.target_update_freq - (self.steps_done % self.target_update_freq)
+            
+            # Compare a few parameters to check if networks are in sync
+            main_params = list(self.q_network.parameters())
+            target_params = list(self.target_network.parameters())
+            
+            param_differences = []
+            for i, (main_param, target_param) in enumerate(zip(main_params[:3], target_params[:3])):  # Check first 3 layers
+                diff = torch.abs(main_param - target_param).mean().item()
+                param_differences.append(diff)
+            
+            avg_param_diff = np.mean(param_differences) if param_differences else 0.0
+            
+            return {
+                'steps_done': self.steps_done,
+                'target_update_freq': self.target_update_freq,
+                'steps_until_next_sync': steps_until_sync,
+                'last_sync_step': (self.steps_done // self.target_update_freq) * self.target_update_freq,
+                'avg_parameter_difference': avg_param_diff,
+                'networks_likely_synced': avg_param_diff < 1e-6
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Error getting network sync status: {e}")
+            return {'error': str(e)} 

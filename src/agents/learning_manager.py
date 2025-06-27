@@ -334,15 +334,19 @@ class LearningManager:
     
     def _setup_deep_learning_wrapper(self, agent, deep_q_learner):
         """Setup the deep learning step wrapper for an agent."""
-        # Initialize deep learning attributes
+        # Initialize deep learning attributes with OPTIMIZED frequencies
         agent._deep_step_count = 0
-        agent._deep_experience_collection_freq = 10
-        agent._deep_training_freq = 3000
+        agent._deep_experience_collection_freq = 20  # INCREASED from 10 to 20 (collect less frequently)
+        agent._deep_training_freq = 6000  # INCREASED from 3000 to 6000 (train less frequently)
         agent._deep_min_buffer_size = 3000
         agent._deep_ready_to_train = False
         agent._deep_prev_state = None
         agent._deep_prev_action = None
         agent._deep_prev_reward = 0.0
+        
+        # Performance tracking
+        agent._deep_last_cleanup = time.time()
+        agent._deep_cleanup_interval = 60.0  # Clean up every minute
         
         # Store original step method
         if not hasattr(agent, '_original_step_method'):
@@ -354,11 +358,17 @@ class LearningManager:
                 result = agent._original_step_method(dt)
                 agent._deep_step_count += 1
                 
-                # Experience collection
+                # PERFORMANCE: Periodic cleanup
+                current_time = time.time()
+                if current_time - agent._deep_last_cleanup > agent._deep_cleanup_interval:
+                    self._cleanup_agent_deep_learning_data(agent, deep_q_learner)
+                    agent._deep_last_cleanup = current_time
+                
+                # Experience collection (less frequent)
                 if agent._deep_step_count % agent._deep_experience_collection_freq == 0:
                     self._collect_deep_experience(agent, deep_q_learner)
                 
-                # Training
+                # Training (much less frequent)
                 if (agent._deep_ready_to_train and 
                     agent._deep_step_count % agent._deep_training_freq == 0):
                     self._train_deep_model(agent, deep_q_learner)
@@ -1075,6 +1085,12 @@ class LearningManager:
     def _acquire_attention_network(self, agent_id: str):
         """Acquire an attention network from the pool or create a new one if pool is empty."""
         try:
+            # CRITICAL: Check if agent already has a network (from transfer)
+            if agent_id in self._attention_networks_in_use:
+                existing_network = self._attention_networks_in_use[agent_id]
+                print(f"♻️ Agent {agent_id[:8]} already has attention network (transferred)")
+                return existing_network
+            
             # Try to reuse an existing network from the pool
             if self._attention_network_pool:
                 network = self._attention_network_pool.pop()
@@ -1287,4 +1303,36 @@ class LearningManager:
         except Exception as e:
             print(f"⚠️ Error updating GPU stats: {e}")
         
-        return self._gpu_stats 
+        return self._gpu_stats
+    
+    def _cleanup_agent_deep_learning_data(self, agent, deep_q_learner):
+        """Clean up accumulated deep learning data for an agent."""
+        try:
+            # Clean up attention network data if present
+            if hasattr(agent, '_attention_dqn') and agent._attention_dqn:
+                if hasattr(agent._attention_dqn, '_cleanup_attention_data'):
+                    agent._attention_dqn._cleanup_attention_data()
+                
+                # Limit experience replay buffer size
+                if hasattr(agent._attention_dqn, 'memory'):
+                    buffer = agent._attention_dqn.memory
+                    if hasattr(buffer, 'buffer') and len(buffer.buffer) > 15000:  # Limit to 15k experiences
+                        # Remove oldest 25% of experiences
+                        remove_count = len(buffer.buffer) // 4
+                        for _ in range(remove_count):
+                            if buffer.buffer:
+                                buffer.buffer.popleft()
+                        print(f"🧹 Trimmed attention network buffer for agent {agent.id[:8]}: removed {remove_count} old experiences")
+            
+            # Clean up standard deep Q-learning data
+            if hasattr(deep_q_learner, 'memory'):
+                buffer = deep_q_learner.memory
+                if hasattr(buffer, 'buffer') and len(buffer.buffer) > 15000:  # Limit to 15k experiences
+                    remove_count = len(buffer.buffer) // 4
+                    for _ in range(remove_count):
+                        if buffer.buffer:
+                            buffer.buffer.popleft()
+                    print(f"🧹 Trimmed deep Q-learning buffer for agent {agent.id[:8]}: removed {remove_count} old experiences")
+            
+        except Exception as e:
+            print(f"⚠️ Error cleaning up deep learning data for agent {agent.id}: {e}") 
