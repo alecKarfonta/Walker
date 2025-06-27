@@ -123,6 +123,7 @@ HTML_TEMPLATE = """
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            max-height: 100%; /* Ensure it doesn't exceed container height */
         }
 
         #leaderboard-panel {
@@ -281,6 +282,13 @@ HTML_TEMPLATE = """
         .bottom-bar-section::-webkit-scrollbar-track { background: transparent; }
         .bottom-bar-section::-webkit-scrollbar-thumb { background: #3498db; border-radius: 3px; }
 
+        /* Population summary specific styling */
+        #population-summary-content {
+            overflow-y: auto;
+            max-height: calc(100% - 30px); /* Account for panel title height */
+            flex-grow: 1;
+        }
+
         .robot-details-title {
             font-size: 12px;
             font-weight: bold;
@@ -332,6 +340,21 @@ HTML_TEMPLATE = """
         <div id="canvas-wrapper">
             <canvas id="simulation-canvas"></canvas>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
+            
+            <!-- Simulation Speed Controls -->
+            <div id="speed-controls" style="position:absolute; top:90px; right:10px; z-index:50; background:rgba(0,0,0,0.8); color:white; padding:8px 12px; border-radius:6px; border:1px solid #3498db;">
+                <div style="margin-bottom: 6px; font-size: 11px; color: #bdc3c7;">
+                    ⚡ Speed: <span id="speed-display" style="color: #3498db; font-weight: bold;">1.0x</span>
+                </div>
+                <div style="display: flex; gap: 4px;">
+                    <button onclick="setSimulationSpeed(0.5)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">0.5x</button>
+                    <button onclick="setSimulationSpeed(1.0)" style="min-width: 28px; background: #3498db; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">1x</button>
+                    <button onclick="setSimulationSpeed(2.0)" style="min-width: 28px; background: #e67e22; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">2x</button>
+                    <button onclick="setSimulationSpeed(5.0)" style="min-width: 28px; background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">5x</button>
+                    <button onclick="setSimulationSpeed(10.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">10x</button>
+                </div>
+            </div>
+            
             <div id="focus-indicator" style="display:none; position:absolute; top:1%; left:50%; transform:translate(-50%, -50%); z-index:50; background:rgba(231, 76, 60, 0.95); color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:2px solid rgba(255,255,255,0.2);">
                 🎯 Focused on Agent: <span id="focused-agent-id">-</span>
             </div>
@@ -710,6 +733,14 @@ HTML_TEMPLATE = """
                 });
             }
 
+            // Update simulation speed display
+            if (data.simulation_speed !== undefined) {
+                const speedDisplay = document.getElementById('speed-display');
+                if (speedDisplay) {
+                    speedDisplay.textContent = data.simulation_speed.toFixed(1) + 'x';
+                }
+            }
+
             // Update leaderboard only if it has changed to prevent re-rendering
             const leaderboardContent = document.getElementById('leaderboard-content');
             if (leaderboardContent && data.leaderboard) {
@@ -959,31 +990,6 @@ HTML_TEMPLATE = """
                         `).join('')}
                     </div>` : ''}
                     
-                                       
-                    <div class="detail-section">
-                        <div style="margin-bottom: 6px; font-weight: bold; color: #3498db;">Learning Approach Controls</div>
-                        <div style="display: flex; flex-direction: column; gap: 3px;">
-                            <button onclick="switchLearningApproach('${agent.id}', 'basic_q_learning')" 
-                                    style="background: #27ae60; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Basic Q-Learning
-                            </button>
-                            <button onclick="switchLearningApproach('${agent.id}', 'enhanced_survival_q')" 
-                                    style="background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Enhanced Survival Q
-                            </button>
-                            <button onclick="switchLearningApproach('${agent.id}', 'deep_survival_q')" 
-                                    style="background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Deep Survival Q (GPU)
-                            </button>
-                            <button onclick="switchLearningApproach('${agent.id}', 'auto_advanced')" 
-                                    style="background: #f39c12; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Auto Advanced Learning
-                            </button>
-                        </div>
-                        <div style="font-size: 9px; color: #95a5a6; margin-top: 4px;">
-                            Current: ${agent.learning_approach || 'basic_q_learning'}
-                        </div>
-                    </div>
                 </div>
             `;
             
@@ -1598,29 +1604,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        // Learning approach switching function
-        async function switchLearningApproach(agentId, approach) {
-            try {
-                const response = await fetch('./switch_learning_approach', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        agent_id: agentId, 
-                        approach: approach 
-                    })
-                });
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    console.log(`✅ Switched agent ${agentId} to ${approach} learning approach`);
-                } else {
-                    console.error(`❌ Failed to switch learning approach: ${result.message}`);
-                }
-            } catch (err) {
-                console.error('Error switching learning approach:', err);
-            }
-        }
-
         // Toggle food lines display
         function toggleFoodLines() {
             showFoodLines = !showFoodLines;
@@ -1633,6 +1616,44 @@ HTML_TEMPLATE = """
                 button.style.background = '#4CAF50';
             }
             console.log(`🎯 Food lines ${showFoodLines ? 'enabled' : 'disabled'}`);
+        }
+
+        // Set simulation speed
+        function setSimulationSpeed(speed) {
+            fetch('./set_simulation_speed', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ speed: speed })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    document.getElementById('speed-display').textContent = speed.toFixed(1) + 'x';
+                    console.log(`⚡ Simulation speed set to ${speed}x`);
+                    
+                    // Update button styles to show active speed
+                    const buttons = document.querySelectorAll('#speed-controls button');
+                    buttons.forEach(btn => {
+                        btn.style.border = 'none';
+                        btn.style.boxShadow = 'none';
+                        btn.style.transform = 'none';
+                    });
+                    
+                    // Highlight the active button by finding the one with matching speed
+                    buttons.forEach(btn => {
+                        if (btn.textContent === speed.toFixed(1) + 'x' || btn.textContent === speed + 'x') {
+                            btn.style.border = '2px solid #fff';
+                            btn.style.boxShadow = '0 0 8px rgba(255,255,255,0.6)';
+                            btn.style.transform = 'scale(1.05)';
+                        }
+                    });
+                } else {
+                    console.error('❌ Failed to set simulation speed:', data.message);
+                }
+            })
+            .catch(error => {
+                console.error('❌ Error setting simulation speed:', error);
+            });
         }
 
     </script>
@@ -1657,7 +1678,7 @@ class TrainingEnvironment:
     Manages physics simulation and evolution of diverse crawling robots.
     Enhanced with comprehensive evaluation framework.
     """
-    def __init__(self, num_agents=30, enable_evaluation=True):  # Reduced from 50 to 30 to save memory
+    def __init__(self, num_agents=30, enable_evaluation=False):  # Reduced from 50 to 30 to save memory
         self.num_agents = num_agents
         # CRITICAL FIX: Disable sleeping at the world level to prevent static bodies from going to sleep
         self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
@@ -1907,6 +1928,10 @@ class TrainingEnvironment:
         self.web_interface_update_interval = 0.05  # 20 FPS instead of 60 FPS
         self.web_data_cache = {}
         self.web_cache_valid = False
+        
+        # Simulation speed control
+        self.simulation_speed_multiplier = 1.0  # 1x normal speed by default
+        self.max_speed_multiplier = 10.0  # Maximum 10x speed
         
         # Physics FPS tracking
         self.physics_fps_counter = 0
@@ -3183,7 +3208,10 @@ class TrainingEnvironment:
                         
                         # Step the physics world only if not evolving
                         if not self._is_evolving:
-                            self.world.Step(self.dt, 8, 3)
+                            # Run multiple physics steps based on simulation speed multiplier
+                            physics_steps = max(1, int(self.simulation_speed_multiplier))
+                            for _ in range(physics_steps):
+                                self.world.Step(self.dt, 8, 3)
                             
                             # Update all agents (copy list to avoid iteration issues)
                             current_agents = self.agents.copy()
@@ -3253,8 +3281,9 @@ class TrainingEnvironment:
                 accumulator -= self.dt
                 self.step_count += 1
                 
-                # Update physics FPS tracking
-                self.physics_fps_counter += 1
+                # Update physics FPS tracking (account for speed multiplier)
+                physics_steps_this_frame = max(1, int(self.simulation_speed_multiplier))
+                self.physics_fps_counter += physics_steps_this_frame
                 if current_time - self.last_physics_fps_update >= 1.0:  # Update every second
                     self.current_physics_fps = round(self.physics_fps_counter / (current_time - self.physics_fps_start_time))
                     self.physics_fps_counter = 0
@@ -3676,80 +3705,19 @@ class TrainingEnvironment:
                         # Add detailed data for focused agent
                         if is_focused:
                             agent_status = self.agent_statuses.get(agent_id, {})
-                            agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
+                            #agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
                             closest_food_info = self._get_closest_food_distance_for_agent(agent)
                             
                             # Get recent reward information
                             recent_reward = float(getattr(agent, 'last_reward', 0.0))
                             
-                            # Get reward components if available
-                            reward_components = {}
-                            last_reward_components = getattr(agent, 'last_reward_components', None)
-                            if last_reward_components is not None:
-                                try:
-                                    reward_components = dict(last_reward_components)
-                                    # Convert numpy types to native Python types
-                                    for key, value in reward_components.items():
-                                        if hasattr(value, 'item'):  # numpy scalar
-                                            reward_components[key] = float(value.item())
-                                        elif isinstance(value, (np.integer, np.floating)):
-                                            reward_components[key] = float(value)
-                                        else:
-                                            reward_components[key] = float(value)
-                                except:
-                                    reward_components = {}
-                            
-                            # Get detailed state information
-                            state_details = {}
-                            current_state = getattr(agent, 'current_state', None)
-                            if current_state is not None:
-                                try:
-                                    if isinstance(current_state, (list, tuple)):
-                                        state_details['raw'] = [float(x) for x in current_state]
-                                    elif hasattr(current_state, 'tolist'):  # numpy array
-                                        state_details['raw'] = [float(x) for x in current_state.tolist()]
-                                    else:
-                                        state_details['raw'] = [float(current_state)]
-                                except:
-                                    state_details['raw'] = []
-                            
-                            # Get continuous state values if available
-                            get_continuous_state = getattr(agent, 'get_continuous_state', None)
-                            if get_continuous_state is not None:
-                                try:
-                                    continuous_state = get_continuous_state()
-                                    if continuous_state is not None:
-                                        if hasattr(continuous_state, 'tolist'):
-                                            state_details['continuous'] = [float(x) for x in continuous_state.tolist()]
-                                        else:
-                                            state_details['continuous'] = [float(x) for x in continuous_state]
-                                except:
-                                    pass
-                            
-                            # Get arm angles and velocities for state details
-                            if agent.upper_arm and agent.lower_arm:
-                                state_details['arm_angles'] = {
-                                    'shoulder': float(agent.upper_arm.angle),
-                                    'elbow': float(agent.lower_arm.angle)
-                                }
-                                state_details['arm_velocities'] = {
-                                    'shoulder': float(agent.upper_arm.angularVelocity),
-                                    'elbow': float(agent.lower_arm.angularVelocity)
-                                }
-                            
                             # Add detailed data to the basic agent data
                             basic_agent_data.update({
                                 'steps': int(agent.steps),
-                                'current_action': [float(x) for x in getattr(agent, 'current_action_tuple', [0.0, 0.0])],
-                                'state': [float(x) for x in current_state] if current_state is not None else [],
-                                'q_table': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0,
                                 'action_history': [int(x) for x in agent.action_history[-10:]] if hasattr(agent, 'action_history') and agent.action_history else [],
                                 'best_reward': float(getattr(agent, 'best_reward_received', 0.0)),
                                 'worst_reward': float(getattr(agent, 'worst_reward_received', 0.0)),
                                 'recent_reward': recent_reward,
-                                'reward_components': reward_components,
-                                'state_details': state_details,
-                                'awake': bool(agent.body.awake if agent.body else False),
                                 'learning_approach': str(getattr(agent, 'learning_approach', 'basic_q_learning')),
                             })
                             
@@ -3845,7 +3813,8 @@ class TrainingEnvironment:
                         'status': environmental_status,
                         'obstacles': self._get_obstacle_data_for_ui()  # Use new physics-body-based obstacle data
                     },
-                    'physics_fps': getattr(self, 'current_physics_fps', 0)
+                    'physics_fps': getattr(self, 'current_physics_fps', 0),
+                    'simulation_speed': self.simulation_speed_multiplier
                 }
                 
             except Exception as e:
@@ -5134,6 +5103,31 @@ def switch_learning_approach():
             return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
         else:
             return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/set_simulation_speed', methods=['POST'])
+def set_simulation_speed():
+    """Set the simulation speed multiplier."""
+    try:
+        data = request.get_json()
+        speed = data.get('speed', 1.0)
+        
+        # Validate speed range
+        if not isinstance(speed, (int, float)) or speed <= 0:
+            return jsonify({'status': 'error', 'message': 'Speed must be a positive number'}), 400
+        
+        if speed > env.max_speed_multiplier:
+            return jsonify({'status': 'error', 'message': f'Speed cannot exceed {env.max_speed_multiplier}x'}), 400
+        
+        # Set the speed
+        env.simulation_speed_multiplier = float(speed)
+        
+        return jsonify({
+            'status': 'success', 
+            'message': f'Simulation speed set to {speed}x',
+            'speed': speed
+        })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
