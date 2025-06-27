@@ -185,7 +185,7 @@ class RobotMemoryPool:
                         
                         # Save experience buffer (limit size to prevent memory issues)
                         if hasattr(deep_adapter, 'memory') and len(deep_adapter.memory) > 0:
-                            buffer_size = min(10000, len(deep_adapter.memory))  # Limit to 10k experiences
+                            buffer_size = min(25000, len(deep_adapter.memory))  # Limit to 25k experiences (increased from 10k)
                             snapshot.experience_buffer = list(deep_adapter.memory.buffer)[-buffer_size:]
                         
                         # Save deep learning statistics
@@ -206,7 +206,7 @@ class RobotMemoryPool:
                         
                         # Save experience buffer (limit size to prevent memory issues)
                         if hasattr(robot._attention_dqn, 'memory') and len(robot._attention_dqn.memory) > 0:
-                            buffer_size = min(10000, len(robot._attention_dqn.memory))  # Limit to 10k experiences
+                            buffer_size = min(25000, len(robot._attention_dqn.memory))  # Limit to 25k experiences (increased from 10k)
                             snapshot.experience_buffer = list(robot._attention_dqn.memory.buffer)[-buffer_size:]
                         
                         # Save attention learning statistics
