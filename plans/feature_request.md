@@ -3,6 +3,14 @@ User Requests
 
 - [x] ✅ **COMPLETELY OVERHAULED**: Realistic Terrain Generation System
 
+- [ ] I want to be able to scroll the Population summary windows
+
+- [ ] When an important event like a robot dying happens show text where they died to explain what happened. have it linger for 5s. 
+
+- [ ] When an evolution event happens show a pop up or some visual indicator in the ui
+
+- [ ] I think that the averaging in the episodic reward is too strong or something because 
+
 **FIXED**: Replaced random obstacle scattering with sophisticated terrain generation featuring actual landscape features:
 
 🏞️ **New Realistic Terrain System**:

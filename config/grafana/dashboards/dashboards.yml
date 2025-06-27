@@ -1,8 +1,29 @@
 apiVersion: 1
 
 providers:
-  - name: 'Walker Training Dashboards'
+  - name: 'default'
     orgId: 1
+    folder: ''
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+
+  - name: 'walker-training'
+    orgId: 1
+    folder: 'Walker Training'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+
+  - name: 'reward-signals'
+    orgId: 1
+    folder: 'Reward Quality'
     type: file
     disableDeletion: false
     updateIntervalSeconds: 10

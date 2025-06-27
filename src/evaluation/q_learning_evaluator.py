@@ -1,591 +1,916 @@
 """
-Q-learning evaluation and analysis.
-Tracks learning quality, convergence, and parameter effectiveness.
+Q-Learning Performance Evaluator
+Comprehensive evaluation system for Q-learning effectiveness across different agent types.
 """
 
-import numpy as np
 import time
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Tuple, Optional, Any, NamedTuple
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from enum import Enum
 import math
+
+# Handle numpy import gracefully
+try:
+    import numpy as np
+except ImportError:
+    # Create a minimal numpy substitute for basic operations
+    class NumpySubstitute:
+        @staticmethod
+        def mean(data):
+            return sum(data) / len(data) if data else 0.0
+        
+        @staticmethod
+        def std(data):
+            if not data:
+                return 0.0
+            mean_val = sum(data) / len(data)
+            variance = sum((x - mean_val) ** 2 for x in data) / len(data)
+            return variance ** 0.5
+        
+        @staticmethod
+        def min(data):
+            return min(data) if data else 0.0
+        
+        @staticmethod
+        def max(data):
+            return max(data) if data else 0.0
+        
+        @staticmethod
+        def sqrt(x):
+            return x ** 0.5
+        
+        @staticmethod
+        def clip(x, min_val, max_val):
+            return max(min_val, min(max_val, x))
+        
+        @staticmethod
+        def array(data):
+            return list(data)
+        
+        @staticmethod
+        def abs(data):
+            if isinstance(data, (list, tuple)):
+                return [abs(x) for x in data]
+            return abs(data)
+        
+        @staticmethod
+        def diff(data):
+            if len(data) < 2:
+                return []
+            return [data[i+1] - data[i] for i in range(len(data)-1)]
+        
+        @staticmethod
+        def var(data):
+            if not data:
+                return 0.0
+            mean_val = sum(data) / len(data)
+            return sum((x - mean_val) ** 2 for x in data) / len(data)
+        
+        @staticmethod
+        def log2(x):
+            if x <= 0:
+                return 0.0
+            return math.log(x) / math.log(2)
+        
+        @staticmethod
+        def histogram(data, bins=10):
+            if not data:
+                return [0] * bins, list(range(bins + 1))
+            
+            min_val, max_val = min(data), max(data)
+            if min_val == max_val:
+                hist = [len(data)] + [0] * (bins - 1)
+                edges = [min_val - 0.5 + i for i in range(bins + 1)]
+                return hist, edges
+            
+            range_val = max_val - min_val
+            bin_size = range_val / bins
+            hist = [0] * bins
+            edges = [min_val + i * bin_size for i in range(bins + 1)]
+            
+            for value in data:
+                bin_idx = int((value - min_val) / bin_size)
+                if bin_idx >= bins:
+                    bin_idx = bins - 1
+                hist[bin_idx] += 1
+            
+            return hist, edges
+    
+    np = NumpySubstitute()
+    print("⚠️ NumPy not available, using basic substitute")
+
+
+class LearningStage(Enum):
+    """Learning stages for curriculum evaluation."""
+    EXPLORATION = "exploration"
+    LEARNING = "learning"
+    CONVERGENCE = "convergence"
+    MASTERY = "mastery"
+    PLATEAU = "plateau"
 
 
 @dataclass
 class QLearningMetrics:
-    """Data class to store Q-learning evaluation metrics."""
-    robot_id: str
-    timestamp: float
+    """Comprehensive Q-learning metrics for a single agent."""
+    agent_id: str
+    agent_type: str
     
-    # Convergence Analysis
-    convergence_rate: float = 0.0
-    convergence_stability: float = 0.0
-    q_value_variance: List[float] = field(default_factory=list)
-    policy_stability: float = 0.0
+    # Value Prediction Accuracy (core metric requested)
+    value_prediction_error: float  # |Q(s,a) - actual_reward_received|
+    value_prediction_mae: float    # Mean Absolute Error over time
+    value_prediction_rmse: float   # Root Mean Square Error over time
     
-    # Learning Efficiency
-    sample_efficiency: float = 0.0  # Learning per sample
-    experience_replay_effectiveness: float = 0.0
-    temporal_difference_progression: List[float] = field(default_factory=list)
-    
-    # Parameter Optimization
-    learning_rate_effectiveness: List[float] = field(default_factory=list)
-    epsilon_decay_optimization: float = 0.0
-    discount_factor_impact: float = 0.0
-    
-    # Q-table Analysis
-    q_table_size: int = 0
-    state_value_distribution: List[float] = field(default_factory=list)
-    action_value_distribution: List[float] = field(default_factory=list)
-    value_function_smoothness: float = 0.0
+    # Q-Value Analysis
+    q_value_mean: float
+    q_value_std: float
+    q_value_range: Tuple[float, float]
+    q_value_distribution: Dict[str, int]  # Distribution of Q-values by bins
     
     # Learning Progress
-    episode_q_improvement: List[float] = field(default_factory=list)
-    learning_plateau_detection: bool = False
-    exploration_exploitation_balance: float = 0.0
+    learning_rate_current: float
+    epsilon_current: float
+    exploration_ratio: float  # % of actions that were exploratory
+    exploitation_ratio: float # % of actions that were exploitative
+    
+    # Convergence Metrics
+    convergence_score: float      # How stable are Q-values (0-1)
+    value_change_rate: float      # Rate of Q-value change per update
+    policy_stability: float       # How often does best action change (0-1)
+    
+    # Experience Quality
+    experience_diversity: float   # Diversity of state-action pairs visited
+    state_coverage: float         # % of relevant state space explored
+    action_preference_entropy: float  # Entropy of action selection distribution
+    
+    # Learning Efficiency
+    steps_to_first_reward: int
+    steps_to_stable_policy: int
+    reward_improvement_rate: float
+    learning_efficiency_score: float  # Overall efficiency rating
+    
+    # Performance Trends
+    recent_performance_trend: str  # "improving", "stable", "declining"
+    learning_velocity: float       # Rate of performance improvement
+    plateau_duration: int          # Steps since last significant improvement
+    
+    # Problem Indicators
+    learning_issues: List[str]     # Detected learning problems
+    recommendations: List[str]     # Suggested improvements
+    
+    # Temporal metrics
+    timestamp: float
+    steps_evaluated: int
+    total_updates: int
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'agent_id': self.agent_id,
+            'agent_type': self.agent_type,
+            'value_prediction': {
+                'current_error': self.value_prediction_error,
+                'mean_absolute_error': self.value_prediction_mae,
+                'root_mean_square_error': self.value_prediction_rmse
+            },
+            'q_values': {
+                'mean': self.q_value_mean,
+                'std': self.q_value_std,
+                'min': self.q_value_range[0],
+                'max': self.q_value_range[1],
+                'distribution': self.q_value_distribution
+            },
+            'learning_parameters': {
+                'learning_rate': self.learning_rate_current,
+                'epsilon': self.epsilon_current,
+                'exploration_ratio': self.exploration_ratio,
+                'exploitation_ratio': self.exploitation_ratio
+            },
+            'convergence': {
+                'score': self.convergence_score,
+                'value_change_rate': self.value_change_rate,
+                'policy_stability': self.policy_stability
+            },
+            'experience': {
+                'diversity': self.experience_diversity,
+                'state_coverage': self.state_coverage,
+                'action_entropy': self.action_preference_entropy
+            },
+            'efficiency': {
+                'steps_to_first_reward': self.steps_to_first_reward,
+                'steps_to_stable_policy': self.steps_to_stable_policy,
+                'improvement_rate': self.reward_improvement_rate,
+                'efficiency_score': self.learning_efficiency_score
+            },
+            'trends': {
+                'performance_trend': self.recent_performance_trend,
+                'learning_velocity': self.learning_velocity,
+                'plateau_duration': self.plateau_duration
+            },
+            'diagnostics': {
+                'issues': self.learning_issues,
+                'recommendations': self.recommendations
+            },
+            'metadata': {
+                'timestamp': self.timestamp,
+                'steps_evaluated': self.steps_evaluated,
+                'total_updates': self.total_updates
+            }
+        }
 
 
 class QLearningEvaluator:
-    """
-    Evaluates Q-learning effectiveness and convergence.
-    Tracks learning quality, parameter effectiveness, and optimization opportunities.
-    """
+    """Evaluates Q-learning performance across different agent types."""
     
-    def __init__(self, history_length: int = 1000):
+    def __init__(self, evaluation_window: int = 1000, update_frequency: int = 100):
+        self.evaluation_window = evaluation_window
+        self.update_frequency = update_frequency
+        
+        # Storage for metrics
+        self.agent_metrics_history: Dict[str, List[QLearningMetrics]] = defaultdict(list)
+        self.agent_value_predictions: Dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
+        self.agent_actual_rewards: Dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
+        self.agent_q_value_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self.agent_action_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
+        self.agent_state_history: Dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
+        
+        # Learning milestones tracking
+        self.learning_milestones: Dict[str, Dict[str, int]] = defaultdict(dict)
+        self.performance_baselines: Dict[str, float] = defaultdict(float)
+        self.last_update_time: Dict[str, float] = defaultdict(float)
+        
+        # Agent type classification
+        self.agent_type_mapping: Dict[str, str] = {}
+        
+        # Comparative analysis
+        self.type_performance_comparison: Dict[str, Dict[str, float]] = defaultdict(dict)
+        
+        print("🧠 Q-Learning Evaluator initialized")
+    
+    def register_agent(self, agent) -> None:
+        """Register an agent for evaluation."""
+        agent_id = str(agent.id)
+        
+        # Determine agent type
+        if hasattr(agent, 'learning_approach'):
+            agent_type = agent.learning_approach
+        elif hasattr(agent, 'q_table') and hasattr(agent.q_table, '__class__'):
+            if 'Enhanced' in agent.q_table.__class__.__name__:
+                agent_type = 'enhanced_q_learning'
+            elif 'Survival' in agent.q_table.__class__.__name__:
+                agent_type = 'survival_q_learning'
+            else:
+                agent_type = 'basic_q_learning'
+        else:
+            agent_type = 'unknown'
+        
+        self.agent_type_mapping[agent_id] = agent_type
+        
+        # Initialize baseline performance
+        if agent_id not in self.performance_baselines:
+            self.performance_baselines[agent_id] = getattr(agent, 'total_reward', 0.0)
+        
+        print(f"📊 Registered agent {agent_id} as type: {agent_type}")
+    
+    def record_q_learning_step(self, agent, state, action: int, 
+                              predicted_q_value: float, actual_reward: float,
+                              next_state, learning_occurred: bool = True) -> None:
         """
-        Initialize the Q-learning evaluator.
+        Record a Q-learning step for evaluation.
         
         Args:
-            history_length: Number of historical data points to maintain
+            agent: The agent that took the action
+            state: The state the agent was in
+            action: The action taken
+            predicted_q_value: The Q-value the agent predicted for this state-action
+            actual_reward: The actual reward received
+            next_state: The resulting state
+            learning_occurred: Whether a Q-learning update happened
         """
-        self.history_length = history_length
-        self.q_metrics: Dict[str, QLearningMetrics] = {}
-        self.q_history: Dict[str, List[QLearningMetrics]] = defaultdict(list)
+        agent_id = str(agent.id)
         
-        # Historical tracking for convergence analysis
-        self.robot_q_histories: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        self.robot_td_errors: Dict[str, deque] = defaultdict(lambda: deque(maxlen=500))
-        self.robot_policy_histories: Dict[str, List[Dict]] = defaultdict(list)
-        self.robot_learning_curves: Dict[str, List[float]] = defaultdict(list)
+        # Ensure agent is registered
+        if agent_id not in self.agent_type_mapping:
+            self.register_agent(agent)
         
-        # Parameter tracking
-        self.robot_parameter_history: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+        # Record the prediction vs reality
+        self.agent_value_predictions[agent_id].append(predicted_q_value)
+        self.agent_actual_rewards[agent_id].append(actual_reward)
         
-    def evaluate_q_learning(self, agent, step_count: int) -> QLearningMetrics:
-        """
-        Evaluate Q-learning performance and return comprehensive metrics.
+        # Record state-action history
+        self.agent_action_history[agent_id].append(action)
+        if hasattr(state, '__iter__'):
+            state_hash = hash(tuple(state) if isinstance(state, (list, tuple)) else state)
+        else:
+            state_hash = hash(state)
+        self.agent_state_history[agent_id].append(state_hash)
         
-        Args:
-            agent: The robot agent to evaluate
-            step_count: Current training step
-            
-        Returns:
-            QLearningMetrics object with current evaluation
-        """
-        try:
-            robot_id = str(agent.id)
-            timestamp = time.time()
-            
-            # Update historical tracking
-            self._update_q_learning_tracking(agent, robot_id, step_count)
-            
-            # Create new metrics object
-            metrics = QLearningMetrics(robot_id=robot_id, timestamp=timestamp)
-            
-            # Convergence Analysis
-            metrics.convergence_rate = self._calculate_convergence_rate(agent, robot_id)
-            metrics.convergence_stability = self._calculate_convergence_stability(robot_id)
-            metrics.q_value_variance = self._calculate_q_value_variance(agent)
-            metrics.policy_stability = self._calculate_policy_stability(robot_id)
-            
-            # Learning Efficiency
-            metrics.sample_efficiency = self._calculate_sample_efficiency(agent, robot_id)
-            metrics.experience_replay_effectiveness = self._calculate_replay_effectiveness(agent)
-            metrics.temporal_difference_progression = self._get_td_progression(robot_id)
-            
-            # Parameter Optimization
-            metrics.learning_rate_effectiveness = self._analyze_learning_rate_effectiveness(robot_id)
-            metrics.epsilon_decay_optimization = self._analyze_epsilon_decay(robot_id)
-            metrics.discount_factor_impact = self._analyze_discount_factor_impact(agent)
-            
-            # Q-table Analysis
-            metrics.q_table_size = self._get_q_table_size(agent)
-            metrics.state_value_distribution = self._get_state_value_distribution(agent)
-            metrics.action_value_distribution = self._get_action_value_distribution(agent)
-            metrics.value_function_smoothness = self._calculate_value_function_smoothness(agent)
-            
-            # Learning Progress
-            metrics.episode_q_improvement = self._calculate_episode_improvement(robot_id)
-            metrics.learning_plateau_detection = self._detect_learning_plateau(robot_id)
-            metrics.exploration_exploitation_balance = self._calculate_exploration_balance(agent)
-            
-            # Store metrics
-            self.q_metrics[robot_id] = metrics
-            self.q_history[robot_id].append(metrics)
-            
-            # Trim history
-            if len(self.q_history[robot_id]) > self.history_length:
-                self.q_history[robot_id] = self.q_history[robot_id][-self.history_length:]
-            
-            return metrics
-            
-        except Exception as e:
-            print(f"⚠️  Error evaluating Q-learning for robot {getattr(agent, 'id', 'unknown')}: {e}")
-            return QLearningMetrics(robot_id=str(getattr(agent, 'id', 'unknown')), timestamp=time.time())
-    
-    def _update_q_learning_tracking(self, agent, robot_id: str, step_count: int):
-        """Update Q-learning historical tracking."""
-        try:
-            # Store current Q-learning state
-            q_state = {
-                'step': step_count,
-                'convergence': getattr(agent, 'q_table', None) and agent.q_table.get_convergence_estimate() or 0.0,
-                'q_table_size': len(getattr(agent, 'q_table', {}).q_values or {}),
-                'total_reward': getattr(agent, 'total_reward', 0.0),
-                'epsilon': getattr(agent, 'epsilon', 0.0),
-                'learning_rate': getattr(agent, 'learning_rate', 0.0)
+        # Record Q-value if available
+        if hasattr(agent, 'q_table'):
+            try:
+                # Get current Q-values for the state
+                if hasattr(agent.q_table, 'get_action_values'):
+                    action_values = agent.q_table.get_action_values(state)
+                    if action_values:
+                        mean_q = np.mean(action_values)
+                        self.agent_q_value_history[agent_id].append(mean_q)
+                elif hasattr(agent.q_table, 'get_q_value'):
+                    q_val = agent.q_table.get_q_value(state, action)
+                    self.agent_q_value_history[agent_id].append(q_val)
+            except Exception as e:
+                # Silently handle Q-table access errors
+                pass
+        
+        # Track learning milestones
+        self._update_learning_milestones(agent_id, actual_reward)
+        
+        # Periodic evaluation
+        current_time = time.time()
+        if (current_time - self.last_update_time[agent_id]) > (self.update_frequency / 10.0):
+            if len(self.agent_value_predictions[agent_id]) >= 10:  # Minimum data for evaluation
+                self._evaluate_agent_performance(agent)
+            self.last_update_time[agent_id] = current_time
+
+    def _update_learning_milestones(self, agent_id: str, reward: float) -> None:
+        """Track important learning milestones."""
+        if agent_id not in self.learning_milestones:
+            self.learning_milestones[agent_id] = {
+                'first_positive_reward_step': -1,
+                'first_significant_reward_step': -1,
+                'stable_policy_step': -1,
+                'total_steps': 0
             }
-            self.robot_q_histories[robot_id].append(q_state)
-            
-            # Trim history
-            if len(self.robot_q_histories[robot_id]) > 1000:
-                self.robot_q_histories[robot_id] = self.robot_q_histories[robot_id][-1000:]
-            
-            # Track TD errors
-            if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_value_history'):
-                recent_history = agent.q_table.q_value_history[-10:]
-                for entry in recent_history:
-                    if 'td_error' in entry:
-                        self.robot_td_errors[robot_id].append(entry['td_error'])
-            
-            # Track parameters
-            self.robot_parameter_history[robot_id]['epsilon'].append(getattr(agent, 'epsilon', 0.0))
-            self.robot_parameter_history[robot_id]['learning_rate'].append(getattr(agent, 'learning_rate', 0.0))
-            self.robot_parameter_history[robot_id]['total_reward'].append(getattr(agent, 'total_reward', 0.0))
-            
-            # Trim parameter history
-            for param_list in self.robot_parameter_history[robot_id].values():
-                if len(param_list) > 500:
-                    param_list[:] = param_list[-500:]
-            
-            # Store current policy
-            if hasattr(agent, 'q_table'):
-                policy_sample = self._sample_current_policy(agent)
-                self.robot_policy_histories[robot_id].append(policy_sample)
-                if len(self.robot_policy_histories[robot_id]) > 100:
-                    self.robot_policy_histories[robot_id] = self.robot_policy_histories[robot_id][-100:]
-            
-        except Exception as e:
-            print(f"⚠️  Error updating Q-learning tracking for robot {robot_id}: {e}")
-    
-    def _sample_current_policy(self, agent) -> Dict:
-        """Sample current policy for stability analysis."""
-        try:
-            policy_sample = {}
-            if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_values'):
-                # Sample a few states and their best actions
-                q_values = agent.q_table.q_values
-                sample_states = list(q_values.keys())[:10]  # Sample first 10 states
-                
-                for state in sample_states:
-                    state_actions = q_values[state]
-                    if state_actions:
-                        best_action = max(state_actions.items(), key=lambda x: x[1])[0]
-                        policy_sample[state] = best_action
-            
-            return policy_sample
-        except:
-            return {}
-    
-    def _calculate_convergence_rate(self, agent, robot_id: str) -> float:
-        """Calculate convergence rate based on recent Q-value changes."""
-        try:
-            if hasattr(agent, 'q_table'):
-                return float(agent.q_table.get_convergence_estimate())
+        
+        milestones = self.learning_milestones[agent_id]
+        milestones['total_steps'] += 1
+        
+        # First positive reward
+        if reward > 0 and milestones['first_positive_reward_step'] == -1:
+            milestones['first_positive_reward_step'] = milestones['total_steps']
+        
+        # First significant reward (> 0.1)
+        if reward > 0.1 and milestones['first_significant_reward_step'] == -1:
+            milestones['first_significant_reward_step'] = milestones['total_steps']
+
+    def _calculate_exploration_ratios(self, agent, action_history: List[int]) -> Tuple[float, float]:
+        """Calculate exploration vs exploitation ratios."""
+        if not action_history or len(action_history) < 10:
+            return 0.5, 0.5
+        
+        # Simple heuristic: if agent has epsilon, use that
+        epsilon = getattr(agent, 'epsilon', 0.1)
+        
+        # Also look at action diversity
+        unique_actions = len(set(action_history[-50:]))  # Last 50 actions
+        total_actions = getattr(agent, 'action_size', len(set(action_history)))
+        
+        if total_actions > 0:
+            action_diversity = unique_actions / total_actions
+            exploration_estimate = max(epsilon, action_diversity)
+        else:
+            exploration_estimate = epsilon
+        
+        exploration_ratio = min(1.0, exploration_estimate)
+        exploitation_ratio = 1.0 - exploration_ratio
+        
+        return exploration_ratio, exploitation_ratio
+
+    def _calculate_convergence_score(self, q_history: List[float]) -> float:
+        """Calculate how converged the Q-values are (0 = changing rapidly, 1 = stable)."""
+        if len(q_history) < 20:
             return 0.0
-        except:
+        
+        # Look at recent changes in Q-values
+        recent_values = np.array(q_history[-20:])
+        if len(recent_values) < 2:
             return 0.0
-    
-    def _calculate_convergence_stability(self, robot_id: str) -> float:
-        """Calculate stability of convergence over time."""
-        try:
-            history = self.robot_q_histories[robot_id]
-            if len(history) < 10:
-                return 0.0
-            
-            # Get recent convergence values
-            recent_convergence = [entry['convergence'] for entry in history[-10:]]
-            
-            # Calculate stability as inverse of variance
-            if len(recent_convergence) > 1:
-                variance = np.var(recent_convergence)
-                stability = 1.0 / (1.0 + variance)
-                return float(stability)
-            
+        
+        # Calculate variance in recent changes
+        changes = np.diff(recent_values)
+        change_variance = np.var(changes) if len(changes) > 0 else 0.0
+        
+        # Convert to convergence score (lower variance = higher convergence)
+        convergence_score = 1.0 / (1.0 + change_variance * 10)
+        return float(np.clip(convergence_score, 0.0, 1.0))
+
+    def _calculate_value_change_rate(self, q_history: List[float]) -> float:
+        """Calculate the rate of Q-value change."""
+        if len(q_history) < 2:
             return 0.0
-        except:
+        
+        changes = np.diff(q_history[-20:]) if len(q_history) >= 20 else np.diff(q_history)
+        return float(np.mean(np.abs(changes))) if len(changes) > 0 else 0.0
+
+    def _calculate_policy_stability(self, agent, state_history: List[int], 
+                                   action_history: List[int]) -> float:
+        """Calculate how stable the policy is."""
+        if len(action_history) < 20 or not hasattr(agent, 'q_table'):
             return 0.0
-    
-    def _calculate_q_value_variance(self, agent) -> List[float]:
-        """Calculate variance in Q-values."""
-        try:
-            if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_values'):
-                all_q_values = []
-                for state_actions in agent.q_table.q_values.values():
-                    all_q_values.extend(state_actions.values())
-                
-                if all_q_values:
-                    return [float(np.var(all_q_values))]
-            return [0.0]
-        except:
-            return [0.0]
-    
-    def _calculate_policy_stability(self, robot_id: str) -> float:
-        """Calculate stability of the policy over time."""
-        try:
-            policy_history = self.robot_policy_histories[robot_id]
-            if len(policy_history) < 2:
-                return 0.0
-            
-            # Compare recent policies
-            recent_policies = policy_history[-5:]
-            if len(recent_policies) < 2:
-                return 0.0
-            
-            # Calculate similarity between consecutive policies
-            similarities = []
-            for i in range(len(recent_policies) - 1):
-                policy1 = recent_policies[i]
-                policy2 = recent_policies[i + 1]
-                
-                # Calculate Jaccard similarity
-                if policy1 and policy2:
-                    common_states = set(policy1.keys()) & set(policy2.keys())
-                    if common_states:
-                        same_actions = sum(1 for state in common_states if policy1[state] == policy2[state])
-                        similarity = same_actions / len(common_states)
-                        similarities.append(similarity)
-            
-            return float(np.mean(similarities)) if similarities else 0.0
-        except:
+        
+        # Look at action consistency for recently visited states
+        state_action_pairs = list(zip(state_history[-20:], action_history[-20:]))
+        state_counts = defaultdict(list)
+        
+        for state, action in state_action_pairs:
+            state_counts[state].append(action)
+        
+        # Calculate consistency for each state
+        consistencies = []
+        for state, actions in state_counts.items():
+            if len(actions) > 1:
+                most_common_action = max(set(actions), key=actions.count)
+                consistency = actions.count(most_common_action) / len(actions)
+                consistencies.append(consistency)
+        
+        return float(np.mean(consistencies)) if consistencies else 0.0
+
+    def _calculate_experience_diversity(self, state_history: List[int], 
+                                       action_history: List[int]) -> float:
+        """Calculate diversity of experienced state-action pairs."""
+        if not state_history or not action_history:
             return 0.0
-    
-    def _calculate_sample_efficiency(self, agent, robot_id: str) -> float:
-        """Calculate sample efficiency (learning per sample)."""
-        try:
-            history = self.robot_q_histories[robot_id]
-            if len(history) < 2:
-                return 0.0
-            
-            # Calculate improvement per step
-            recent_history = history[-10:]
-            if len(recent_history) < 2:
-                return 0.0
-            
-            improvement = recent_history[-1]['total_reward'] - recent_history[0]['total_reward']
-            steps = recent_history[-1]['step'] - recent_history[0]['step']
-            
-            if steps > 0:
-                return improvement / steps
+        
+        # Count unique state-action pairs
+        state_action_pairs = list(zip(state_history, action_history))
+        unique_pairs = len(set(state_action_pairs))
+        total_pairs = len(state_action_pairs)
+        
+        return unique_pairs / total_pairs if total_pairs > 0 else 0.0
+
+    def _calculate_state_coverage(self, agent, state_history: List[int]) -> float:
+        """Calculate what percentage of the state space has been explored."""
+        if not state_history:
             return 0.0
-        except:
+        
+        unique_states = len(set(state_history))
+        
+        # Estimate total state space size
+        if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'get_stats'):
+            stats = agent.q_table.get_stats()
+            total_states = stats.get('total_states', unique_states * 2)
+        else:
+            # Conservative estimate
+            total_states = max(unique_states * 2, 100)
+        
+        return min(1.0, unique_states / total_states)
+
+    def _calculate_action_entropy(self, action_history: List[int]) -> float:
+        """Calculate entropy of action selection distribution."""
+        if not action_history:
             return 0.0
-    
-    def _calculate_replay_effectiveness(self, agent) -> float:
-        """Calculate effectiveness of experience replay."""
-        try:
-            if hasattr(agent, 'replay_buffer'):
-                buffer_size = len(agent.replay_buffer.buffer) if hasattr(agent.replay_buffer, 'buffer') else 0
-                buffer_capacity = getattr(agent.replay_buffer, 'capacity', 1)
-                
-                # Simple measure: buffer utilization
-                utilization = buffer_size / buffer_capacity
-                
-                # Could be enhanced with more sophisticated metrics
-                return float(utilization)
+        
+        # Count action frequencies
+        action_counts = defaultdict(int)
+        for action in action_history[-100:]:  # Recent actions
+            action_counts[action] += 1
+        
+        total_actions = sum(action_counts.values())
+        if total_actions == 0:
             return 0.0
-        except:
+        
+        # Calculate entropy
+        entropy = 0.0
+        for count in action_counts.values():
+            if count > 0:
+                prob = count / total_actions
+                entropy -= prob * np.log2(prob)
+        
+        return float(entropy)
+
+    def _calculate_reward_improvement_rate(self, reward_history: List[float]) -> float:
+        """Calculate the rate of reward improvement."""
+        if len(reward_history) < 20:
             return 0.0
-    
-    def _get_td_progression(self, robot_id: str) -> List[float]:
-        """Get temporal difference error progression."""
-        try:
-            td_errors = list(self.robot_td_errors[robot_id])
-            return [float(error) for error in td_errors[-20:]]  # Last 20 TD errors
-        except:
-            return []
-    
-    def _analyze_learning_rate_effectiveness(self, robot_id: str) -> List[float]:
-        """Analyze learning rate effectiveness over time."""
-        try:
-            learning_rates = self.robot_parameter_history[robot_id]['learning_rate']
-            rewards = self.robot_parameter_history[robot_id]['total_reward']
-            
-            if len(learning_rates) < 2 or len(rewards) < 2:
-                return [0.0]
-            
-            # Calculate correlation between learning rate and reward improvement
-            min_len = min(len(learning_rates), len(rewards))
-            if min_len > 10:
-                recent_lrs = learning_rates[-min_len:]
-                recent_rewards = rewards[-min_len:]
-                
-                # Simple effectiveness: reward improvement when learning rate changes
-                lr_changes = np.diff(recent_lrs)
-                reward_changes = np.diff(recent_rewards)
-                
-                if len(lr_changes) > 0 and len(reward_changes) > 0:
-                    # Correlation between learning rate changes and reward improvements
-                    correlation = np.corrcoef(lr_changes, reward_changes)[0, 1]
-                    return [float(correlation) if not np.isnan(correlation) else 0.0]
-            
-            return [0.0]
-        except:
-            return [0.0]
-    
-    def _analyze_epsilon_decay(self, robot_id: str) -> float:
-        """Analyze epsilon decay optimization."""
-        try:
-            epsilons = self.robot_parameter_history[robot_id]['epsilon']
-            rewards = self.robot_parameter_history[robot_id]['total_reward']
-            
-            if len(epsilons) < 10 or len(rewards) < 10:
-                return 0.0
-            
-            # Analyze if epsilon decay is well-timed with performance
-            min_len = min(len(epsilons), len(rewards))
-            recent_epsilons = epsilons[-min_len:]
-            recent_rewards = rewards[-min_len:]
-            
-            # Check if epsilon decreases as performance improves
-            epsilon_trend = np.polyfit(range(len(recent_epsilons)), recent_epsilons, 1)[0]
-            reward_trend = np.polyfit(range(len(recent_rewards)), recent_rewards, 1)[0]
-            
-            # Good epsilon decay: epsilon decreases while rewards increase
-            if epsilon_trend < 0 and reward_trend > 0:
-                return abs(epsilon_trend) * reward_trend
-            
+        
+        # Compare recent rewards to earlier rewards
+        recent_rewards = np.array(reward_history[-10:])
+        earlier_rewards = np.array(reward_history[-20:-10])
+        
+        recent_mean = np.mean(recent_rewards)
+        earlier_mean = np.mean(earlier_rewards)
+        
+        improvement = recent_mean - earlier_mean
+        return float(improvement)
+
+    def _calculate_efficiency_score(self, steps_to_first_reward: int, 
+                                   prediction_mae: float, convergence_score: float) -> float:
+        """Calculate overall learning efficiency score."""
+        efficiency_components = []
+        
+        # Speed to first reward (lower is better)
+        if steps_to_first_reward > 0:
+            reward_speed_score = max(0.0, 1.0 - (steps_to_first_reward / 1000.0))
+            efficiency_components.append(reward_speed_score)
+        
+        # Prediction accuracy (lower MAE is better)
+        accuracy_score = max(0.0, 1.0 - min(prediction_mae, 1.0))
+        efficiency_components.append(accuracy_score)
+        
+        # Convergence (higher is better)
+        efficiency_components.append(convergence_score)
+        
+        return float(np.mean(efficiency_components)) if efficiency_components else 0.0
+
+    def _analyze_performance_trend(self, reward_history: List[float]) -> str:
+        """Analyze recent performance trend."""
+        if len(reward_history) < 30:
+            return "insufficient_data"
+        
+        # Compare recent thirds
+        recent_third = np.mean(reward_history[-10:])
+        middle_third = np.mean(reward_history[-20:-10])
+        early_third = np.mean(reward_history[-30:-20])
+        
+        # Determine trend
+        if recent_third > middle_third > early_third:
+            return "improving"
+        elif recent_third < middle_third < early_third:
+            return "declining"
+        elif abs(recent_third - middle_third) < 0.01:
+            return "stable"
+        else:
+            return "fluctuating"
+
+    def _calculate_learning_velocity(self, reward_history: List[float], 
+                                    q_history: List[float]) -> float:
+        """Calculate the velocity of learning (rate of change)."""
+        if len(reward_history) < 10:
             return 0.0
-        except:
-            return 0.0
-    
-    def _analyze_discount_factor_impact(self, agent) -> float:
-        """Analyze impact of discount factor on learning."""
-        try:
-            if hasattr(agent, 'discount_factor'):
-                discount = agent.discount_factor
-                
-                # Simple heuristic: optimal discount factor is usually around 0.9-0.99
-                optimal_range = (0.85, 0.99)
-                if optimal_range[0] <= discount <= optimal_range[1]:
-                    # Distance from optimal center (0.92)
-                    return 1.0 - abs(discount - 0.92) / 0.07
-                else:
-                    return 0.0
-            return 0.0
-        except:
-            return 0.0
-    
-    def _get_q_table_size(self, agent) -> int:
-        """Get Q-table size."""
-        try:
-            if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_values'):
-                return len(agent.q_table.q_values)
+        
+        # Combine reward improvement and Q-value stabilization
+        reward_velocity = 0.0
+        if len(reward_history) >= 20:
+            recent_rewards = np.array(reward_history[-10:])
+            earlier_rewards = np.array(reward_history[-20:-10])
+            reward_velocity = (np.mean(recent_rewards) - np.mean(earlier_rewards)) / 10
+        
+        q_stability_velocity = 0.0
+        if len(q_history) >= 20:
+            recent_q_std = np.std(q_history[-10:])
+            earlier_q_std = np.std(q_history[-20:-10])
+            q_stability_velocity = max(0, earlier_q_std - recent_q_std) / 10  # Decreasing std is good
+        
+        return float(reward_velocity + q_stability_velocity)
+
+    def _calculate_plateau_duration(self, reward_history: List[float]) -> int:
+        """Calculate how long the agent has been on a performance plateau."""
+        if len(reward_history) < 50:
             return 0
-        except:
-            return 0
-    
-    def _get_state_value_distribution(self, agent) -> List[float]:
-        """Get distribution of state values."""
-        try:
-            if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_values'):
-                state_values = []
-                for state_actions in agent.q_table.q_values.values():
-                    if state_actions:
-                        max_value = max(state_actions.values())
-                        state_values.append(max_value)
-                
-                return state_values[:50]  # Limit to first 50 values
-            return []
-        except:
-            return []
-    
-    def _get_action_value_distribution(self, agent) -> List[float]:
-        """Get distribution of action values."""
-        try:
-            if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_values'):
-                action_values = []
-                for state_actions in agent.q_table.q_values.values():
-                    action_values.extend(state_actions.values())
-                
-                return action_values[:100]  # Limit to first 100 values
-            return []
-        except:
-            return []
-    
-    def _calculate_value_function_smoothness(self, agent) -> float:
-        """Calculate smoothness of value function."""
-        try:
-            state_values = self._get_state_value_distribution(agent)
-            if len(state_values) > 2:
-                # Calculate variance of differences (smoothness measure)
-                differences = np.diff(state_values)
-                smoothness = 1.0 / (1.0 + np.var(differences))
-                return float(smoothness)
-            return 0.0
-        except:
-            return 0.0
-    
-    def _calculate_episode_improvement(self, robot_id: str) -> List[float]:
-        """Calculate Q-learning improvement per episode."""
-        try:
-            history = self.robot_q_histories[robot_id]
-            if len(history) < 2:
-                return [0.0]
-            
-            # Calculate improvements over recent history
-            improvements = []
-            recent_history = history[-10:]
-            
-            for i in range(1, len(recent_history)):
-                improvement = recent_history[i]['total_reward'] - recent_history[i-1]['total_reward']
-                improvements.append(improvement)
-            
-            return improvements
-        except:
-            return [0.0]
-    
-    def _detect_learning_plateau(self, robot_id: str) -> bool:
-        """Detect if learning has plateaued."""
-        try:
-            history = self.robot_q_histories[robot_id]
-            if len(history) < 20:
-                return False
-            
-            # Check if recent improvements are consistently small
-            recent_rewards = [entry['total_reward'] for entry in history[-20:]]
-            
-            # Calculate trend
-            if len(recent_rewards) > 10:
-                trend = np.polyfit(range(len(recent_rewards)), recent_rewards, 1)[0]
-                
-                # Plateau if trend is very small (less than 0.001 per step)
-                return abs(trend) < 0.001
-            
-            return False
-        except:
-            return False
-    
-    def _calculate_exploration_balance(self, agent) -> float:
-        """Calculate exploration-exploitation balance."""
-        try:
-            if hasattr(agent, 'epsilon') and hasattr(agent, 'total_reward'):
-                epsilon = agent.epsilon
-                performance = getattr(agent, 'total_reward', 0.0)
-                
-                # Good balance: moderate epsilon with good performance
-                # Or low epsilon with very good performance
-                if performance > 0:
-                    # Balance score based on epsilon and performance
-                    if epsilon > 0.3:  # High exploration
-                        return min(1.0, performance / 10.0)  # Performance should be building
-                    elif epsilon < 0.1:  # Low exploration
-                        return min(1.0, performance / 5.0)   # Performance should be high
-                    else:  # Medium exploration
-                        return min(1.0, performance / 7.0)   # Balanced performance expected
-            
-            return 0.0
-        except:
-            return 0.0
-    
-    def get_q_learning_summary(self, robot_id: str) -> Dict[str, Any]:
-        """Get Q-learning summary for a robot."""
-        if robot_id not in self.q_metrics:
-            return {}
         
-        metrics = self.q_metrics[robot_id]
-        return {
-            'robot_id': robot_id,
-            'convergence_rate': metrics.convergence_rate,
-            'convergence_stability': metrics.convergence_stability,
-            'sample_efficiency': metrics.sample_efficiency,
-            'policy_stability': metrics.policy_stability,
-            'q_table_size': metrics.q_table_size,
-            'learning_plateau': metrics.learning_plateau_detection,
-            'exploration_balance': metrics.exploration_exploitation_balance,
-            'replay_effectiveness': metrics.experience_replay_effectiveness
-        }
-    
-    def get_learning_diagnostics(self, robot_id: str) -> Dict[str, Any]:
-        """Get detailed learning diagnostics for troubleshooting."""
-        if robot_id not in self.q_metrics:
-            return {}
+        # Look for the last significant improvement
+        improvement_threshold = 0.02  # Minimum improvement to count
+        steps_since_improvement = 0
         
-        metrics = self.q_metrics[robot_id]
+        recent_mean = np.mean(reward_history[-10:])
         
-        # Identify potential issues
+        for i in range(10, min(len(reward_history), 200), 10):
+            historical_mean = np.mean(reward_history[-(i+10):-i])
+            improvement = recent_mean - historical_mean
+            
+            if improvement > improvement_threshold:
+                break
+            steps_since_improvement = i
+        
+        return steps_since_improvement
+
+    def _diagnose_learning_issues(self, prediction_mae: float, convergence_score: float,
+                                 exploration_ratio: float, trend: str, plateau_duration: int) -> List[str]:
+        """Diagnose potential learning issues."""
         issues = []
+        
+        # Poor value prediction
+        if prediction_mae > 0.5:
+            issues.append("high_value_prediction_error")
+        
+        # Poor convergence
+        if convergence_score < 0.3:
+            issues.append("poor_convergence")
+        
+        # Exploration issues
+        if exploration_ratio < 0.05:
+            issues.append("insufficient_exploration")
+        elif exploration_ratio > 0.8:
+            issues.append("excessive_exploration")
+        
+        # Performance issues
+        if trend == "declining":
+            issues.append("declining_performance")
+        
+        if plateau_duration > 100:
+            issues.append("learning_plateau")
+        
+        return issues
+
+    def _generate_recommendations(self, issues: List[str], agent_type: str) -> List[str]:
+        """Generate recommendations based on detected issues."""
         recommendations = []
         
-        if metrics.convergence_rate < 0.3:
-            issues.append("Low convergence rate")
-            recommendations.append("Consider increasing learning rate or adjusting reward function")
+        if "high_value_prediction_error" in issues:
+            recommendations.append("Consider adjusting learning rate or improving state representation")
         
-        if metrics.policy_stability < 0.5:
-            issues.append("Unstable policy")
-            recommendations.append("Consider reducing learning rate or epsilon")
+        if "poor_convergence" in issues:
+            recommendations.append("Reduce learning rate or increase experience replay")
         
-        if metrics.learning_plateau_detection:
-            issues.append("Learning plateau detected")
-            recommendations.append("Consider curriculum learning or exploration bonus")
+        if "insufficient_exploration" in issues:
+            recommendations.append("Increase epsilon or add exploration bonus")
         
-        if metrics.exploration_exploitation_balance < 0.3:
-            issues.append("Poor exploration-exploitation balance")
-            recommendations.append("Adjust epsilon decay schedule")
+        if "excessive_exploration" in issues:
+            recommendations.append("Decrease epsilon or improve exploitation strategy")
+        
+        if "declining_performance" in issues:
+            recommendations.append("Check for learning rate decay or catastrophic forgetting")
+        
+        if "learning_plateau" in issues:
+            if agent_type == "basic_q_learning":
+                recommendations.append("Consider upgrading to enhanced Q-learning")
+            else:
+                recommendations.append("Try curriculum learning or reward shaping")
+        
+        return recommendations
+
+    def _evaluate_agent_performance(self, agent) -> QLearningMetrics:
+        """Evaluate comprehensive Q-learning performance for an agent."""
+        agent_id = str(agent.id)
+        agent_type = self.agent_type_mapping.get(agent_id, 'unknown')
+        
+        # Get recent data
+        predictions = list(self.agent_value_predictions[agent_id])
+        actual_rewards = list(self.agent_actual_rewards[agent_id])
+        q_history = list(self.agent_q_value_history[agent_id])
+        action_history = list(self.agent_action_history[agent_id])
+        state_history = list(self.agent_state_history[agent_id])
+        
+        # Calculate value prediction accuracy (CORE METRIC)
+        value_prediction_error = 0.0
+        value_prediction_mae = 0.0
+        value_prediction_rmse = 0.0
+        
+        if len(predictions) > 0 and len(actual_rewards) > 0:
+            min_len = min(len(predictions), len(actual_rewards))
+            pred_array = np.array(predictions[-min_len:])
+            actual_array = np.array(actual_rewards[-min_len:])
+            
+            errors = np.abs(pred_array - actual_array)
+            value_prediction_error = float(errors[-1]) if len(errors) > 0 else 0.0
+            value_prediction_mae = float(np.mean(errors))
+            value_prediction_rmse = float(np.sqrt(np.mean(errors ** 2)))
+        
+        # Q-value analysis
+        q_value_mean = float(np.mean(q_history)) if q_history else 0.0
+        q_value_std = float(np.std(q_history)) if q_history else 0.0
+        q_value_range = (float(np.min(q_history)), float(np.max(q_history))) if q_history else (0.0, 0.0)
+        
+        # Q-value distribution
+        q_value_distribution = {}
+        if q_history:
+            hist, bin_edges = np.histogram(q_history, bins=10)
+            for i, count in enumerate(hist):
+                bin_center = (bin_edges[i] + bin_edges[i+1]) / 2
+                q_value_distribution[f"bin_{bin_center:.3f}"] = int(count)
+        
+        # Learning parameters
+        learning_rate_current = getattr(agent, 'learning_rate', 0.0)
+        epsilon_current = getattr(agent, 'epsilon', 0.0)
+        
+        # Exploration vs exploitation analysis
+        exploration_ratio, exploitation_ratio = self._calculate_exploration_ratios(agent, action_history)
+        
+        # Convergence metrics
+        convergence_score = self._calculate_convergence_score(q_history)
+        value_change_rate = self._calculate_value_change_rate(q_history)
+        policy_stability = self._calculate_policy_stability(agent, state_history, action_history)
+        
+        # Experience diversity
+        experience_diversity = self._calculate_experience_diversity(state_history, action_history)
+        state_coverage = self._calculate_state_coverage(agent, state_history)
+        action_preference_entropy = self._calculate_action_entropy(action_history)
+        
+        # Learning efficiency
+        milestones = self.learning_milestones[agent_id]
+        steps_to_first_reward = milestones.get('first_positive_reward_step', -1)
+        steps_to_stable_policy = milestones.get('stable_policy_step', -1)
+        reward_improvement_rate = self._calculate_reward_improvement_rate(actual_rewards)
+        learning_efficiency_score = self._calculate_efficiency_score(
+            steps_to_first_reward, value_prediction_mae, convergence_score
+        )
+        
+        # Performance trends
+        recent_performance_trend = self._analyze_performance_trend(actual_rewards)
+        learning_velocity = self._calculate_learning_velocity(actual_rewards, q_history)
+        plateau_duration = self._calculate_plateau_duration(actual_rewards)
+        
+        # Problem diagnosis
+        learning_issues = self._diagnose_learning_issues(
+            value_prediction_mae, convergence_score, exploration_ratio, 
+            recent_performance_trend, plateau_duration
+        )
+        recommendations = self._generate_recommendations(learning_issues, agent_type)
+        
+        # Create metrics object
+        metrics = QLearningMetrics(
+            agent_id=agent_id,
+            agent_type=agent_type,
+            value_prediction_error=value_prediction_error,
+            value_prediction_mae=value_prediction_mae,
+            value_prediction_rmse=value_prediction_rmse,
+            q_value_mean=q_value_mean,
+            q_value_std=q_value_std,
+            q_value_range=q_value_range,
+            q_value_distribution=q_value_distribution,
+            learning_rate_current=learning_rate_current,
+            epsilon_current=epsilon_current,
+            exploration_ratio=exploration_ratio,
+            exploitation_ratio=exploitation_ratio,
+            convergence_score=convergence_score,
+            value_change_rate=value_change_rate,
+            policy_stability=policy_stability,
+            experience_diversity=experience_diversity,
+            state_coverage=state_coverage,
+            action_preference_entropy=action_preference_entropy,
+            steps_to_first_reward=steps_to_first_reward,
+            steps_to_stable_policy=steps_to_stable_policy,
+            reward_improvement_rate=reward_improvement_rate,
+            learning_efficiency_score=learning_efficiency_score,
+            recent_performance_trend=recent_performance_trend,
+            learning_velocity=learning_velocity,
+            plateau_duration=plateau_duration,
+            learning_issues=learning_issues,
+            recommendations=recommendations,
+            timestamp=time.time(),
+            steps_evaluated=len(predictions),
+            total_updates=milestones['total_steps']
+        )
+        
+        # Store metrics
+        self.agent_metrics_history[agent_id].append(metrics)
+        if len(self.agent_metrics_history[agent_id]) > 100:  # Keep last 100 evaluations
+            self.agent_metrics_history[agent_id].pop(0)
+        
+        return metrics
+
+    def get_agent_metrics(self, agent_id: str) -> Optional[QLearningMetrics]:
+        """Get the latest metrics for a specific agent."""
+        if agent_id in self.agent_metrics_history and self.agent_metrics_history[agent_id]:
+            return self.agent_metrics_history[agent_id][-1]
+        return None
+
+    def get_all_agent_metrics(self) -> Dict[str, QLearningMetrics]:
+        """Get latest metrics for all agents."""
+        metrics = {}
+        for agent_id, history in self.agent_metrics_history.items():
+            if history:
+                metrics[agent_id] = history[-1]
+        return metrics
+
+    def get_type_comparison(self) -> Dict[str, Dict[str, float]]:
+        """Get comparative analysis across agent types."""
+        type_metrics = defaultdict(list)
+        
+        # Group metrics by agent type
+        for agent_id, history in self.agent_metrics_history.items():
+            if history:
+                latest_metrics = history[-1]
+                agent_type = latest_metrics.agent_type
+                type_metrics[agent_type].append(latest_metrics)
+        
+        # Calculate averages per type
+        comparison = {}
+        for agent_type, metrics_list in type_metrics.items():
+            if metrics_list:
+                comparison[agent_type] = {
+                    'avg_prediction_mae': np.mean([m.value_prediction_mae for m in metrics_list]),
+                    'avg_convergence_score': np.mean([m.convergence_score for m in metrics_list]),
+                    'avg_efficiency_score': np.mean([m.learning_efficiency_score for m in metrics_list]),
+                    'avg_learning_velocity': np.mean([m.learning_velocity for m in metrics_list]),
+                    'agent_count': len(metrics_list),
+                    'avg_steps_to_first_reward': np.mean([m.steps_to_first_reward for m in metrics_list if m.steps_to_first_reward > 0]),
+                    'common_issues': self._get_common_issues([m.learning_issues for m in metrics_list])
+                }
+        
+        return dict(comparison)
+
+    def _get_common_issues(self, issues_lists: List[List[str]]) -> List[str]:
+        """Find the most common issues across agents."""
+        all_issues = [issue for issues in issues_lists for issue in issues]
+        issue_counts = defaultdict(int)
+        for issue in all_issues:
+            issue_counts[issue] += 1
+        
+        # Return issues that affect more than 25% of agents
+        total_agents = len(issues_lists)
+        threshold = max(1, total_agents * 0.25)
+        
+        return [issue for issue, count in issue_counts.items() if count >= threshold]
+
+    def get_learning_diagnostics(self, agent_id: str) -> Dict[str, Any]:
+        """Get comprehensive learning diagnostics for an agent."""
+        if agent_id not in self.agent_metrics_history or not self.agent_metrics_history[agent_id]:
+            return {'status': 'no_data'}
+        
+        latest_metrics = self.agent_metrics_history[agent_id][-1]
+        
+        # Determine overall health
+        health_score = 0
+        max_score = 5
+        
+        if latest_metrics.value_prediction_mae < 0.3:
+            health_score += 1
+        if latest_metrics.convergence_score > 0.5:
+            health_score += 1
+        if latest_metrics.learning_efficiency_score > 0.5:
+            health_score += 1
+        if latest_metrics.recent_performance_trend in ['improving', 'stable']:
+            health_score += 1
+        if latest_metrics.plateau_duration < 50:
+            health_score += 1
+        
+        if health_score >= 4:
+            overall_health = 'excellent'
+        elif health_score >= 3:
+            overall_health = 'good'
+        elif health_score >= 2:
+            overall_health = 'fair'
+        else:
+            overall_health = 'needs_attention'
         
         return {
-            'robot_id': robot_id,
-            'issues_detected': issues,
-            'recommendations': recommendations,
-            'overall_health': 'good' if len(issues) == 0 else 'needs_attention',
-            'convergence_trend': self._get_convergence_trend(robot_id),
-            'performance_trend': self._get_performance_trend(robot_id)
+            'agent_id': agent_id,
+            'agent_type': latest_metrics.agent_type,
+            'overall_health': overall_health,
+            'health_score': f"{health_score}/{max_score}",
+            'key_metrics': {
+                'value_prediction_accuracy': 1.0 - min(1.0, latest_metrics.value_prediction_mae),
+                'convergence_score': latest_metrics.convergence_score,
+                'learning_efficiency': latest_metrics.learning_efficiency_score,
+                'performance_trend': latest_metrics.recent_performance_trend
+            },
+            'issues_detected': latest_metrics.learning_issues,
+            'recommendations': latest_metrics.recommendations,
+            'learning_stage': self._determine_learning_stage(latest_metrics),
+            'time_since_evaluation': time.time() - latest_metrics.timestamp
         }
-    
-    def _get_convergence_trend(self, robot_id: str) -> str:
-        """Get convergence trend description."""
-        try:
-            history = self.robot_q_histories[robot_id]
-            if len(history) < 5:
-                return "insufficient_data"
-            
-            recent_convergence = [entry['convergence'] for entry in history[-5:]]
-            trend = np.polyfit(range(len(recent_convergence)), recent_convergence, 1)[0]
-            
-            if trend > 0.01:
-                return "improving"
-            elif trend < -0.01:
-                return "deteriorating"
-            else:
-                return "stable"
-        except:
-            return "unknown"
-    
-    def _get_performance_trend(self, robot_id: str) -> str:
-        """Get performance trend description."""
-        try:
-            history = self.robot_q_histories[robot_id]
-            if len(history) < 5:
-                return "insufficient_data"
-            
-            recent_rewards = [entry['total_reward'] for entry in history[-5:]]
-            trend = np.polyfit(range(len(recent_rewards)), recent_rewards, 1)[0]
-            
-            if trend > 0.1:
-                return "improving"
-            elif trend < -0.1:
-                return "deteriorating"
-            else:
-                return "stable"
-        except:
-            return "unknown" 
+
+    def _determine_learning_stage(self, metrics: QLearningMetrics) -> str:
+        """Determine what stage of learning the agent is in."""
+        if metrics.steps_to_first_reward == -1:
+            return LearningStage.EXPLORATION.value
+        elif metrics.convergence_score < 0.3:
+            return LearningStage.LEARNING.value
+        elif metrics.convergence_score > 0.7 and metrics.plateau_duration < 20:
+            return LearningStage.CONVERGENCE.value
+        elif metrics.learning_efficiency_score > 0.8:
+            return LearningStage.MASTERY.value
+        else:
+            return LearningStage.PLATEAU.value
+
+    def generate_summary_report(self) -> Dict[str, Any]:
+        """Generate a comprehensive summary report."""
+        all_metrics = self.get_all_agent_metrics()
+        type_comparison = self.get_type_comparison()
+        
+        if not all_metrics:
+            return {'status': 'no_data', 'message': 'No Q-learning data available'}
+        
+        # Overall statistics
+        all_mae_values = [m.value_prediction_mae for m in all_metrics.values()]
+        all_efficiency_scores = [m.learning_efficiency_score for m in all_metrics.values()]
+        all_convergence_scores = [m.convergence_score for m in all_metrics.values()]
+        
+        # Best performing agents
+        best_accuracy_agent = min(all_metrics.items(), key=lambda x: x[1].value_prediction_mae)
+        best_efficiency_agent = max(all_metrics.items(), key=lambda x: x[1].learning_efficiency_score)
+        best_convergence_agent = max(all_metrics.items(), key=lambda x: x[1].convergence_score)
+        
+        return {
+            'timestamp': time.time(),
+            'total_agents_evaluated': len(all_metrics),
+            'overall_statistics': {
+                'avg_prediction_mae': float(np.mean(all_mae_values)),
+                'avg_efficiency_score': float(np.mean(all_efficiency_scores)),
+                'avg_convergence_score': float(np.mean(all_convergence_scores)),
+                'prediction_accuracy_range': [float(np.min(all_mae_values)), float(np.max(all_mae_values))]
+            },
+            'best_performers': {
+                'most_accurate': {
+                    'agent_id': best_accuracy_agent[0],
+                    'agent_type': best_accuracy_agent[1].agent_type,
+                    'mae': best_accuracy_agent[1].value_prediction_mae
+                },
+                'most_efficient': {
+                    'agent_id': best_efficiency_agent[0],
+                    'agent_type': best_efficiency_agent[1].agent_type,
+                    'efficiency_score': best_efficiency_agent[1].learning_efficiency_score
+                },
+                'best_convergence': {
+                    'agent_id': best_convergence_agent[0],
+                    'agent_type': best_convergence_agent[1].agent_type,
+                    'convergence_score': best_convergence_agent[1].convergence_score
+                }
+            },
+            'agent_type_comparison': type_comparison,
+            'system_health': {
+                'agents_with_issues': len([m for m in all_metrics.values() if m.learning_issues]),
+                'agents_learning_well': len([m for m in all_metrics.values() if m.learning_efficiency_score > 0.6]),
+                'agents_converged': len([m for m in all_metrics.values() if m.convergence_score > 0.7])
+            }
+        }

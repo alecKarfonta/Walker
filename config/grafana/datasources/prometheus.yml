@@ -4,7 +4,7 @@ datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://prometheus:9090
+    url: http://walker-prometheus:9090
     isDefault: true
     version: 1
     editable: true
@@ -22,7 +22,7 @@ datasources:
   - name: Walker-Metrics-DB
     type: postgres
     access: proxy
-    url: postgres:5432
+    url: walker-postgres:5432
     database: walker_metrics
     user: walker_user
     secureJsonData:

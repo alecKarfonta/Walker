@@ -28,29 +28,23 @@ scrape_configs:
     scrape_timeout: 5s
     metrics_path: '/metrics'
     static_configs:
-      - targets: ['walker-app:8080']
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: walker-app:8080
+      - targets: ['walker-training-app:8080']
 
   # Walker Dashboard Exporter API
   - job_name: 'walker-dashboard-api'
     scrape_interval: 30s
     scrape_timeout: 10s
-    metrics_path: '/api/metrics'
+    metrics_path: '/metrics'
     static_configs:
-      - targets: ['walker-app:2322']
-    relabel_configs:
-      - source_labels: [__address__]
-        target_label: __param_target
-      - source_labels: [__param_target]
-        target_label: instance
-      - target_label: __address__
-        replacement: walker-app:2322
+      - targets: ['walker-training-app:2322']
+
+  # Walker Reward Signal Quality Metrics
+  - job_name: 'walker-reward-signals'
+    scrape_interval: 15s
+    scrape_timeout: 5s
+    metrics_path: '/api/metrics/reward_signals'
+    static_configs:
+      - targets: ['walker-training-app:2322']
 
   # MLflow Tracking Server
   - job_name: 'mlflow'

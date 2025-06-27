@@ -117,17 +117,17 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.impatience = 0.002  # Increased for faster adaptation
 
         # Reward clipping to stabilize learning (REDUCED: to match new reward scale)
-        self.reward_clip_min = -0.1
-        self.reward_clip_max = 0.1
+        self.reward_clip_min = -0.05  # REDUCED from -0.1 to -0.05 for tighter control
+        self.reward_clip_max = 0.05   # REDUCED from 0.1 to 0.05 for tighter control
 
         # For state calculation
         self.last_x_position = self.body.position.x
         self.last_update_step = 0
         self.reward_count = 0
         
-        # Q-value bounds to prevent explosion
-        self.min_q_value = -1.0  # REDUCED bounds to match smaller reward scale
-        self.max_q_value = 5.0   # Increased range for better learning
+        # Q-value bounds to prevent explosion (ADJUSTED FOR NEW REWARD SCALE)
+        self.min_q_value = -2.0  # REDUCED from -1.0 to allow accumulation of small rewards
+        self.max_q_value = 2.0   # REDUCED from 5.0 to match smaller reward scale
         
         # Track extreme rewards seen in current episode
         self.best_reward_received = -np.inf  # Start at -inf so first reward sets it
@@ -448,8 +448,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         if displacement <= 0.0005 and total_reward > 0.005:
             total_reward = min(total_reward, 0.005)  # Cap positive reward when not progressing
         
-        # Clip final reward to reasonable range (CRITICAL: Much smaller range)
-        total_reward = np.clip(total_reward, -0.1, 0.2)
+        # Clip final reward to reasonable range (CRITICAL: Q-learning appropriate range)
+        total_reward = np.clip(total_reward, -0.05, 0.05)  # REDUCED from (-0.1, 0.2) to (-0.05, 0.05)
         
         # Debug logging for first agent (MORE FREQUENT TO CATCH THE ISSUE)
         if self.id == 0 and self.steps % 50 == 0:  # Every 50 steps instead of 300
@@ -466,10 +466,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             print(f"  Body angle: {np.degrees(abs(self.body.angle)):.2f}°")
             print(f"  Impatience penalty: {impatience_penalty:.6f} (stuck for {self.time_since_good_value:.1f} steps)")
             print(f"  TOTAL BEFORE CLIP: {total_reward:.6f}")
-            print(f"  TOTAL AFTER CLIP: {np.clip(total_reward, -0.1, 0.2):.6f}")
+            print(f"  TOTAL AFTER CLIP: {np.clip(total_reward, -0.05, 0.05):.6f}")
             print(f"  Episode total so far: {getattr(self, 'total_reward', 'N/A')}")
             print("---")
-            
+        
         return total_reward
         
     def enhanced_choose_action(self) -> int:
@@ -613,6 +613,36 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 discount_factor=self.discount_factor,
                 use_adaptive_lr=True
             )
+            
+            # Record reward signal for evaluation using the training environment's adapter
+            try:
+                # Try to get the training environment's adapter instance first
+                training_env = getattr(self, '_training_env', None)
+                if training_env and hasattr(training_env, 'reward_signal_adapter'):
+                    training_env.reward_signal_adapter.record_reward_signal(
+                        agent_id=str(self.id),
+                        state=experience.state,
+                        action=experience.action,
+                        reward=experience.reward
+                    )
+                else:
+                    # Fallback: use singleton instance to avoid multiple instance issue  
+                    from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+                    reward_signal_adapter = get_reward_signal_adapter()
+                    reward_signal_adapter.record_reward_signal(
+                        agent_id=str(self.id),
+                        state=experience.state,
+                        action=experience.action,
+                        reward=experience.reward
+                    )
+            except ImportError:
+                # Module not available, skip silently
+                pass
+            except Exception as e:
+                # Log other errors for debugging
+                if self.steps % 100 == 0:  # Only log errors occasionally to avoid spam
+                    print(f"⚠️ Reward signal recording failed for agent {self.id}: {e}")
+                pass
     
     def learn_from_replay(self):
         """Traditional experience replay learning (fallback method)."""
@@ -667,9 +697,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # CRITICAL: Update prev_x for next step
         self.prev_x = current_x
         
-        # Prevent total reward from exploding negatively (REDUCED: adjusted for new reward scale)
-        if self.total_reward < -5.0:  # REDUCED threshold for scaled-down reward system  
-            self.total_reward = max(self.total_reward, -5.0)
+        # Prevent total reward from exploding negatively (ADJUSTED: for new reward scale)
+        if self.total_reward < -2.0:  # REDUCED from -5.0 to -2.0 for smaller reward scale  
+            self.total_reward = max(self.total_reward, -2.0)
+        # Prevent total reward from exploding positively (NEW: cap positive rewards too)
+        elif self.total_reward > 2.0:  # Cap positive total rewards for Q-learning stability
+            self.total_reward = min(self.total_reward, 2.0)
         
         # Combined debug logging for agent 0, on a longer interval
         if self.id == 0 and self.steps % 600 == 0:
@@ -710,6 +743,36 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                     discount_factor=self.discount_factor,
                     use_adaptive_lr=True
                 )
+                
+                # Record reward signal for evaluation using the training environment's adapter
+                try:
+                    # Try to get the training environment's adapter instance
+                    training_env = getattr(self, '_training_env', None)
+                    if training_env and hasattr(training_env, 'reward_signal_adapter'):
+                        training_env.reward_signal_adapter.record_reward_signal(
+                            agent_id=str(self.id),
+                            state=prev_state,
+                            action=prev_action,
+                            reward=reward
+                        )
+                    else:
+                        # Fallback: use singleton instance to avoid multiple instance issue
+                        from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+                        reward_signal_adapter = get_reward_signal_adapter()
+                        reward_signal_adapter.record_reward_signal(
+                            agent_id=str(self.id),
+                            state=prev_state,
+                            action=prev_action,
+                            reward=reward
+                        )
+                except ImportError:
+                    # Module not available, skip silently
+                    pass
+                except Exception as e:
+                    # Log other errors for debugging
+                    if self.steps % 100 == 0:  # Only log errors occasionally
+                        print(f"⚠️ Reward signal recording failed for agent {self.id}: {e}")
+                    pass
             
             # Choose new action using enhanced method
             action_idx = self.choose_action()
@@ -1281,6 +1344,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 self.prev_food_distance = current_food_distance
                 return 0.0
             
+            # Skip food reward calculation if no food is accessible
+            if current_food_distance == float('inf') or self.prev_food_distance == float('inf'):
+                if self.id == 0 and self.steps % 400 == 0:
+                    print(f"🍎 Agent {self.id}: Skipping food reward - no accessible food (dist=inf)")
+                return 0.0  # No reward when food system isn't working
+            
             # Calculate change in distance
             distance_change = self.prev_food_distance - current_food_distance
             
@@ -1292,37 +1361,40 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             if len(self.food_distance_history) > 10:
                 self.food_distance_history.pop(0)
             
-            # Calculate food approach reward
+            # Calculate food approach reward with improved thresholds
             food_reward = 0.0
             
-            # Primary reward: moving closer to food
-            if distance_change > 0.1:  # Moved significantly closer
-                food_reward += min(0.02, distance_change * 0.1)  # Scale reward based on distance improvement
-            elif distance_change < -0.1:  # Moved significantly away
-                food_reward -= min(0.005, abs(distance_change) * 0.02)  # Small penalty for moving away
+            # Primary reward: moving closer to food (increased threshold for physics simulation)
+            if distance_change > 0.5:  # INCREASED: Moved significantly closer (was 0.1)
+                food_reward += min(0.03, distance_change * 0.15)  # INCREASED: Scale reward based on distance improvement
+            elif distance_change < -0.5:  # INCREASED: Moved significantly away (was -0.1)
+                food_reward -= min(0.008, abs(distance_change) * 0.03)  # INCREASED: Small penalty for moving away
             
             # Bonus for being very close to food
-            if current_food_distance < 3.0:  # Within consumption range
-                food_reward += 0.01 * (3.0 - current_food_distance) / 3.0  # Proximity bonus
+            if current_food_distance < 5.0:  # INCREASED: Within consumption range (was 3.0)
+                food_reward += 0.015 * (5.0 - current_food_distance) / 5.0  # INCREASED: Proximity bonus
             
             # Bonus for consistent approach (trend reward)
             if len(self.food_distance_history) >= 5:
                 trend = self.food_distance_history[0] - self.food_distance_history[-1]
                 if trend > 0:  # Generally getting closer over time
-                    food_reward += min(0.005, trend * 0.01)
+                    food_reward += min(0.008, trend * 0.015)  # INCREASED: Trend reward
             
             # Update previous distance for next calculation
             self.prev_food_distance = current_food_distance
             
-            # Debug logging for first agent occasionally
+            # Enhanced debug logging for first agent occasionally
             if self.id == 0 and self.steps % 200 == 0 and food_reward != 0.0:
                 print(f"🍎 Agent {self.id} Food Approach: distance={current_food_distance:.2f}, change={distance_change:.3f}, reward={food_reward:.4f}")
+                if len(self.food_distance_history) >= 2:
+                    trend = self.food_distance_history[0] - self.food_distance_history[-1]
+                    print(f"   Trend over {len(self.food_distance_history)} steps: {trend:.3f} (closer={trend > 0})")
             
             return food_reward
             
         except Exception as e:
             # Fail gracefully if food distance calculation fails
-            if self.id == 0 and self.steps % 500 == 0:
+            if self.id == 0 and self.steps % 300 == 0:
                 print(f"⚠️ Error calculating food approach reward for agent {self.id}: {e}")
             return 0.0
     
@@ -1341,8 +1413,6 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 training_env = self.world._training_env
             elif hasattr(self.world, 'training_environment'):
                 training_env = self.world.training_environment
-            elif hasattr(self, '_training_env'):
-                training_env = self._training_env
             
             if training_env and hasattr(training_env, 'ecosystem_dynamics'):
                 agent_pos = (self.body.position.x, self.body.position.y)
@@ -1353,9 +1423,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                     agent_role = training_env.agent_statuses[self.id].get('role', 'omnivore')
                 
                 nearest_distance = float('inf')
+                food_sources_checked = 0
+                edible_food_sources = 0
                 
                 # Check all food sources
                 for food_source in training_env.ecosystem_dynamics.food_sources:
+                    food_sources_checked += 1
                     if food_source.amount <= 0.1:  # Skip depleted food
                         continue
                     
@@ -1368,6 +1441,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                     if consumption_efficiency <= 0.0:
                         continue  # Skip food this agent can't eat
                     
+                    edible_food_sources += 1
+                    
                     # Calculate distance
                     food_x, food_y = food_source.position
                     distance = ((agent_pos[0] - food_x) ** 2 + (agent_pos[1] - food_y) ** 2) ** 0.5
@@ -1375,14 +1450,20 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                     if distance < nearest_distance:
                         nearest_distance = distance
                 
+                # Debug logging for food calculation issues
+                if self.id == 0 and self.steps % 300 == 0:
+                    print(f"🍎 Agent {self.id} Food Debug: checked={food_sources_checked}, edible={edible_food_sources}, nearest_dist={nearest_distance:.2f}")
+                    print(f"   Agent pos: ({agent_pos[0]:.1f}, {agent_pos[1]:.1f}), Role: {agent_role}")
+                
                 return nearest_distance
             else:
-                # Fallback: use a simple heuristic based on position
-                # Assume food is generally distributed around the origin
-                agent_pos = (self.body.position.x, self.body.position.y)
-                return ((agent_pos[0]) ** 2 + (agent_pos[1]) ** 2) ** 0.5
+                # CRITICAL FIX: Instead of wrong fallback, return inf and log the issue
+                if self.id == 0 and self.steps % 200 == 0:  # Log for debugging
+                    print(f"⚠️ Agent {self.id}: Cannot access ecosystem data - no food approach reward")
+                    print(f"   training_env={training_env is not None}, ecosystem={hasattr(training_env, 'ecosystem_dynamics') if training_env else False}")
+                return float('inf')  # No food distance calculation possible
                 
         except Exception as e:
-            if self.id == 0 and self.steps % 1000 == 0:  # Rare debug output
+            if self.id == 0 and self.steps % 500 == 0:  # Rare debug output
                 print(f"⚠️ Error getting food distance for agent {self.id}: {e}")
             return float('inf') 

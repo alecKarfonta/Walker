@@ -90,51 +90,51 @@ class SurvivalRewardCalculator:
         """
         total_reward = 0.0
         
-        # 1. ENERGY GAIN REWARD (Highest Priority)
+        # 1. ENERGY GAIN REWARD (Highest Priority) - MASSIVELY REDUCED FOR Q-LEARNING
         energy_change = agent_data.get('energy_change', 0.0)
         if energy_change > 0:
-            # Major reward for gaining energy (eating) - REDUCED from 20.0 to 5.0
-            energy_reward = energy_change * 5.0  # REDUCED SCALE
+            # CRITICAL FIX: Reduced from 5.0 to 0.5 for Q-learning scale
+            energy_reward = energy_change * 0.5  # REDUCED from 5.0 to 0.5
             total_reward += energy_reward
             
-        # 2. FOOD-SEEKING BEHAVIOR REWARD - SCALED DOWN
+        # 2. FOOD-SEEKING BEHAVIOR REWARD - FURTHER SCALED DOWN
         food_approach_reward = self._calculate_food_approach_reward(old_state, new_state)
-        total_reward += food_approach_reward * 1.0  # REDUCED from 3.0 to 1.0
+        total_reward += food_approach_reward * 0.3  # REDUCED from 1.0 to 0.3
         
-        # 3. MOVEMENT EFFICIENCY REWARD - KEPT SAME
+        # 3. MOVEMENT EFFICIENCY REWARD - SCALED DOWN
         movement_reward = self._calculate_movement_efficiency(action, agent_data)
-        total_reward += movement_reward * self.movement_efficiency_weight
+        total_reward += movement_reward * (self.movement_efficiency_weight * 0.2)  # REDUCED by 0.2
         
         # 4. SURVIVAL PENALTIES - SCALED DOWN
         survival_penalty = self._calculate_survival_penalties(new_state, agent_data)
-        total_reward += survival_penalty * 0.5  # REDUCED from 1.0 to 0.5
+        total_reward += survival_penalty * 0.1  # REDUCED from 0.5 to 0.1
         
         # 5. THRIVING BONUS - SCALED DOWN
         thriving_bonus = self._calculate_thriving_bonus(new_state, agent_data)
-        total_reward += thriving_bonus * 0.5  # REDUCED from 1.0 to 0.5
+        total_reward += thriving_bonus * 0.1  # REDUCED from 0.5 to 0.1
         
-        # 6. BEHAVIORAL BONUSES - KEPT SAME
+        # 6. BEHAVIORAL BONUSES - SCALED DOWN
         behavior_bonus = self._calculate_behavior_bonuses(agent_data)
-        total_reward += behavior_bonus
+        total_reward += behavior_bonus * 0.3  # REDUCED by 0.3
         
-        # CRITICAL: Scale down final reward to match crawling reward scale
-        total_reward = np.clip(total_reward, -2.0, 10.0)  # Match crawling reward scale
+        # CRITICAL: Scale down final reward to proper Q-learning range
+        total_reward = np.clip(total_reward, -0.5, 0.5)  # REDUCED from (-2.0, 10.0) to (-0.5, 0.5)
         
         return total_reward
     
     def _calculate_food_approach_reward(self, old_state: SurvivalState, 
                                        new_state: SurvivalState) -> float:
         """Reward for moving toward food sources."""
-        # Reward for getting closer to food
+        # Reward for getting closer to food - SCALED DOWN FOR Q-LEARNING
         if new_state.nearest_food_distance_bin < old_state.nearest_food_distance_bin:
-            return 1.0  # Moved closer to food
+            return 0.1  # REDUCED from 1.0 to 0.1 - Moved closer to food
         elif new_state.nearest_food_distance_bin > old_state.nearest_food_distance_bin:
-            return -0.2  # Moved away from food (small penalty)
+            return -0.02  # REDUCED from -0.2 to -0.02 - Moved away from food (small penalty)
         else:
             # Same distance - check if moving in right direction
             if (new_state.nearest_food_direction_bin == new_state.body_orientation_bin or
                 abs(new_state.nearest_food_direction_bin - new_state.body_orientation_bin) <= 1):
-                return 0.1  # Oriented toward food
+                return 0.01  # REDUCED from 0.1 to 0.01 - Oriented toward food
         return 0.0
     
     def _calculate_movement_efficiency(self, action: Tuple[float, float], 
@@ -143,20 +143,20 @@ class SurvivalRewardCalculator:
         displacement = agent_data.get('displacement', 0.0)
         velocity = agent_data.get('velocity_magnitude', 0.0)
         
-        # Reward forward progress
+        # Reward forward progress - SCALED DOWN FOR Q-LEARNING
         if displacement > self.min_movement_threshold:
-            efficiency_reward = min(displacement * 2.0, 1.0)  # Cap at 1.0
+            efficiency_reward = min(displacement * 0.2, 0.1)  # REDUCED from 2.0 to 0.2, cap from 1.0 to 0.1
             
-            # Efficiency bonus for good speed
+            # Efficiency bonus for good speed - SCALED DOWN
             if velocity > 0.5:
-                efficiency_reward *= 1.2
+                efficiency_reward *= 1.1  # REDUCED from 1.2 to 1.1
             
             return efficiency_reward
         
-        # Small penalty for excessive energy use without progress
+        # Small penalty for excessive energy use without progress - SCALED DOWN
         energy_cost = abs(action[0]) + abs(action[1])
         if energy_cost > 1.5 and displacement < self.min_movement_threshold:
-            return -0.1
+            return -0.01  # REDUCED from -0.1 to -0.01
         
         return 0.0
     
@@ -165,24 +165,24 @@ class SurvivalRewardCalculator:
         """Calculate penalties for survival threats."""
         penalty = 0.0
         
-        # Energy-based penalties
+        # Energy-based penalties - SCALED DOWN FOR Q-LEARNING
         energy_level = agent_data.get('energy_level', 1.0)
         if energy_level < self.critical_energy_threshold:
-            penalty -= 2.0  # Critical energy penalty
+            penalty -= 0.2  # REDUCED from 2.0 to 0.2 - Critical energy penalty
         elif energy_level < self.low_energy_threshold:
-            penalty -= 0.5  # Low energy penalty
+            penalty -= 0.05  # REDUCED from 0.5 to 0.05 - Low energy penalty
         
-        # Health-based penalties
+        # Health-based penalties - SCALED DOWN
         health_level = agent_data.get('health_level', 1.0)
         if health_level < 0.5:
-            penalty -= 1.0 * (0.5 - health_level)
+            penalty -= 0.1 * (0.5 - health_level)  # REDUCED from 1.0 to 0.1
         
-        # Stability penalty
+        # Stability penalty - SCALED DOWN
         body_angle = agent_data.get('body_angle', 0.0)
         if abs(body_angle) > math.pi/2:
-            penalty -= 1.0  # Flipped over
+            penalty -= 0.1  # REDUCED from 1.0 to 0.1 - Flipped over
         elif abs(body_angle) > math.pi/4:
-            penalty -= 0.3  # Highly tilted
+            penalty -= 0.03  # REDUCED from 0.3 to 0.03 - Highly tilted
         
         return penalty
     
@@ -195,7 +195,7 @@ class SurvivalRewardCalculator:
         if (energy_level > self.high_energy_threshold and 
             velocity > 0.5 and 
             state.ground_contact_bin == 1):  # Stable contact
-            return 1.0
+            return 0.1  # REDUCED from 1.0 to 0.1
         
         return 0.0
     
@@ -203,18 +203,18 @@ class SurvivalRewardCalculator:
         """Calculate bonuses for good behaviors."""
         bonus = 0.0
         
-        # Bonus for exploring when energy is high
+        # Bonus for exploring when energy is high - SCALED DOWN
         energy_level = agent_data.get('energy_level', 0.0)
         exploration_score = agent_data.get('exploration_score', 0.0)
         
         if energy_level > 0.6 and exploration_score > 0.1:
-            bonus += 0.2
+            bonus += 0.02  # REDUCED from 0.2 to 0.02
         
-        # Bonus for conservative behavior when energy is low
+        # Bonus for conservative behavior when energy is low - SCALED DOWN
         if energy_level < 0.3:
             velocity = agent_data.get('velocity_magnitude', 0.0)
             if velocity < 0.2:  # Moving slowly to conserve energy
-                bonus += 0.1
+                bonus += 0.01  # REDUCED from 0.1 to 0.01
         
         return bonus
 
@@ -272,6 +272,22 @@ class EnhancedSurvivalQLearning(EnhancedQTable):
             state_tuple, action, reward, next_state_tuple,
             adjusted_lr, discount_factor, use_adaptive_lr=True
         )
+        
+        # Record reward signal for evaluation
+        try:
+            from src.evaluation.reward_signal_integration import reward_signal_adapter
+            # Extract agent ID from agent_data if available
+            agent_id = agent_data.get('agent_id')
+            if agent_id:
+                reward_signal_adapter.record_reward_signal(
+                    agent_id=str(agent_id),
+                    state=state_tuple,
+                    action=action,
+                    reward=reward
+                )
+        except (ImportError, AttributeError, KeyError):
+            # Silently handle if reward signal system not available or agent_id missing
+            pass
         
         # Store high-value experiences for replay
         if self._is_high_value_experience(reward, agent_data):

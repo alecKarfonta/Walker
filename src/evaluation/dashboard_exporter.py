@@ -127,6 +127,27 @@ class DashboardExporter:
                 )
             ''')
             
+            # Reward signal quality metrics table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS reward_signal_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp REAL,
+                    agent_id TEXT,
+                    quality_score REAL,
+                    signal_to_noise_ratio REAL,
+                    reward_consistency REAL,
+                    reward_sparsity REAL,
+                    exploration_incentive REAL,
+                    convergence_support REAL,
+                    behavioral_alignment REAL,
+                    reward_mean REAL,
+                    reward_std REAL,
+                    steps_analyzed INTEGER,
+                    total_rewards_received INTEGER,
+                    quality_issues TEXT
+                )
+            ''')
+            
             conn.commit()
             conn.close()
             
@@ -267,6 +288,69 @@ class DashboardExporter:
                 return jsonify(config)
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/metrics/reward_signals')
+        def get_reward_signal_metrics():
+            """Get current reward signal quality metrics."""
+            try:
+                with self.metrics_lock:
+                    metrics = self.current_metrics.get('reward_signals', {})
+                    return jsonify(metrics)
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/api/metrics/history/reward_signals')
+        def get_reward_signal_history():
+            """Get reward signal metrics history."""
+            try:
+                hours = request.args.get('hours', 1, type=int)
+                since = time.time() - (hours * 3600)
+                
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                cursor.execute('''
+                    SELECT timestamp, agent_id, quality_score, signal_to_noise_ratio,
+                           reward_consistency, reward_sparsity, exploration_incentive,
+                           convergence_support, behavioral_alignment, reward_mean, reward_std
+                    FROM reward_signal_metrics 
+                    WHERE timestamp > ?
+                    ORDER BY timestamp
+                ''', (since,))
+                
+                rows = cursor.fetchall()
+                conn.close()
+                
+                history = []
+                for row in rows:
+                    history.append({
+                        'timestamp': row[0],
+                        'agent_id': row[1],
+                        'quality_score': row[2],
+                        'signal_to_noise_ratio': row[3],
+                        'reward_consistency': row[4],
+                        'reward_sparsity': row[5],
+                        'exploration_incentive': row[6],
+                        'convergence_support': row[7],
+                        'behavioral_alignment': row[8],
+                        'reward_mean': row[9],
+                        'reward_std': row[10]
+                    })
+                
+                return jsonify(history)
+                
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+        
+        @self.app.route('/metrics')
+        def get_prometheus_metrics_endpoint():
+            """Prometheus metrics endpoint."""
+            try:
+                metrics_text = self.get_prometheus_metrics()
+                from flask import Response
+                return Response(metrics_text, mimetype='text/plain')
+            except Exception as e:
+                return f"# Error generating metrics: {str(e)}", 500
     
     def start(self):
         """Start the dashboard exporter services."""
@@ -492,8 +576,140 @@ class DashboardExporter:
                 
                 self.current_metrics['robots'] = robot_summaries
                 
+                # Update reward signal metrics if available
+                self._update_reward_signal_metrics()
+                
         except Exception as e:
             print(f"⚠️  Error updating current metrics: {e}")
+    
+    def _update_reward_signal_metrics(self):
+        """Update reward signal quality metrics in current metrics cache."""
+        try:
+            # Import reward signal adapter (ensure we get the singleton instance)
+            from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+            reward_signal_adapter = get_reward_signal_adapter()
+            
+            # Get all reward signal metrics
+            all_reward_metrics = reward_signal_adapter.get_all_reward_metrics()
+            reward_status = reward_signal_adapter.get_system_status()
+            
+            if all_reward_metrics:
+                # Calculate aggregate statistics
+                quality_scores = [m.quality_score for m in all_reward_metrics.values()]
+                snr_values = [m.signal_to_noise_ratio for m in all_reward_metrics.values()]
+                consistency_values = [m.reward_consistency for m in all_reward_metrics.values()]
+                sparsity_values = [m.reward_sparsity for m in all_reward_metrics.values()]
+                
+                # Count agents by quality tier
+                excellent = len([m for m in all_reward_metrics.values() if m.quality_score >= 0.8])
+                good = len([m for m in all_reward_metrics.values() if 0.6 <= m.quality_score < 0.8])
+                fair = len([m for m in all_reward_metrics.values() if 0.4 <= m.quality_score < 0.6])
+                poor = len([m for m in all_reward_metrics.values() if 0.2 <= m.quality_score < 0.4])
+                very_poor = len([m for m in all_reward_metrics.values() if m.quality_score < 0.2])
+                
+                # Count common issues
+                all_issues = []
+                for metrics in all_reward_metrics.values():
+                    all_issues.extend([issue.value for issue in metrics.quality_issues])
+                
+                issue_counts = {}
+                for issue in all_issues:
+                    issue_counts[issue] = issue_counts.get(issue, 0) + 1
+                
+                self.current_metrics['reward_signals'] = {
+                    'timestamp': time.time(),
+                    'total_agents': len(all_reward_metrics),
+                    'total_rewards_recorded': reward_status.get('total_rewards_recorded', 0),
+                    'active': reward_status.get('active', False),
+                    
+                    # Aggregate quality metrics
+                    'avg_quality_score': sum(quality_scores) / len(quality_scores),
+                    'avg_signal_to_noise_ratio': sum(snr_values) / len(snr_values),
+                    'avg_consistency': sum(consistency_values) / len(consistency_values),
+                    'avg_sparsity': sum(sparsity_values) / len(sparsity_values),
+                    'min_quality_score': min(quality_scores),
+                    'max_quality_score': max(quality_scores),
+                    
+                    # Quality distribution
+                    'agents_excellent': excellent,
+                    'agents_good': good,
+                    'agents_fair': fair,
+                    'agents_poor': poor,
+                    'agents_very_poor': very_poor,
+                    
+                    # Issue tracking
+                    'agents_with_issues': len([m for m in all_reward_metrics.values() if m.quality_issues]),
+                    'sparse_reward_agents': issue_counts.get('sparse_rewards', 0),
+                    'noisy_reward_agents': issue_counts.get('noisy_rewards', 0),
+                    'inconsistent_reward_agents': issue_counts.get('inconsistent_rewards', 0),
+                    'poor_exploration_agents': issue_counts.get('poor_exploration_incentive', 0),
+                    
+                    # Performance indicators
+                    'agents_with_good_rewards': excellent + good,
+                    'percentage_good_quality': (excellent + good) / len(all_reward_metrics) * 100 if all_reward_metrics else 0
+                }
+                
+                # Store reward signal metrics in database
+                self._store_reward_signal_metrics_in_db(all_reward_metrics)
+                
+            else:
+                self.current_metrics['reward_signals'] = {
+                    'timestamp': time.time(),
+                    'total_agents': 0,
+                    'total_rewards_recorded': reward_status.get('total_rewards_recorded', 0),
+                    'active': reward_status.get('active', False),
+                    'status': 'no_data'
+                }
+                
+        except Exception as e:
+            print(f"⚠️  Error updating reward signal metrics: {e}")
+            # Set fallback metrics
+            self.current_metrics['reward_signals'] = {
+                'timestamp': time.time(),
+                'status': 'error',
+                'error': str(e)
+            }
+    
+    def _store_reward_signal_metrics_in_db(self, reward_metrics):
+        """Store reward signal quality metrics in database."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            current_time = time.time()
+            
+            for agent_id, metrics in reward_metrics.items():
+                quality_issues_str = ','.join([issue.value for issue in metrics.quality_issues])
+                
+                cursor.execute('''
+                    INSERT INTO reward_signal_metrics (
+                        timestamp, agent_id, quality_score, signal_to_noise_ratio,
+                        reward_consistency, reward_sparsity, exploration_incentive,
+                        convergence_support, behavioral_alignment, reward_mean,
+                        reward_std, steps_analyzed, total_rewards_received, quality_issues
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    current_time,
+                    agent_id,
+                    metrics.quality_score,
+                    metrics.signal_to_noise_ratio,
+                    metrics.reward_consistency,
+                    metrics.reward_sparsity,
+                    metrics.exploration_incentive,
+                    metrics.convergence_support,
+                    metrics.behavioral_alignment,
+                    metrics.reward_mean,
+                    metrics.reward_std,
+                    metrics.steps_analyzed,
+                    metrics.total_rewards_received,
+                    quality_issues_str
+                ))
+            
+            conn.commit()
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️  Error storing reward signal metrics in database: {e}")
     
     def _generate_alerts(self) -> List[Dict[str, Any]]:
         """Generate system alerts for monitoring."""
@@ -565,6 +781,36 @@ class DashboardExporter:
                         'message': f"{len(poor_performers)} robots showing poor learning convergence",
                         'timestamp': current_time,
                         'value': len(poor_performers)
+                    })
+                
+                # Reward signal quality alerts
+                reward_signals = self.current_metrics.get('reward_signals', {})
+                
+                if reward_signals.get('avg_quality_score', 1.0) < 0.3:
+                    alerts.append({
+                        'level': 'critical',
+                        'type': 'poor_reward_quality',
+                        'message': f"Poor average reward quality: {reward_signals.get('avg_quality_score', 0):.3f}",
+                        'timestamp': current_time,
+                        'value': reward_signals.get('avg_quality_score', 0)
+                    })
+                
+                if reward_signals.get('sparse_reward_agents', 0) > len(robots) * 0.3:
+                    alerts.append({
+                        'level': 'warning',
+                        'type': 'sparse_rewards',
+                        'message': f"{reward_signals.get('sparse_reward_agents', 0)} agents have sparse rewards",
+                        'timestamp': current_time,
+                        'value': reward_signals.get('sparse_reward_agents', 0)
+                    })
+                
+                if reward_signals.get('noisy_reward_agents', 0) > len(robots) * 0.2:
+                    alerts.append({
+                        'level': 'warning',
+                        'type': 'noisy_rewards',
+                        'message': f"{reward_signals.get('noisy_reward_agents', 0)} agents have noisy rewards",
+                        'timestamp': current_time,
+                        'value': reward_signals.get('noisy_reward_agents', 0)
                     })
                 
         except Exception as e:
@@ -679,6 +925,146 @@ class DashboardExporter:
                             "x": 6,
                             "y": 16
                         }
+                    },
+                    {
+                        "id": 6,
+                        "title": "Reward Signal Quality Score",
+                        "type": "gauge",
+                        "datasource": "Prometheus",
+                        "targets": [
+                            {
+                                "expr": "walker_reward_signals_avg_quality_score",
+                                "refId": "F"
+                            }
+                        ],
+                        "fieldConfig": {
+                            "defaults": {
+                                "thresholds": {
+                                    "steps": [
+                                        {"color": "red", "value": 0},
+                                        {"color": "yellow", "value": 0.4},
+                                        {"color": "green", "value": 0.6}
+                                    ]
+                                },
+                                "min": 0,
+                                "max": 1,
+                                "unit": "none"
+                            }
+                        },
+                        "gridPos": {
+                            "h": 8,
+                            "w": 6,
+                            "x": 0,
+                            "y": 20
+                        }
+                    },
+                    {
+                        "id": 7,
+                        "title": "Reward Signal Metrics",
+                        "type": "timeseries",
+                        "datasource": "Prometheus",
+                        "targets": [
+                            {
+                                "expr": "walker_reward_signals_avg_signal_to_noise_ratio",
+                                "legendFormat": "Signal-to-Noise Ratio",
+                                "refId": "G"
+                            },
+                            {
+                                "expr": "walker_reward_signals_avg_consistency",
+                                "legendFormat": "Consistency",
+                                "refId": "H"
+                            },
+                            {
+                                "expr": "1 - walker_reward_signals_avg_sparsity",
+                                "legendFormat": "Reward Density",
+                                "refId": "I"
+                            }
+                        ],
+                        "gridPos": {
+                            "h": 8,
+                            "w": 12,
+                            "x": 6,
+                            "y": 20
+                        }
+                    },
+                    {
+                        "id": 8,
+                        "title": "Reward Quality Distribution",
+                        "type": "piechart",
+                        "datasource": "Prometheus",
+                        "targets": [
+                            {
+                                "expr": "walker_reward_signals_agents_excellent",
+                                "legendFormat": "Excellent",
+                                "refId": "J"
+                            },
+                            {
+                                "expr": "walker_reward_signals_agents_good",
+                                "legendFormat": "Good",
+                                "refId": "K"
+                            },
+                            {
+                                "expr": "walker_reward_signals_agents_fair",
+                                "legendFormat": "Fair",
+                                "refId": "L"
+                            },
+                            {
+                                "expr": "walker_reward_signals_agents_poor + walker_reward_signals_agents_very_poor",
+                                "legendFormat": "Poor",
+                                "refId": "M"
+                            }
+                        ],
+                        "gridPos": {
+                            "h": 8,
+                            "w": 6,
+                            "x": 18,
+                            "y": 20
+                        }
+                    },
+                    {
+                        "id": 9,
+                        "title": "Reward Signal Issues",
+                        "type": "stat",
+                        "datasource": "Prometheus",
+                        "targets": [
+                            {
+                                "expr": "walker_reward_signals_sparse_reward_agents",
+                                "legendFormat": "Sparse Rewards",
+                                "refId": "N"
+                            },
+                            {
+                                "expr": "walker_reward_signals_noisy_reward_agents",
+                                "legendFormat": "Noisy Rewards",
+                                "refId": "O"
+                            },
+                            {
+                                "expr": "walker_reward_signals_inconsistent_reward_agents",
+                                "legendFormat": "Inconsistent",
+                                "refId": "P"
+                            },
+                            {
+                                "expr": "walker_reward_signals_poor_exploration_agents",
+                                "legendFormat": "Poor Exploration",
+                                "refId": "Q"
+                            }
+                        ],
+                        "fieldConfig": {
+                            "defaults": {
+                                "thresholds": {
+                                    "steps": [
+                                        {"color": "green", "value": 0},
+                                        {"color": "yellow", "value": 3},
+                                        {"color": "red", "value": 6}
+                                    ]
+                                }
+                            }
+                        },
+                        "gridPos": {
+                            "h": 6,
+                            "w": 24,
+                            "x": 0,
+                            "y": 28
+                        }
                     }
                 ],
                 "time": {
@@ -732,6 +1118,12 @@ class DashboardExporter:
                     metrics_lines.append(f"walker_robots_avg_convergence {avg_convergence} {current_time}")
                     metrics_lines.append(f"walker_robots_avg_exploration_efficiency {avg_efficiency} {current_time}")
                     metrics_lines.append(f"walker_robots_total_count {len(robots)} {current_time}")
+                
+                # Reward signal quality metrics
+                reward_signals = self.current_metrics.get('reward_signals', {})
+                for key, value in reward_signals.items():
+                    if isinstance(value, (int, float)) and key != 'timestamp':
+                        metrics_lines.append(f"walker_reward_signals_{key} {value} {current_time}")
                 
                 return '\n'.join(metrics_lines)
                 

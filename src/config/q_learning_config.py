@@ -29,8 +29,8 @@ class QLearningConfig:
     max_q_value: float = 5.0
     
     # Reward scaling (ensures consistency across approaches)
-    reward_clip_min: float = -2.0
-    reward_clip_max: float = 10.0
+    reward_clip_min: float = -0.5
+    reward_clip_max: float = 0.5
     
     # Experience replay
     replay_buffer_size: int = 3000

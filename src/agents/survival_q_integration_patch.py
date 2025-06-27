@@ -162,11 +162,12 @@ class SurvivalAwareQLearning:
             energy_change = new_energy_bin - old_energy_bin
             
             if energy_change > 0:
-                reward += 2.0 * energy_change  # REDUCED from 20.0
-                self.survival_stats['food_consumed'] += 1
+                reward += 0.2 * energy_change  # REDUCED from 2.0 to 0.2 for Q-learning scale
+                # Track energy gain
                 self.survival_stats['energy_gained'] += energy_change
+                self.survival_stats['food_consumed'] += 1
             elif energy_change < 0:
-                reward += 0.5 * energy_change   # REDUCED from 5.0
+                reward += 0.05 * energy_change   # REDUCED from 0.5 to 0.05 for Q-learning scale
             
             # SECONDARY: Food-seeking behavior - SCALED DOWN
             old_food_dist_bin = old_state[4] if len(old_state) > 4 else 2
