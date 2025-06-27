@@ -285,7 +285,7 @@ class LearningManager:
                     epsilon_start=1.0,
                     epsilon_end=0.01,
                     epsilon_decay=150000,
-                    buffer_size=50000,  # Increased from 25k to 50k for better learning
+                    buffer_size=25000,
                     batch_size=32,
                     target_update_freq=2000,
                     device="auto",

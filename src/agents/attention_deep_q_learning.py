@@ -173,8 +173,7 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
         # Copy weights to target network
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        # Attention analysis - REDUCED SIZE for performance
-        self.attention_history = deque(maxlen=50)  # REDUCED from 1000 to 50
+        self.attention_history = deque(maxlen=1000) 
         
         # Performance optimization tracking
         self._last_cleanup_time = time.time()
