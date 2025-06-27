@@ -4418,8 +4418,8 @@ class TrainingEnvironment:
                 self.focus_on_agent(None) # Clear focus if agent not found
                 return jsonify({'status': 'error', 'message': f'Agent {agent_id} not found', 'agent_id': None})
         else:
-            # If no agent_id is provided, it's a click on empty space, so clear focus
-            self.focus_on_agent(None)
+            # Clear focus if no agent_id provided
+            env.focus_on_agent(None)
             return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
 
     def get_camera_state(self):
@@ -4439,7 +4439,7 @@ class TrainingEnvironment:
         }
     
     def update_user_zoom(self, zoom_level):
-        """Update the user's preferred zoom level."""
+        """Update the user's zoom level preference."""
         self.user_zoom_level = max(0.01, min(20, zoom_level))  # Clamp to reasonable bounds
         self.user_has_manually_zoomed = True
         # Don't update target_zoom - let frontend handle zoom locally
@@ -5087,7 +5087,7 @@ class TrainingEnvironment:
                     )
                 )
                 
-    else:
+            else:
                 # Default: circular obstacle for other types
                 fixture = obstacle_body.CreateFixture(
                     shape=b2.b2CircleShape(radius=size/2),
@@ -5226,7 +5226,7 @@ class TrainingEnvironment:
             
             return obstacles_for_ui
             
-    except Exception as e:
+        except Exception as e:
             print(f"⚠️ Error getting obstacle data for UI: {e}")
             return []
 
@@ -5283,7 +5283,7 @@ class TrainingEnvironment:
             # Memory pool handles its own cleanup automatically
             print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
             
-    except Exception as e:
+        except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
 
 # Create Flask app and SocketIO instance
@@ -5488,7 +5488,7 @@ def update_agent_params():
         
         result = env.update_agent_params(params, target_agent_id)
         return jsonify({'status': 'success', 'updated_params': result})
-            except Exception as e:
+    except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/switch_learning_approach', methods=['POST'])
@@ -5505,9 +5505,9 @@ def switch_learning_approach():
         success = env.switch_agent_learning_approach(agent_id, approach)
         if success:
             return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
-            else:
+        else:
             return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
-        except Exception as e:
+    except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/test_carnivore_feeding', methods=['POST'])

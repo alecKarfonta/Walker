@@ -31,8 +31,9 @@ class LearningManager:
     Allows dynamic switching between approaches during training.
     """
     
-    def __init__(self, ecosystem_interface=None):
+    def __init__(self, ecosystem_interface=None, training_environment=None):
         self.ecosystem_interface = ecosystem_interface
+        self.training_environment = training_environment
         
         # Track which approach each agent is using
         self.agent_approaches: Dict[str, LearningApproach] = {}
@@ -176,119 +177,311 @@ class LearningManager:
         agent_id = agent.id
         
         try:
-            # Clean up current approach
+            # Step 1: Clean up current approach
             self._cleanup_current_approach(agent, from_approach)
             
-            # Set up new approach
-            if to_approach == LearningApproach.BASIC_Q_LEARNING:
-                return self._setup_basic_q_learning(agent)
-            
-            elif to_approach == LearningApproach.ENHANCED_Q_LEARNING:
-                return self._setup_enhanced_q_learning(agent)
-            
-            elif to_approach == LearningApproach.SURVIVAL_Q_LEARNING:
-                return self._setup_survival_q_learning(agent)
-            
-            elif to_approach == LearningApproach.DEEP_Q_LEARNING:
-                return self._setup_deep_q_learning(agent)
-            
-            elif to_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
-                if not self.attention_deep_q_available:
-                    print(f"❌ Attention Deep Q-Learning not available. Falling back to Deep Q-Learning for agent {agent.id}")
-                    return self._setup_deep_q_learning(agent)
-                
-                agent_id = agent.id
-                
-                # Check if agent already has its own attention network to prevent recreation
-                if hasattr(agent, '_attention_dqn') and agent._attention_dqn is not None:
-                    print(f"🔍 Agent {agent_id[:8]} already has its own Attention Deep Q-Learning network")
-                    agent.learning_approach = to_approach.value
-                    return True
-                
-                try:
-                    
-                    from .attention_deep_q_learning import AttentionDeepQLearning
-                    
-                    # Get continuous state representation
-                    state_data = self._get_agent_state_data(agent)
-                    state_vector = self._convert_to_continuous_state(state_data)
-                    
-                    # Create individual attention network for this agent
-                    self._network_creation_count += 1
-                    print(f"🧠 Creating individual Attention Network #{self._network_creation_count} for agent {agent_id[:8]}")
-                    
-                    attention_dqn = AttentionDeepQLearning(
-                        state_dim=len(state_vector),
-                        action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
-                        learning_rate=0.001
-                    )
-                    
-                    # Store in agent only (no global sharing)
-                    agent._attention_dqn = attention_dqn
-                    agent._original_choose_action = getattr(agent, 'choose_action', None)
-                    
-                    # Replace action selection method with individual network
-                    def attention_choose_action():
-                        if not hasattr(agent, '_attention_dqn') or agent._attention_dqn is None:
-                            # Fallback to prevent crashes if network is missing
-                            if agent._original_choose_action:
-                                return agent._original_choose_action()
-                            return 0
-                        
-                        state_data = self._get_agent_state_data(agent)
-                        state_vector = self._convert_to_continuous_state(state_data)
-                        action = agent._attention_dqn.choose_action(state_vector, state_data)
-                        return action
-                    
-                    agent.choose_action = attention_choose_action
-                    agent.learning_approach = to_approach.value
-                    
-                    print(f"✅ Agent {agent_id[:8]} now using Attention Deep Q-Learning (Network #{self._network_creation_count})")
-                    return True
-                    
-                except Exception as e:
-                    print(f"❌ Failed to setup Attention Deep Q-Learning for agent {agent_id[:8]}: {e}")
-                    print(f"🔄 Falling back to Deep Q-Learning for agent {agent_id[:8]}")
-                    return self._setup_deep_q_learning(agent)
-            
-            elif to_approach == LearningApproach.ELITE_IMITATION_LEARNING and self.elite_imitation_available:
-                # Store original action selection
-                agent._original_choose_action = getattr(agent, 'choose_action', None)
-                agent._use_elite_imitation = True
-                
-                # Enhanced action selection with elite imitation
-                def imitation_choose_action():
-                    # Get context for imitation learning
-                    context = self._get_agent_context(agent)
-                    current_state = self._get_agent_state(agent)
-                    
-                    # Try to get action from elite imitation
-                    if self.elite_imitation:
-                        imitation_action = self.elite_imitation.get_imitation_action(
-                            agent.id, current_state, context
-                        )
-                        if imitation_action is not None:
-                            return imitation_action
-                    
-                    # Fall back to original method
-                    if agent._original_choose_action:
-                        return agent._original_choose_action()
-                    else:
-                        return agent.choose_action() if hasattr(agent, 'choose_action') else 0
-                
-                agent.choose_action = imitation_choose_action
-                agent.learning_approach = to_approach.value
-                
-                print(f"🎭 Agent {agent.id} now using Elite Imitation Learning")
-                return True
-            
-            else:
-                print(f"⚠️ Unknown learning approach: {to_approach}")
+            # Step 2: Create new learning approach instance
+            new_adapter = self._create_learning_approach(agent, to_approach)
+            if not new_adapter:
+                print(f"❌ Failed to create {to_approach.value} for agent {agent_id}")
                 return False
+            
+            # Step 3: Store new adapter if needed
+            if new_adapter != agent:  # Only store if it's a separate adapter
+                self.agent_adapters[agent_id] = new_adapter
+            
+            # Step 4: Transfer knowledge from old approach
+            if agent_id in self.agent_original_qtables:
+                self._transfer_knowledge(agent, self.agent_original_qtables[agent_id], to_approach)
+            
+            print(f"✅ Agent {agent_id} successfully switched to {to_approach.value}")
+            return True
                 
         except Exception as e:
             print(f"❌ Error performing approach switch: {e}")
             return False
+    
+    def _create_learning_approach(self, agent, approach: LearningApproach):
+        """Create a new learning approach instance for the agent."""
+        
+        try:
+            if approach == LearningApproach.BASIC_Q_LEARNING:
+                # Simple sparse Q-table
+                agent.q_table = SparseQTable(
+                    action_count=agent.action_size,
+                    default_value=0.0
+                )
+                agent.learning_rate = 0.1
+                agent.epsilon = 0.3
+                agent.epsilon_decay = 0.999
+                agent.learning_approach = approach.value
+                return agent
+            
+            elif approach == LearningApproach.ENHANCED_Q_LEARNING:
+                # Enhanced Q-table with sophisticated features
+                agent.q_table = EnhancedQTable(
+                    action_count=agent.action_size,
+                    default_value=0.0,
+                    confidence_threshold=15,
+                    exploration_bonus=0.15
+                )
+                agent.learning_rate = 0.05
+                agent.epsilon = 0.3
+                agent.epsilon_decay = 0.9999
+                agent.learning_approach = approach.value
+                return agent
+            
+            elif approach == LearningApproach.SURVIVAL_Q_LEARNING:
+                if not self.ecosystem_interface:
+                    print("❌ Cannot create survival Q-learning: No ecosystem interface")
+                    return None
+                
+                from .survival_q_integration_patch import upgrade_agent_to_survival_learning
+                survival_adapter = upgrade_agent_to_survival_learning(agent, self.ecosystem_interface)
+                return survival_adapter
+            
+            elif approach == LearningApproach.DEEP_Q_LEARNING:
+                from .deep_survival_q_learning import DeepSurvivalQLearning, TORCH_AVAILABLE
+                
+                if not TORCH_AVAILABLE:
+                    print("❌ PyTorch not available. Cannot use Deep Q-Learning.")
+                    return None
+                
+                # Create Deep Q-Learning instance
+                state_dim = 15
+                action_dim = agent.action_size
+                
+                deep_q_learner = DeepSurvivalQLearning(
+                    state_dim=state_dim,
+                    action_dim=action_dim,
+                    learning_rate=3e-4,
+                    gamma=0.99,
+                    epsilon_start=1.0,
+                    epsilon_end=0.01,
+                    epsilon_decay=150000,
+                    buffer_size=25000,
+                    batch_size=32,
+                    target_update_freq=2000,
+                    device="auto",
+                    use_dueling=True,
+                    use_prioritized_replay=True
+                )
+                
+                # Setup deep learning wrapper
+                self._setup_deep_learning_wrapper(agent, deep_q_learner)
+                agent.learning_approach = approach.value
+                return deep_q_learner
+            
+            elif approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
+                if not self.attention_deep_q_available:
+                    print(f"❌ Attention Deep Q-Learning not available for agent {agent.id}")
+                    return None
+                
+                from .attention_deep_q_learning import AttentionDeepQLearning
+                
+                # Get state dimensions
+                state_data = self._get_agent_state_data(agent)
+                state_vector = self._convert_to_continuous_state(state_data)
+                
+                # Create individual attention network
+                self._network_creation_count += 1
+                print(f"🧠 Creating Attention Network #{self._network_creation_count} for agent {agent.id[:8]}")
+                
+                attention_dqn = AttentionDeepQLearning(
+                    state_dim=len(state_vector),
+                    action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
+                    learning_rate=0.001
+                )
+                
+                # Setup attention learning wrapper
+                self._setup_attention_learning_wrapper(agent, attention_dqn)
+                agent.learning_approach = approach.value
+                return attention_dqn
+            
+            elif approach == LearningApproach.ELITE_IMITATION_LEARNING:
+                if not self.elite_imitation_available:
+                    print(f"❌ Elite Imitation Learning not available for agent {agent.id}")
+                    return None
+                
+                # Setup elite imitation wrapper
+                self._setup_elite_imitation_wrapper(agent)
+                agent.learning_approach = approach.value
+                return agent
+            
+            else:
+                print(f"⚠️ Unknown learning approach: {approach}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Error creating learning approach {approach.value}: {e}")
+            return None
+    
+    def _setup_deep_learning_wrapper(self, agent, deep_q_learner):
+        """Setup the deep learning step wrapper for an agent."""
+        # Initialize deep learning attributes
+        agent._deep_step_count = 0
+        agent._deep_experience_collection_freq = 10
+        agent._deep_training_freq = 3000
+        agent._deep_min_buffer_size = 3000
+        agent._deep_ready_to_train = False
+        agent._deep_prev_state = None
+        agent._deep_prev_action = None
+        agent._deep_prev_reward = 0.0
+        
+        # Store original step method
+        if not hasattr(agent, '_original_step_method'):
+            agent._original_step_method = agent.step
+        
+        # Create wrapper step method
+        def deep_learning_step(dt: float):
+            try:
+                result = agent._original_step_method(dt)
+                agent._deep_step_count += 1
+                
+                # Experience collection
+                if agent._deep_step_count % agent._deep_experience_collection_freq == 0:
+                    self._collect_deep_experience(agent, deep_q_learner)
+                
+                # Training
+                if (agent._deep_ready_to_train and 
+                    agent._deep_step_count % agent._deep_training_freq == 0):
+                    self._train_deep_model(agent, deep_q_learner)
+                
+                return result
+            except Exception as e:
+                return agent._original_step_method(dt)
+        
+        agent.step = deep_learning_step
+    
+    def _setup_attention_learning_wrapper(self, agent, attention_dqn):
+        """Setup the attention learning wrapper for an agent."""
+        agent._attention_dqn = attention_dqn
+        agent._original_choose_action = getattr(agent, 'choose_action', None)
+        
+        def attention_choose_action():
+            if not hasattr(agent, '_attention_dqn') or agent._attention_dqn is None:
+                if agent._original_choose_action:
+                    return agent._original_choose_action()
+                return 0
+            
+            training_env = getattr(agent, 'training_environment', None)
+            state_data = self._get_agent_state_data(agent, training_env)
+            state_vector = agent._attention_dqn.get_arm_control_state_representation(state_data)
+            action = agent._attention_dqn.choose_action(state_vector, state_data)
+            return action
+        
+        agent.choose_action = attention_choose_action
+    
+    def _setup_elite_imitation_wrapper(self, agent):
+        """Setup the elite imitation learning wrapper for an agent."""
+        agent._original_choose_action = getattr(agent, 'choose_action', None)
+        agent._use_elite_imitation = True
+        
+        def imitation_choose_action():
+            context = self._get_agent_context(agent)
+            current_state = self._get_agent_state(agent)
+            
+            if self.elite_imitation:
+                imitation_action = self.elite_imitation.get_imitation_action(
+                    agent.id, current_state, context
+                )
+                if imitation_action is not None:
+                    return imitation_action
+            
+            if agent._original_choose_action:
+                return agent._original_choose_action()
+            else:
+                return agent.choose_action() if hasattr(agent, 'choose_action') else 0
+        
+        agent.choose_action = imitation_choose_action
+    
+    def _collect_deep_experience(self, agent, deep_q_learner):
+        """Collect experience for deep learning."""
+        try:
+            current_state = [
+                getattr(agent.body, 'angle', 0.0),
+                agent.body.linearVelocity.x if hasattr(agent.body, 'linearVelocity') else 0.0,
+                agent.body.linearVelocity.y if hasattr(agent.body, 'linearVelocity') else 0.0,
+                agent.body.position.x if hasattr(agent.body, 'position') else 0.0,
+                agent.body.position.y if hasattr(agent.body, 'position') else 0.0,
+            ]
+            
+            if len(current_state) == 5:
+                extended_state_list = current_state + [0.0] * 10
+                extended_state_array = np.array(extended_state_list, dtype=np.float32)
+                action_idx = deep_q_learner.choose_action(extended_state_array)
+                
+                if hasattr(agent, 'actions') and action_idx is not None and action_idx < len(agent.actions):
+                    agent.current_action = action_idx
+                    agent.current_action_tuple = agent.actions[action_idx]
+                
+                if (agent._deep_prev_state is not None and 
+                    agent._deep_prev_action is not None and
+                    action_idx is not None):
+                    reward = getattr(agent, 'total_reward', 0.0) - getattr(agent, '_deep_prev_reward', 0.0)
+                    deep_q_learner.store_experience(
+                        agent._deep_prev_state, 
+                        agent._deep_prev_action, 
+                        reward, 
+                        extended_state_array, 
+                        False
+                    )
+                    
+                    agent._deep_prev_state = extended_state_array
+                    agent._deep_prev_action = action_idx
+                    agent._deep_prev_reward = getattr(agent, 'total_reward', 0.0)
+                    
+        except Exception as e:
+            print(f"❌ Experience collection error Agent {agent.id}: {e}")
+    
+    def _train_deep_model(self, agent, deep_q_learner):
+        """Train the deep learning model."""
+        if len(self._agents_currently_training) >= 1:
+            import random
+            agent._deep_step_count -= random.randint(1000, 3000)
+            return
+        
+        self._agents_currently_training.add(agent.id)
+        
+        try:
+            import time
+            import threading
+            
+            print(f"🔥 GPU TRAINING START: Agent {agent.id}")
+            training_start_time = time.time()
+            
+            def background_training():
+                try:
+                    learning_stats = deep_q_learner.learn()
+                    training_duration = time.time() - training_start_time
+                    print(f"✅ GPU TRAINING COMPLETE: Agent {agent.id} ({training_duration:.3f}s)")
+                except Exception as e:
+                    print(f"❌ GPU TRAINING FAILED: Agent {agent.id} - {e}")
+                finally:
+                    self._agents_currently_training.discard(agent.id)
+            
+            training_thread = threading.Thread(target=background_training, daemon=True)
+            training_thread.start()
+            
+        except Exception as e:
+            print(f"❌ GPU TRAINING FAILED: Agent {agent.id} - {e}")
+            self._agents_currently_training.discard(agent.id)
+    
+    def _transfer_knowledge(self, agent, source_qtable, approach: LearningApproach):
+        """Transfer knowledge from source Q-table to new approach."""
+        try:
+            if approach == LearningApproach.BASIC_Q_LEARNING:
+                self._transfer_basic_knowledge(agent, source_qtable)
+            elif approach == LearningApproach.ENHANCED_Q_LEARNING:
+                self._transfer_enhanced_knowledge(agent, source_qtable)
+            elif approach == LearningApproach.SURVIVAL_Q_LEARNING:
+                self._transfer_survival_knowledge(agent, source_qtable)
+            elif approach == LearningApproach.DEEP_Q_LEARNING:
+                self._transfer_deep_knowledge(agent, source_qtable)
+            # Note: Attention and Elite approaches don't need specific knowledge transfer
+            
+        except Exception as e:
+            print(f"⚠️ Error transferring knowledge for {approach.value}: {e}")
     
     def _cleanup_current_approach(self, agent, approach: LearningApproach):
         """Clean up the current learning approach."""
@@ -309,9 +502,12 @@ class LearningManager:
                 try:
                     # Clear GPU memory if using CUDA
                     if hasattr(agent._attention_dqn, 'device') and 'cuda' in str(agent._attention_dqn.device):
-                        import torch
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except ImportError:
+                            pass  # Torch not available, skip GPU cleanup
                     del agent._attention_dqn
                     print(f"🧹 Cleaned up attention network for agent {agent_id}")
                 except Exception as e:
@@ -332,296 +528,6 @@ class LearningManager:
                 
         except Exception as e:
             print(f"⚠️ Error cleaning up approach for agent {agent_id}: {e}")
-    
-    def _setup_basic_q_learning(self, agent) -> bool:
-        """Set up basic Q-learning approach."""
-        try:
-            # Use simple sparse Q-table
-            agent.q_table = SparseQTable(
-                action_count=agent.action_size,
-                default_value=0.0
-            )
-            
-            # Reset learning parameters to basic values
-            agent.learning_rate = 0.1
-            agent.epsilon = 0.3
-            agent.epsilon_decay = 0.999
-            
-            # Transfer some knowledge from original Q-table if available
-            if agent.id in self.agent_original_qtables:
-                self._transfer_basic_knowledge(agent, self.agent_original_qtables[agent.id])
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error setting up basic Q-learning: {e}")
-            return False
-    
-    def _setup_enhanced_q_learning(self, agent) -> bool:
-        """Set up enhanced Q-learning approach."""
-        try:
-            # Use enhanced Q-table with all the sophisticated features
-            agent.q_table = EnhancedQTable(
-                action_count=agent.action_size,
-                default_value=0.0,
-                confidence_threshold=15,
-                exploration_bonus=0.15
-            )
-            
-            # Enhanced learning parameters
-            agent.learning_rate = 0.05
-            agent.epsilon = 0.3
-            agent.epsilon_decay = 0.9999
-            
-            # Transfer knowledge from original Q-table
-            if agent.id in self.agent_original_qtables:
-                self._transfer_enhanced_knowledge(agent, self.agent_original_qtables[agent.id])
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error setting up enhanced Q-learning: {e}")
-            return False
-    
-    def _setup_survival_q_learning(self, agent) -> bool:
-        """Set up survival Q-learning approach."""
-        try:
-            if not self.ecosystem_interface:
-                print("❌ Cannot setup survival Q-learning: No ecosystem interface")
-                return False
-            
-            from .survival_q_integration_patch import upgrade_agent_to_survival_learning
-            
-            # Upgrade agent to survival learning
-            survival_adapter = upgrade_agent_to_survival_learning(agent, self.ecosystem_interface)
-            self.agent_adapters[agent.id] = survival_adapter
-            
-            # Transfer knowledge from original Q-table if available
-            if agent.id in self.agent_original_qtables:
-                self._transfer_survival_knowledge(agent, self.agent_original_qtables[agent.id])
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error setting up survival Q-learning: {e}")
-            return False
-    
-    def _setup_deep_q_learning(self, agent) -> bool:
-        """Set up deep Q-learning approach with GPU acceleration."""
-        try:
-            from .deep_survival_q_learning import DeepSurvivalQLearning, TORCH_AVAILABLE
-            
-            if not TORCH_AVAILABLE:
-                print("❌ PyTorch not available. Cannot use Deep Q-Learning. Falling back to Enhanced Q-Learning.")
-                return self._setup_enhanced_q_learning(agent)
-            
-            # Create Deep Q-Learning instance with GPU support
-            state_dim = 15  # Continuous state vector dimensions (matches get_continuous_state_vector output)
-            action_dim = agent.action_size
-            
-            deep_q_learner = DeepSurvivalQLearning(
-                state_dim=state_dim,
-                action_dim=action_dim,
-                learning_rate=3e-4,
-                gamma=0.99,
-                epsilon_start=1.0,
-                epsilon_end=0.01,
-                epsilon_decay=150000,  # Slower decay
-                buffer_size=25000,     # Reduced from 100k to 25k
-                batch_size=32,         # Reduced from 64 to 32  
-                target_update_freq=2000,  # Less frequent updates
-                device="auto",  # Auto-detect GPU
-                use_dueling=True,
-                use_prioritized_replay=True
-            )
-            
-                            # Store the deep learner in agent adapters
-            self.agent_adapters[agent.id] = deep_q_learner
-            
-            # Initialize experience collection (lightweight) vs training (heavy) separation
-            # PHYSICS ENGINE OPTIMIZED: 60 FPS = 16.67ms per step
-            agent._deep_step_count = 0
-            agent._deep_experience_collection_freq = 10   # Collect every 10 steps = 6 times/second
-            agent._deep_training_freq = 3000               # Train every 300 steps = every 5 seconds  
-            agent._deep_min_buffer_size = 3000            # Start training after 1,000 experiences
-            agent._deep_ready_to_train = False            # No training until buffer is full
-            agent._deep_prev_state = None
-            agent._deep_prev_action = None                # Initialize previous action
-            agent._deep_prev_reward = 0.0                 # Initialize previous reward
-            
-            # Store original step method and replace with deep learning step
-            if not hasattr(agent, '_original_step_method'):
-                agent._original_step_method = agent.step
-            
-            # Create wrapper for efficient Deep Q-Learning with separated experience collection and training
-            def deep_learning_step(dt: float):
-                try:
-                    # CRITICAL: Always run original simulation step first 
-                    result = agent._original_step_method(dt)
-                    
-                    # Initialize deep learning attributes if needed
-                    if not hasattr(agent, '_deep_step_count'):
-                        agent._deep_step_count = 0
-                        agent._deep_experience_collection_freq = 10   # Collect every 10 steps = 6 times/second
-                        agent._deep_training_freq = 3000               # Train every 300 steps = every 5 seconds
-                        agent._deep_min_buffer_size = 3000            # Start training after 1,000 experiences
-                        agent._deep_ready_to_train = False
-                        agent._deep_prev_state = None
-                        agent._deep_prev_action = None
-                        agent._deep_prev_reward = 0.0
-                        print(f"🔧 Deep Q-Learning attributes initialized for Agent {agent.id} (Physics Engine Optimized)")
-                    
-                    agent._deep_step_count += 1
-                    
-                    # PHASE 1: Lightweight experience collection (every few steps)
-                    if agent._deep_step_count % agent._deep_experience_collection_freq == 0:
-                        try:
-                            # Quick state collection (minimal computation)
-                            current_state = [
-                                getattr(agent.body, 'angle', 0.0),                              # body angle
-                                agent.body.linearVelocity.x if hasattr(agent.body, 'linearVelocity') else 0.0,  # velocity x
-                                agent.body.linearVelocity.y if hasattr(agent.body, 'linearVelocity') else 0.0,  # velocity y
-                                agent.body.position.x if hasattr(agent.body, 'position') else 0.0,              # position x
-                                agent.body.position.y if hasattr(agent.body, 'position') else 0.0,              # position y
-                            ]
-                            
-                            # Choose action (neural network inference - relatively fast)
-                            if len(current_state) == 5:  # Basic state, extend to 15 dimensions
-                                extended_state_list = current_state + [0.0] * 10  # Pad to 15 dimensions
-                                extended_state_array = np.array(extended_state_list, dtype=np.float32)
-                                action_idx = deep_q_learner.choose_action(extended_state_array)
-                                
-                                # Set action on agent (lightweight)
-                                if hasattr(agent, 'actions') and action_idx is not None and action_idx < len(agent.actions):
-                                    agent.current_action = action_idx
-                                    agent.current_action_tuple = agent.actions[action_idx]
-                                
-                                # Store experience if we have previous state (lightweight)
-                                if (agent._deep_prev_state is not None and 
-                                    agent._deep_prev_action is not None and
-                                    action_idx is not None):
-                                    reward = getattr(agent, 'total_reward', 0.0) - getattr(agent, '_deep_prev_reward', 0.0)
-                                    deep_q_learner.store_experience(
-                                        agent._deep_prev_state, 
-                                        agent._deep_prev_action, 
-                                        reward, 
-                                        extended_state_array, 
-                                        False
-                                    )
-                                    
-                                    # Record reward signal for evaluation
-                                    try:
-                                        from src.evaluation.reward_signal_integration import reward_signal_adapter
-                                        reward_signal_adapter.record_reward_signal(
-                                            agent_id=str(agent.id),
-                                            state=tuple(agent._deep_prev_state) if hasattr(agent._deep_prev_state, '__iter__') else (agent._deep_prev_state,),
-                                            action=agent._deep_prev_action,
-                                            reward=reward
-                                        )
-                                    except (ImportError, AttributeError):
-                                        # Silently handle if reward signal system not available
-                                        pass
-                                    
-                                    # Store current state for next step
-                                    agent._deep_prev_state = extended_state_array
-                                    agent._deep_prev_action = action_idx
-                                    agent._deep_prev_reward = getattr(agent, 'total_reward', 0.0)
-                                
-                        except Exception as e:
-                            # Log experience collection errors instead of silent fail
-                            print(f"❌ Experience collection error Agent {agent.id}: {e}")
-                            import traceback
-                            traceback.print_exc()
-                    
-                    # PHASE 2: Heavy training (very infrequent, only when buffer is full)
-                    if not agent._deep_ready_to_train:
-                        # Check if buffer is ready for training
-                        if hasattr(deep_q_learner, 'memory') and len(deep_q_learner.memory) >= agent._deep_min_buffer_size:
-                            agent._deep_ready_to_train = True
-                            print(f"🎯 TRAINING READY: Agent {agent.id} buffer filled ({len(deep_q_learner.memory):,} experiences)")
-                            print(f"   🔥 GPU training will begin every {agent._deep_training_freq:,} steps")
-                        else:
-                            # Periodic buffer status update (every 1000 steps)
-                            if hasattr(deep_q_learner, 'memory') and agent._deep_step_count % 1000 == 0:
-                                current_buffer_size = len(deep_q_learner.memory)
-                                progress = (current_buffer_size / agent._deep_min_buffer_size) * 100
-                                print(f"📊 Buffer Progress: Agent {agent.id} - {current_buffer_size:,}/{agent._deep_min_buffer_size:,} ({progress:.1f}%)")
-                    
-                    # Heavy training phase (very infrequent) with training coordination
-                    if (agent._deep_ready_to_train and 
-                        agent._deep_step_count % agent._deep_training_freq == 0 and
-                        hasattr(deep_q_learner, 'memory') and 
-                        len(deep_q_learner.memory) >= deep_q_learner.batch_size):
-                        
-                        # Training coordination - prevent multiple agents training simultaneously
-                        # (initialized in __init__ method)
-                        
-                        # Skip training if any agent is already training (prevent GPU overload)
-                        if len(self._agents_currently_training) >= 1:  # Max 1 agent training at a time
-                            # Defer training by larger random amount to spread out training
-                            import random
-                            agent._deep_step_count -= random.randint(1000, 3000)
-                            return result
-                        
-                        # Add this agent to training set
-                        self._agents_currently_training.add(agent.id)
-                        
-                        try:
-                            import time
-                            import threading
-                            buffer_size = len(deep_q_learner.memory)
-                            batch_size = deep_q_learner.batch_size
-                            
-                            print(f"🔥 GPU TRAINING START: Agent {agent.id} (step {agent._deep_step_count})")
-                            print(f"   📊 Buffer: {buffer_size:,} experiences | Batch: {batch_size}")
-                            
-                            training_start_time = time.time()
-                            
-                            # BACKGROUND THREADING: Move heavy training to background thread
-                            def background_training():
-                                try:
-                                    # Heavy neural network training (GPU intensive)
-                                    learning_stats = deep_q_learner.learn()
-                                    
-                                    training_duration = time.time() - training_start_time
-                                    print(f"✅ GPU TRAINING COMPLETE: Agent {agent.id}")
-                                    print(f"   ⏱️  Duration: {training_duration:.3f}s | Loss: {learning_stats.get('loss', 'N/A')}")
-                                    
-                                    # Memory cleanup handled automatically by buffer maxlen
-                                except Exception as e:
-                                    print(f"❌ GPU TRAINING FAILED: Agent {agent.id} - {e}")
-                                finally:
-                                    # Remove from training set
-                                    self._agents_currently_training.discard(agent.id)
-                            
-                            # Start background training (non-blocking)
-                            training_thread = threading.Thread(target=background_training, daemon=True)
-                            training_thread.start()
-                                
-                        except Exception as e:
-                            print(f"❌ GPU TRAINING FAILED: Agent {agent.id} - {e}")
-                            self._agents_currently_training.discard(agent.id)
-                    
-                    return result
-                    
-                except Exception as e:
-                    # Always fall back to original simulation
-                    return agent._original_step_method(dt)
-            
-            # Replace the step method
-            agent.step = deep_learning_step
-            
-            # Transfer knowledge from original Q-table if available
-            if agent.id in self.agent_original_qtables:
-                self._transfer_deep_knowledge(agent, self.agent_original_qtables[agent.id])
-            
-            print(f"🧠 Agent {agent.id} now using Deep Q-Learning with GPU acceleration")
-            return True
-            
-        except Exception as e:
-            print(f"❌ Error setting up deep Q-learning: {e}")
-            # Fall back to enhanced Q-learning if deep learning fails
-            return self._setup_enhanced_q_learning(agent)
     
     def _transfer_basic_knowledge(self, agent, source_qtable):
         """Transfer basic knowledge from source Q-table."""
@@ -884,6 +790,17 @@ class LearningManager:
         
         return results
     
+    def set_training_environment(self, training_environment):
+        """Set the training environment reference for accessing real food data."""
+        self.training_environment = training_environment
+    
+    def inject_training_environment_into_agents(self, agents):
+        """Inject training environment reference into all agents for state data access."""
+        for agent in agents:
+            if hasattr(agent, 'id'):
+                agent.training_environment = self.training_environment
+        print(f"🌍 Training environment injected into {len(agents)} agents")
+    
     def recommend_approach(self, agent, performance_history: Dict[str, float]) -> LearningApproach:
         """Recommend the best learning approach for an agent based on performance."""
         try:
@@ -913,11 +830,16 @@ class LearningManager:
         if self.elite_imitation and hasattr(agent, 'id'):
             try:
                 # Calculate performance metrics
+                # Calculate distance traveled safely
+                distance_traveled = 0.0
+                if hasattr(agent, 'body') and agent.body and hasattr(agent.body, 'position'):
+                    distance_traveled = abs(agent.body.position.x)
+                
                 performance_data = {
                     'total_reward': getattr(agent, 'total_reward', 0.0),
                     'survival_time': getattr(agent, 'steps', 0),
                     'food_consumption': getattr(agent, 'total_reward', 0.0) * 0.1,  # Estimate
-                    'distance_traveled': abs(getattr(agent, 'body', type('', (), {'position': type('', (), {'x': 0})})()).position.x),
+                    'distance_traveled': distance_traveled,
                     'learning_efficiency': 0.5  # Default value
                 }
                 
@@ -945,7 +867,7 @@ class LearningManager:
     
     def get_enhanced_statistics(self) -> Dict[str, Any]:
         """Get comprehensive statistics including enhanced learning systems."""
-        stats = {
+        stats: Dict[str, Any] = {
             'attention_deep_q_available': self.attention_deep_q_available,
             'elite_imitation_available': self.elite_imitation_available,
         }
@@ -955,7 +877,7 @@ class LearningManager:
         
         return stats
     
-    def _get_agent_state_data(self, agent) -> Dict[str, Any]:
+    def _get_agent_state_data(self, agent, training_environment=None) -> Dict[str, Any]:
         """Extract state data from agent for enhanced learning systems."""
         try:
             state_data = {}
@@ -977,16 +899,59 @@ class LearningManager:
             state_data['energy'] = getattr(agent, 'energy_level', 1.0)
             state_data['health'] = getattr(agent, 'health_level', 1.0)
             
-            # Food information (simplified)
-            state_data['nearest_food'] = {
-                'distance': 10.0,  # Default value
-                'direction': 0.0,
-                'type': 0
-            }
+            # Real food information from training environment
+            if training_environment and hasattr(training_environment, '_get_closest_food_distance_for_agent'):
+                try:
+                    food_info = training_environment._get_closest_food_distance_for_agent(agent)
+                    agent_pos = state_data.get('position', (0, 0))
+                    
+                    # Calculate direction vector to food
+                    food_position = food_info.get('food_position')
+                    if food_position:
+                        # Direction vector from agent to food
+                        dx = food_position[0] - agent_pos[0]
+                        dy = food_position[1] - agent_pos[1]
+                        
+                        # Normalize to unit vector
+                        distance = (dx**2 + dy**2)**0.5
+                        if distance > 0:
+                            direction_x = dx / distance
+                            direction_y = dy / distance
+                        else:
+                            direction_x, direction_y = 0.0, 0.0
+                    else:
+                        direction_x, direction_y = 0.0, 0.0
+                    
+                    state_data['nearest_food'] = {
+                        'distance': food_info.get('distance', 50.0),
+                        'direction_x': direction_x,
+                        'direction_y': direction_y,
+                        'type': food_info.get('food_type', 'unknown')
+                    }
+                except Exception as e:
+                    print(f"⚠️ Error getting real food data: {e}")
+                    # Fallback to default values
+                    state_data['nearest_food'] = {
+                        'distance': 50.0,
+                        'direction_x': 0.0,
+                        'direction_y': 0.0,
+                        'type': 'unknown'
+                    }
+            else:
+                # Default food information
+                state_data['nearest_food'] = {
+                    'distance': 50.0,
+                    'direction_x': 0.0,
+                    'direction_y': 0.0,
+                    'type': 'unknown'
+                }
             
-            # Social context
-            state_data['nearby_agents'] = 2  # Default value
-            state_data['competition_pressure'] = 0.5
+            # Ground contact detection using Box2D physics
+            ground_contact = self._detect_ground_contact(agent)
+            state_data['ground_contact'] = ground_contact
+            
+            # Physics body for advanced ground detection
+            state_data['physics_body'] = agent.body if hasattr(agent, 'body') else None
             
             return state_data
             
@@ -1051,6 +1016,34 @@ class LearningManager:
             print(f"⚠️ Error creating state representation: {e}")
             # Return default state
             return np.zeros(15, dtype=np.float32)
+    
+    def _detect_ground_contact(self, agent) -> bool:
+        """Detect if the agent is in contact with the ground using Box2D physics."""
+        try:
+            if not hasattr(agent, 'body') or not agent.body:
+                return False
+            
+            if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                for contact_edge in agent.lower_arm.contacts:
+                    contact = contact_edge.contact
+                    if contact.touching:
+                        fixture_a = contact.fixtureA
+                        fixture_b = contact.fixtureB
+                        if ((fixture_a.filterData.categoryBits & 0x0001) or 
+                            (fixture_b.filterData.categoryBits & 0x0001)):
+                            return True
+            
+            return False
+            
+        except Exception as e:
+            # Fallback: Use simple position-based detection
+            try:
+                if hasattr(agent, 'body') and agent.body:
+                    # Ground level approximation
+                    return agent.body.position.y <= 1.0
+            except:
+                pass
+            return False
     
     def _get_agent_context(self, agent) -> Dict[str, Any]:
         """Get contextual information for elite imitation learning."""
