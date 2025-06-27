@@ -3875,11 +3875,22 @@ class TrainingEnvironment:
             print(f"⚠️ Error generating performance report: {e}")
 
     def get_status(self, canvas_width=1200, canvas_height=800, viewport_culling=True):
-        """Returns the current state of the simulation for rendering with enhanced safety and optional viewport culling."""
+        """
+        Returns the current state of the simulation for rendering with enhanced safety and optional viewport culling.
+        
+        VIEWPORT CULLING BEHAVIOR:
+        - 'agents': Viewport-filtered agents for rendering performance (only visible agents)
+        - 'all_agents': ALL agents for UI panels (population summary, robot details, leaderboard)
+        - 'leaderboard': Always shows ALL agents for fair ranking
+        - 'robots': Always shows ALL agents for complete population view
+        - 'statistics': Always calculated from ALL agents
+        
+        This ensures viewport culling only affects visual rendering, not data integrity.
+        """
         serialization_start = time.time()
         
         if not self.is_running:
-            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
+            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'all_agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
         # Use a read lock to safely access agents
         with self._physics_lock:
@@ -4030,10 +4041,12 @@ class TrainingEnvironment:
                     robot_details = []
 
                 # 5. Get minimal agent data for rendering + detailed data for focused agent only
-                # Use viewport_agents for rendering, but always include focused agent
-                agents_data = []
+                # SEPARATE: rendering agents (viewport-filtered) vs all agents data (for UI panels)
+                agents_data = []  # For rendering - viewport filtered
+                all_agents_data = []  # For UI panels - ALL agents
+                
                 try:
-                    # Ensure focused agent is included even if outside viewport
+                    # Rendering agents: Use viewport_agents for rendering, but always include focused agent
                     visible_agents_set = set(viewport_agents)
                     if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
                         visible_agents_set.add(self.focused_agent)
@@ -4107,9 +4120,41 @@ class TrainingEnvironment:
                                 'closest_food_position': [float(closest_food_info['food_position'][0]), float(closest_food_info['food_position'][1])] if closest_food_info.get('food_position') is not None else None
                             })
                             
+                    # Generate ALL agents data (for UI panels - not affected by viewport culling)
+                    for agent in current_agents:
+                        if not agent.body:  # Skip agents without bodies
+                            continue
+                            
+                        agent_id = agent.id
+                        is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
+                        
+                        # Basic data for all agents
+                        basic_all_agent_data = {
+                            'id': agent.id,
+                            'body': {
+                                'x': float(agent.body.position.x),
+                                'y': float(agent.body.position.y),
+                                'velocity': {
+                                    'x': float(agent.body.linearVelocity.x),
+                                    'y': float(agent.body.linearVelocity.y)
+                                }
+                            },
+                            'total_reward': float(agent.total_reward),
+                            # Basic ecosystem data
+                            'ecosystem': {
+                                'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
+                                'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                                'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
+                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
+                                'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
+                            }
+                        }
+                        all_agents_data.append(basic_all_agent_data)
+                        
                 except Exception as e:
                     print(f"⚠️  Error creating agents data: {e}")
                     agents_data = []
+                    all_agents_data = []
 
                 # 6. Get focused agent ID safely
                 focused_agent_id = None
@@ -4157,7 +4202,8 @@ class TrainingEnvironment:
                     'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
                     'leaderboard': leaderboard_data,
                     'robots': robot_details,
-                    'agents': agents_data,
+                    'agents': agents_data,  # Viewport-filtered agents for rendering
+                    'all_agents': all_agents_data,  # ALL agents for UI panels (not affected by viewport culling)
                     'statistics': self.population_stats,
                     'camera': self.get_camera_state(),
                     'focused_agent_id': focused_agent_id,
@@ -4219,13 +4265,11 @@ class TrainingEnvironment:
                 if hasattr(self, 'performance_timings'):
                     self.performance_timings['data_serialization'].append(serialization_time)
                 
-                return response_data
-                
             except Exception as e:
                 print(f"❌ Critical error in get_status: {e}")
                 import traceback
                 traceback.print_exc()
-                return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
+                return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'all_agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
     def start(self):
         """Starts the training loop in a separate thread."""
