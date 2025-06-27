@@ -2016,6 +2016,8 @@ class TrainingEnvironment:
             self.learning_manager.set_training_environment(self)
             # Inject training environment into all agents for state data extraction
             self.learning_manager.inject_training_environment_into_agents(self.agents)
+            # Log initial resource usage
+            self.learning_manager.log_resource_usage(force=True)
             print("🧠 Learning Manager initialized successfully with training environment")
         except Exception as e:
             print(f"⚠️ Learning Manager initialization failed: {e}")
@@ -3454,6 +3456,13 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
                 last_health_check = current_time
+            
+            # Log attention network pool and GPU usage every 60 seconds  
+            if hasattr(self, 'learning_manager') and self.learning_manager:
+                try:
+                    self.learning_manager.log_resource_usage()
+                except Exception as e:
+                    print(f"⚠️ Error logging resource usage: {e}")
             
             # Performance cleanup every 2 minutes
             if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:

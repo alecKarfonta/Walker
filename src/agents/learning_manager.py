@@ -55,6 +55,27 @@ class LearningManager:
         self._attention_network_pool_max_size = 10    # Max pooled networks
         self._attention_networks_in_use: Dict[str, Any] = {}  # agent_id -> network
         
+        # NETWORK CREATION TRACKING
+        self._network_stats = {
+            'total_created': 0,
+            'total_reused': 0,
+            'current_in_use': 0,
+            'current_in_pool': 0,
+            'peak_networks_in_use': 0,
+            'networks_destroyed': 0
+        }
+        
+        # GPU USAGE TRACKING
+        self._gpu_stats = {
+            'initial_memory_mb': 0,
+            'current_memory_mb': 0,
+            'peak_memory_mb': 0,
+            'last_update_time': 0
+        }
+        
+        # Initialize GPU baseline
+        self._update_gpu_stats()
+        
         # Performance tracking for comparison
         self.approach_performance: Dict[LearningApproach, Dict[str, float]] = {
             approach: {
@@ -1058,14 +1079,24 @@ class LearningManager:
             if self._attention_network_pool:
                 network = self._attention_network_pool.pop()
                 self._attention_networks_in_use[agent_id] = network
-                print(f"♻️ Reused Attention Network for agent {agent_id[:8]} (pool: {len(self._attention_network_pool)} available)")
+                
+                # Update tracking stats
+                self._network_stats['total_reused'] += 1
+                self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
+                self._network_stats['current_in_pool'] = len(self._attention_network_pool)
+                
+                # Update peak usage if needed
+                if self._network_stats['current_in_use'] > self._network_stats['peak_networks_in_use']:
+                    self._network_stats['peak_networks_in_use'] = self._network_stats['current_in_use']
+                
+                print(f"♻️ Reused Attention Network for agent {agent_id[:8]} (pool: {len(self._attention_network_pool)}, reused: {self._network_stats['total_reused']})")
                 return network
             
             # Pool is empty, create a new network
             from .attention_deep_q_learning import AttentionDeepQLearning
             
             self._network_creation_count += 1
-            print(f"🧠 Creating NEW Attention Network #{self._network_creation_count} for agent {agent_id[:8]} (pool empty)")
+            self._network_stats['total_created'] += 1
             
             network = AttentionDeepQLearning(
                 state_dim=5,  # Fixed: [arm_angle, elbow_angle, food_distance, food_direction, ground_contact]
@@ -1074,6 +1105,20 @@ class LearningManager:
             )
             
             self._attention_networks_in_use[agent_id] = network
+            
+            # Update tracking stats
+            self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
+            self._network_stats['current_in_pool'] = len(self._attention_network_pool)
+            
+            # Update peak usage if needed
+            if self._network_stats['current_in_use'] > self._network_stats['peak_networks_in_use']:
+                self._network_stats['peak_networks_in_use'] = self._network_stats['current_in_use']
+            
+            # Update GPU stats after creating network
+            self._update_gpu_stats()
+            
+            print(f"🧠 NEW Attention Network #{self._network_creation_count} for agent {agent_id[:8]} (created: {self._network_stats['total_created']}, GPU: {self._gpu_stats['current_memory_mb']}MB)")
+            
             return network
             
         except Exception as e:
@@ -1088,6 +1133,9 @@ class LearningManager:
             
             network = self._attention_networks_in_use.pop(agent_id)
             
+            # Update stats - network no longer in use
+            self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
+            
             # Only return to pool if we have space and network is valid
             if (len(self._attention_network_pool) < self._attention_network_pool_max_size and 
                 network is not None):
@@ -1097,11 +1145,15 @@ class LearningManager:
                     # Clear attention history but keep learned weights
                     if hasattr(network, 'attention_history'):
                         network.attention_history.clear()
-                    print(f"♻️ Returned Attention Network to pool from agent {agent_id[:8]} (pool: {len(self._attention_network_pool) + 1} total)")
                 except Exception as e:
                     print(f"⚠️ Error resetting network state: {e}")
                 
                 self._attention_network_pool.append(network)
+                
+                # Update pool stats
+                self._network_stats['current_in_pool'] = len(self._attention_network_pool)
+                
+                print(f"♻️ Returned Attention Network to pool from agent {agent_id[:8]} (pool: {len(self._attention_network_pool)}, in_use: {self._network_stats['current_in_use']})")
             else:
                 # Pool is full or network is invalid, destroy it
                 try:
@@ -1110,7 +1162,14 @@ class LearningManager:
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                     del network
-                    print(f"🧹 Destroyed excess Attention Network from agent {agent_id[:8]} (pool full or invalid)")
+                    
+                    # Update destruction stats
+                    self._network_stats['networks_destroyed'] += 1
+                    
+                    # Update GPU stats after destroying network
+                    self._update_gpu_stats()
+                    
+                    print(f"🧹 Destroyed excess Attention Network from agent {agent_id[:8]} (destroyed: {self._network_stats['networks_destroyed']}, GPU: {self._gpu_stats['current_memory_mb']}MB)")
                 except Exception as e:
                     print(f"⚠️ Error destroying attention network: {e}")
                     
@@ -1124,4 +1183,108 @@ class LearningManager:
             'networks_in_use': len(self._attention_networks_in_use), 
             'total_networks_created': self._network_creation_count,
             'pool_max_size': self._attention_network_pool_max_size
-        } 
+        }
+    
+    def get_comprehensive_stats(self) -> Dict[str, Any]:
+        """Get comprehensive statistics including network creation and GPU usage."""
+        # Update current stats
+        self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
+        self._network_stats['current_in_pool'] = len(self._attention_network_pool)
+        self._update_gpu_stats()
+        
+        return {
+            'network_stats': self._network_stats.copy(),
+            'gpu_stats': self._gpu_stats.copy(),
+            'efficiency_metrics': {
+                'reuse_rate': (self._network_stats['total_reused'] / 
+                              max(1, self._network_stats['total_created'] + self._network_stats['total_reused']) * 100),
+                'memory_efficiency': (self._gpu_stats['current_memory_mb'] - self._gpu_stats['initial_memory_mb']),
+                'pool_utilization': (len(self._attention_network_pool) / self._attention_network_pool_max_size * 100)
+            }
+        }
+    
+    def log_resource_usage(self, force: bool = False):
+        """Log network creation and GPU usage statistics periodically."""
+        import time
+        
+        # Log every 60 seconds or when forced
+        current_time = time.time()
+        if not force and current_time - getattr(self, '_last_log_time', 0) < 60:
+            return
+        
+        self._last_log_time = current_time
+        stats = self.get_comprehensive_stats()
+        
+        print(f"""
+📊 ATTENTION NETWORK POOL STATS:
+   🧠 Networks: Created={stats['network_stats']['total_created']}, Reused={stats['network_stats']['total_reused']}, Destroyed={stats['network_stats']['networks_destroyed']}
+   🔄 Current: In Use={stats['network_stats']['current_in_use']}, In Pool={stats['network_stats']['current_in_pool']}, Peak={stats['network_stats']['peak_networks_in_use']}
+   📈 Efficiency: Reuse Rate={stats['efficiency_metrics']['reuse_rate']:.1f}%, Pool Utilization={stats['efficiency_metrics']['pool_utilization']:.1f}%
+   
+🖥️ GPU MEMORY USAGE:
+   💾 Current: {stats['gpu_stats']['current_memory_mb']}MB, Peak: {stats['gpu_stats']['peak_memory_mb']}MB
+   📊 Memory Growth: +{stats['efficiency_metrics']['memory_efficiency']:.1f}MB since startup
+""")
+    
+    def reset_tracking_stats(self):
+        """Reset network creation and GPU tracking statistics."""
+        self._network_stats = {
+            'total_created': 0,
+            'total_reused': 0,
+            'current_in_use': len(self._attention_networks_in_use),
+            'current_in_pool': len(self._attention_network_pool),
+            'peak_networks_in_use': 0,
+            'networks_destroyed': 0
+        }
+        
+        # Reset GPU baseline
+        self._update_gpu_stats()
+        self._gpu_stats['initial_memory_mb'] = self._gpu_stats['current_memory_mb']
+        self._gpu_stats['peak_memory_mb'] = self._gpu_stats['current_memory_mb']
+        
+        print("🔄 Network and GPU tracking statistics reset")
+
+    def _update_gpu_stats(self):
+        """Update GPU usage statistics."""
+        try:
+            import time
+            
+            # Try to get CUDA GPU memory usage first
+            current_memory_mb = 0
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    # Get GPU memory usage in MB
+                    current_memory_mb = int(torch.cuda.memory_allocated() / (1024**2))
+                    
+                    # Set initial baseline on first call
+                    if self._gpu_stats['initial_memory_mb'] == 0:
+                        self._gpu_stats['initial_memory_mb'] = current_memory_mb
+            except ImportError:
+                # Fallback to nvidia-ml-py if available
+                try:
+                    import pynvml
+                    pynvml.nvmlInit()
+                    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+                    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    current_memory_mb = int(info.used / (1024**2))
+                    
+                    if self._gpu_stats['initial_memory_mb'] == 0:
+                        self._gpu_stats['initial_memory_mb'] = current_memory_mb
+                except:
+                    pass  # No GPU monitoring available
+            
+            # Update peak memory usage
+            if current_memory_mb > self._gpu_stats['peak_memory_mb']:
+                self._gpu_stats['peak_memory_mb'] = current_memory_mb
+            
+            # Update current memory usage
+            self._gpu_stats['current_memory_mb'] = current_memory_mb
+            
+            # Update last update time
+            self._gpu_stats['last_update_time'] = int(time.time())
+            
+        except Exception as e:
+            print(f"⚠️ Error updating GPU stats: {e}")
+        
+        return self._gpu_stats 
