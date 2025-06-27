@@ -13,7 +13,7 @@ User Requests
 
 - [ ] Completelt random baseline agents
 
-
+- [ ] Show the immediate recent reward in robot details. Also show the components of the reward signal. Show the state values.
 
 **FIXED**: Replaced random obstacle scattering with sophisticated terrain generation featuring actual landscape features:
 

@@ -331,9 +331,7 @@ HTML_TEMPLATE = """
     <div id="app-container">
         <div id="canvas-wrapper">
             <canvas id="simulation-canvas"></canvas>
-            <button id="resetView" style="position:absolute; top:10px; left:10px; z-index:50;">Reset View</button>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
-            <button id="testCarnivoreFeeding" onclick="testCarnivoreFeeding()" style="position:absolute; top:10px; left:250px; z-index:50; background:#FF4444; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Test Carnivore</button>
             <div id="focus-indicator" style="display:none; position:absolute; top:1%; left:50%; transform:translate(-50%, -50%); z-index:50; background:rgba(231, 76, 60, 0.95); color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:2px solid rgba(255,255,255,0.2);">
                 🎯 Focused on Agent: <span id="focused-agent-id">-</span>
             </div>
@@ -648,34 +646,7 @@ HTML_TEMPLATE = """
             });
         });
 
-        document.getElementById('resetView').addEventListener('click', () => {
-            focusedAgentId = null;
-            userHasManuallyPanned = false; // Reset manual pan flag
-            
-            // Reset camera to default view
-            cameraPosition = { x: 0, y: 0 };
-            cameraZoom = 1.0;
 
-            // Tell backend to reset zoom preferences and focus
-            fetch('./reset_view', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .catch(error => {
-                console.error('Error resetting view:', error);
-            });
-
-            // Also reset legacy offset and scale if they are used elsewhere
-            scale = 15;
-            offsetX = canvas.width / 2;
-            offsetY = canvas.height * 0.8;
-            
-            // Hide focus indicator
-            const focusIndicator = document.getElementById('focus-indicator');
-            if(focusIndicator) {
-                focusIndicator.style.display = 'none';
-            }
-        });
 
         function getRewardColor(reward) {
             // Define threshold for "close to zero"
@@ -960,6 +931,10 @@ HTML_TEMPLATE = """
                             <span class="detail-value">${agent.total_reward.toFixed(2)}</span>
                         </div>
                         <div class="detail-row">
+                            <span class="detail-label">Recent Reward:</span>
+                            <span class="detail-value" style="color: ${agent.recent_reward > 0 ? '#27ae60' : agent.recent_reward < 0 ? '#e74c3c' : '#f39c12'};">${(agent.recent_reward || 0).toFixed(4)}</span>
+                        </div>
+                        <div class="detail-row">
                             <span class="detail-label">Best Reward:</span>
                             <span class="detail-value" style="color: #27ae60;">${(agent.best_reward || 0).toFixed(4)}</span>
                         </div>
@@ -973,48 +948,18 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                     
+                    ${agent.reward_components && Object.keys(agent.reward_components).length > 0 ? `
                     <div class="detail-section">
+                        <div style="margin-bottom: 6px; font-weight: bold; color: #3498db;">Reward Components</div>
+                        ${Object.entries(agent.reward_components).map(([key, value]) => `
                         <div class="detail-row">
-                            <span class="detail-label">Shoulder Angle:</span>
-                            <span class="detail-value">${(shoulderAngle * 180 / Math.PI).toFixed(1)}°</span>
+                            <span class="detail-label">${key.charAt(0).toUpperCase() + key.slice(1)}:</span>
+                            <span class="detail-value" style="color: ${value > 0 ? '#27ae60' : value < 0 ? '#e74c3c' : '#f39c12'};">${value.toFixed(4)}</span>
                         </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Elbow Angle:</span>
-                            <span class="detail-value">${(elbowAngle * 180 / Math.PI).toFixed(1)}°</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Current Action:</span>
-                            <span class="detail-value">(${agent.current_action[0]}, ${agent.current_action[1]})</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">State (Discretized):</span>
-                            <span class="detail-value">S-bin:${agent.state[0] || 'N/A'}, E-bin:${agent.state[1] || 'N/A'}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">State (Angles):</span>
-                            <span class="detail-value">S:${agent.state[0] ? ((agent.state[0] * 10) - 180).toFixed(0) + '°' : 'N/A'}, E:${agent.state[1] ? ((agent.state[1] * 10) - 180).toFixed(0) + '°' : 'N/A'}</span>
-                        </div>
-                    </div>
+                        `).join('')}
+                    </div>` : ''}
                     
-                    <div class="detail-section">
-                        <div class="detail-row">
-                            <span class="detail-label">Q-Table Size:</span>
-                            <span class="detail-value">${Object.keys(agent.q_table || {}).length}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Action History:</span>
-                            <span class="detail-value">${getActionHistoryString(agent.action_history)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Total Actions:</span>
-                            <span class="detail-value">${(agent.action_history || []).length}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Awake:</span>
-                            <span class="detail-value">${agent.awake ? 'Yes' : 'No'}</span>
-                        </div>
-                    </div>
-                    
+                                       
                     <div class="detail-section">
                         <div style="margin-bottom: 6px; font-weight: bold; color: #3498db;">Learning Approach Controls</div>
                         <div style="display: flex; flex-direction: column; gap: 3px;">
@@ -1690,65 +1635,21 @@ HTML_TEMPLATE = """
             console.log(`🎯 Food lines ${showFoodLines ? 'enabled' : 'disabled'}`);
         }
 
-        // Test carnivore feeding mechanics
-        function testCarnivoreFeeding() {
-            console.log('🧪 Testing carnivore feeding mechanics...');
-            fetch('./test_carnivore_feeding', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    console.log('✅ Carnivore feeding test completed');
-                    alert('Carnivore feeding test completed - check console logs for results');
-                } else {
-                    console.error('❌ Carnivore feeding test failed:', data.message);
-                    alert('Carnivore feeding test failed: ' + data.message);
-                }
-            })
-            .catch(error => {
-                console.error('❌ Error during carnivore feeding test:', error);
-                alert('Error running carnivore feeding test');
-            });
-        }
-
     </script>
 </body>
 </html>
 """
 
 def safe_convert_numeric(value):
-    """Convert numpy numeric types to JSON-serializable types without recursion."""
-    if isinstance(value, np.integer):
-        return int(value)
-    elif isinstance(value, np.floating):
-        return float(value)
-    elif isinstance(value, np.ndarray):
-        return value.tolist()
-    elif isinstance(value, (int, float, str, bool)) or value is None:
-        return value
-    else:
-        # For other types, try to convert to float if possible, otherwise return as-is
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return value
-
+    # DO NOT EVER USE THIS FUNCTION. Always use proper type conversion.
+    pass
 def safe_convert_list(lst):
-    """Convert a list of potentially numpy values efficiently."""
-    if not lst:
-        return lst
-    return [safe_convert_numeric(item) for item in lst]
-
+    # DO NOT EVER USE THIS FUNCTION. Always use proper type conversion.
+    pass
 def safe_convert_position(pos):
-    """Convert a position tuple/list safely."""
-    if hasattr(pos, 'x') and hasattr(pos, 'y'):
-        # Box2D vector
-        return (float(pos.x), float(pos.y))
-    elif isinstance(pos, (tuple, list)) and len(pos) >= 2:
-        return (safe_convert_numeric(pos[0]), safe_convert_numeric(pos[1]))
-    return pos
+    # DO NOT EVER USE THIS FUNCTION. Always use proper type conversion.
+    pass
+
 
 class TrainingEnvironment:
     """
@@ -1892,7 +1793,7 @@ class TrainingEnvironment:
         self._agents_pending_destruction = []  # Safe destruction queue
         
         # Statistics update timing
-        self.stats_update_interval = 1.0
+        self.stats_update_interval = 2.0
         self.last_stats_update = 0
         
         # Evolution timing with safety
@@ -2473,8 +2374,6 @@ class TrainingEnvironment:
             # Update agent statuses based on their behaviors and interactions
             self._update_agent_statuses()
             
-            # Simulate predation events (visual only)
-            self._simulate_predation_events()
             
             # Clean up old predation events (keep only last 10 seconds)
             self.predation_events = [
@@ -2529,67 +2428,7 @@ class TrainingEnvironment:
             elif status_data['status'] != 'hunting':
                 status_data['status'] = 'hunting'
                 status_data['last_status_change'] = current_time
-            
-            # Alliances and territories removed
     
-    def _simulate_predation_events(self):
-        """Simulate predation events for visualization purposes."""
-        current_time = time.time()
-        
-        # Find carnivores and herbivores
-        carnivores = []
-        herbivores = []
-        
-        for agent in self.agents:
-            if getattr(agent, '_destroyed', False) or not agent.body:
-                continue
-                
-            agent_id = agent.id
-            if agent_id in self.agent_statuses:
-                role = self.agent_statuses[agent_id]['role']
-                if role == 'carnivore':
-                    carnivores.append(agent)
-                elif role == 'herbivore':
-                    herbivores.append(agent)
-        
-        # Simulate predation attempts
-        for predator in carnivores:
-            if self.agent_statuses[predator.id]['status'] != 'hunting':
-                continue
-                
-            # Find nearby prey
-            for prey in herbivores:
-                distance = ((predator.body.position.x - prey.body.position.x) ** 2 + 
-                           (predator.body.position.y - prey.body.position.y) ** 2) ** 0.5
-                
-                if distance < 5.0:  # Within hunting range
-                    # Predation attempt based on relative speeds/fitness
-                    predator_fitness = predator.get_evolutionary_fitness()
-                    prey_fitness = prey.get_evolutionary_fitness()
-                    
-                    success_chance = min(0.3, predator_fitness / (prey_fitness + 1.0))
-                    
-                    if random.random() < success_chance:
-                        # Successful predation event
-                        self.predation_events.append({
-                            'predator_id': predator.id,
-                            'prey_id': prey.id,
-                            'position': (predator.body.position.x, predator.body.position.y),
-                            'timestamp': current_time,
-                            'success': True
-                        })
-                        
-                        # Update prey status
-                        if prey.id in self.agent_statuses:
-                            self.agent_statuses[prey.id]['status'] = 'fleeing'
-                        
-                        # Update predator energy
-                        if predator.id in self.agent_health:
-                            self.agent_health[predator.id]['energy'] = min(1.0, 
-                                self.agent_health[predator.id]['energy'] + 0.2)
-                        
-                        break  # One predation per predator per update
-
     def _generate_resources_between_agents(self):
         """Generate resources strategically between agents."""
         try:
@@ -3827,9 +3666,9 @@ class TrainingEnvironment:
                             'ecosystem': {
                                 'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
                                 'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
-                                'health': safe_convert_numeric(self.agent_health.get(agent_id, {'health': 1.0})['health']),
-                                'energy': safe_convert_numeric(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
-                                'speed': safe_convert_numeric((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
+                                'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
+                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
+                                'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
                             }
                         }
                         agents_data.append(basic_agent_data)
@@ -3840,28 +3679,89 @@ class TrainingEnvironment:
                             agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
                             closest_food_info = self._get_closest_food_distance_for_agent(agent)
                             
+                            # Get recent reward information
+                            recent_reward = float(getattr(agent, 'last_reward', 0.0))
+                            
+                            # Get reward components if available
+                            reward_components = {}
+                            last_reward_components = getattr(agent, 'last_reward_components', None)
+                            if last_reward_components is not None:
+                                try:
+                                    reward_components = dict(last_reward_components)
+                                    # Convert numpy types to native Python types
+                                    for key, value in reward_components.items():
+                                        if hasattr(value, 'item'):  # numpy scalar
+                                            reward_components[key] = float(value.item())
+                                        elif isinstance(value, (np.integer, np.floating)):
+                                            reward_components[key] = float(value)
+                                        else:
+                                            reward_components[key] = float(value)
+                                except:
+                                    reward_components = {}
+                            
+                            # Get detailed state information
+                            state_details = {}
+                            current_state = getattr(agent, 'current_state', None)
+                            if current_state is not None:
+                                try:
+                                    if isinstance(current_state, (list, tuple)):
+                                        state_details['raw'] = [float(x) for x in current_state]
+                                    elif hasattr(current_state, 'tolist'):  # numpy array
+                                        state_details['raw'] = [float(x) for x in current_state.tolist()]
+                                    else:
+                                        state_details['raw'] = [float(current_state)]
+                                except:
+                                    state_details['raw'] = []
+                            
+                            # Get continuous state values if available
+                            get_continuous_state = getattr(agent, 'get_continuous_state', None)
+                            if get_continuous_state is not None:
+                                try:
+                                    continuous_state = get_continuous_state()
+                                    if continuous_state is not None:
+                                        if hasattr(continuous_state, 'tolist'):
+                                            state_details['continuous'] = [float(x) for x in continuous_state.tolist()]
+                                        else:
+                                            state_details['continuous'] = [float(x) for x in continuous_state]
+                                except:
+                                    pass
+                            
+                            # Get arm angles and velocities for state details
+                            if agent.upper_arm and agent.lower_arm:
+                                state_details['arm_angles'] = {
+                                    'shoulder': float(agent.upper_arm.angle),
+                                    'elbow': float(agent.lower_arm.angle)
+                                }
+                                state_details['arm_velocities'] = {
+                                    'shoulder': float(agent.upper_arm.angularVelocity),
+                                    'elbow': float(agent.lower_arm.angularVelocity)
+                                }
+                            
                             # Add detailed data to the basic agent data
                             basic_agent_data.update({
-                                'steps': safe_convert_numeric(agent.steps),
-                                'current_action': safe_convert_list(agent.current_action_tuple),
-                                'state': safe_convert_list(agent.current_state),
+                                'steps': int(agent.steps),
+                                'current_action': [float(x) for x in getattr(agent, 'current_action_tuple', [0.0, 0.0])],
+                                'state': [float(x) for x in current_state] if current_state is not None else [],
                                 'q_table': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0,
-                                'action_history': safe_convert_list(agent.action_history[-10:]) if agent.action_history else [],
-                                'best_reward': safe_convert_numeric(getattr(agent, 'best_reward_received', 0.0)),
-                                'worst_reward': safe_convert_numeric(getattr(agent, 'worst_reward_received', 0.0)),
-                                'awake': agent.body.awake if agent.body else False,
-                                'learning_approach': getattr(agent, 'learning_approach', 'basic_q_learning'),
+                                'action_history': [int(x) for x in agent.action_history[-10:]] if hasattr(agent, 'action_history') and agent.action_history else [],
+                                'best_reward': float(getattr(agent, 'best_reward_received', 0.0)),
+                                'worst_reward': float(getattr(agent, 'worst_reward_received', 0.0)),
+                                'recent_reward': recent_reward,
+                                'reward_components': reward_components,
+                                'state_details': state_details,
+                                'awake': bool(agent.body.awake if agent.body else False),
+                                'learning_approach': str(getattr(agent, 'learning_approach', 'basic_q_learning')),
                             })
                             
                             # Add detailed ecosystem data
                             basic_agent_data['ecosystem'].update({
-                                'speed_factor': safe_convert_numeric(agent_status.get('speed_factor', 1.0)),
+                                'speed_factor': float(agent_status.get('speed_factor', 1.0)),
                                                 # Alliances and territories removed
-                                'closest_food_distance': safe_convert_numeric(closest_food_info['distance']),
-                                'closest_food_signed_x_distance': safe_convert_numeric(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
+                                'closest_food_distance': float(closest_food_info['distance']),
+                                'closest_food_signed_x_distance': float(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
                                 'closest_food_type': closest_food_info['food_type'],
                                 'closest_food_source': closest_food_info.get('source_type', 'environment'),
-                                'closest_food_position': safe_convert_position(closest_food_info.get('food_position', None))
+                                'closest_food_position': [float(closest_food_info['food_position'][0]), float(closest_food_info['food_position'][1])] if closest_food_info.get('food_position') is not None else None
                             })
                             
                 except Exception as e:
@@ -4972,311 +4872,7 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
 
-    def test_carnivore_feeding(self):
-        """Test method to place a carnivore next to prey to verify feeding mechanics"""
-        print("🧪 Running carnivore feeding test...")
-        
-        # Find a carnivore and a herbivore
-        carnivore = None
-        herbivore = None
-        
-        for agent in self.agents:
-            if getattr(agent, '_destroyed', False) or not agent.body:
-                continue
-            role = self.agent_statuses.get(agent.id, {}).get('role', 'omnivore')
-            if role == 'carnivore' and carnivore is None:
-                carnivore = agent
-            elif role == 'herbivore' and herbivore is None:
-                herbivore = agent
-            
-            if carnivore and herbivore:
-                break
-        
-        if not carnivore or not herbivore:
-            print("❌ Test failed: Could not find both carnivore and herbivore")
-            return
-        
-        # Record initial states
-        carnivore_initial_energy = self.agent_energy_levels.get(carnivore.id, 1.0)
-        herbivore_initial_energy = self.agent_energy_levels.get(herbivore.id, 1.0)
-        herbivore_initial_health = self.agent_health.get(herbivore.id, {'health': 1.0})['health']
-        
-        # Position carnivore next to herbivore (within consumption distance)
-        herbivore_pos = (herbivore.body.position.x, herbivore.body.position.y)
-        test_position = (herbivore_pos[0] + 2.0, herbivore_pos[1])  # 2 meters away (within 4m consumption distance)
-        
-        # Move carnivore to test position
-        carnivore.body.position = test_position
-        carnivore.body.linearVelocity = (0, 0)  # Stop movement
-        
-        # Lower carnivore's energy to trigger hunting behavior
-        self.agent_energy_levels[carnivore.id] = 0.5  # Below 0.6 threshold
-        
-        print(f"🔬 Test setup:")
-        print(f"   Carnivore {carnivore.id[:8]} - Energy: {carnivore_initial_energy:.2f} -> 0.5")
-        print(f"   Herbivore {herbivore.id[:8]} - Energy: {herbivore_initial_energy:.2f}, Health: {herbivore_initial_health:.2f}")
-        print(f"   Distance: {math.sqrt((test_position[0] - herbivore_pos[0])**2 + (test_position[1] - herbivore_pos[1])**2):.1f}m")
-        
-        # Run consumption updates for several frames to see if feeding occurs
-        print("🔄 Running consumption updates...")
-        for frame in range(10):  # Run for 10 frames
-            # Manually trigger resource consumption update
-            self._update_resource_consumption()
-            
-            # Check current states
-            carnivore_energy = self.agent_energy_levels.get(carnivore.id, 1.0)
-            herbivore_energy = self.agent_energy_levels.get(herbivore.id, 1.0)
-            herbivore_health = self.agent_health.get(herbivore.id, {'health': 1.0})['health']
-            carnivore_status = self.agent_statuses.get(carnivore.id, {}).get('status', 'unknown')
-            
-            print(f"   Frame {frame+1}: Carnivore energy {carnivore_energy:.3f}, status: {carnivore_status}")
-            print(f"   Frame {frame+1}: Herbivore energy {herbivore_energy:.3f}, health: {herbivore_health:.3f}")
-            
-            # Check if carnivore is consuming herbivore
-            if carnivore_energy > 0.5 or carnivore_status == 'eating':
-                print(f"✅ SUCCESS: Carnivore is consuming herbivore!")
-                print(f"   Energy gained: {carnivore_energy - 0.5:.3f}")
-                print(f"   Herbivore health lost: {herbivore_initial_health - herbivore_health:.3f}")
-                return
-        
-        print("❌ FAILED: Carnivore did not consume herbivore after 10 frames")
-        print("   This indicates the robot consumption system is not working properly")
-        
-        # Reset positions to avoid disrupting normal simulation
-        carnivore.body.position = (random.uniform(-30, 30), 5.0)
-        self.agent_energy_levels[carnivore.id] = carnivore_initial_energy
 
-    def _create_obstacle_physics_bodies(self):
-        """Create Box2D physics bodies for obstacles that don't have them yet. 
-        NOTE: This is kept for backward compatibility but static world generation is now preferred."""
-        try:
-            if not hasattr(self, 'obstacle_bodies'):
-                self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
-            
-            # MODIFIED: Reduced dynamic obstacle creation since we now use static world generation
-            # Only create physics bodies for any remaining dynamic obstacles (minimal)
-            obstacles_to_create = []
-            
-            # NOTE: Environmental system and evolution engine obstacle spawning has been disabled
-            # Static obstacles are created once during initialization via _generate_static_world()
-            
-            # Only process existing moving obstacles or special dynamic obstacles if any exist
-            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
-                for i, obstacle in enumerate(self.environmental_system.obstacles):
-                    # Only create physics bodies for moving obstacles that weren't created statically
-                    if hasattr(obstacle, 'movement_pattern') and obstacle.movement_pattern:
-                        obstacle_id = f"moving_{i}_{obstacle.type.value if hasattr(obstacle, 'type') else 'unknown'}"
-                        if obstacle_id not in self.obstacle_bodies:
-                            obstacles_to_create.append({
-                                'id': obstacle_id,
-                                'type': obstacle.type.value if hasattr(obstacle, 'type') else 'boulder',
-                                'position': obstacle.position,
-                                'size': obstacle.size,
-                                'source': 'environmental_moving'
-                            })
-            
-            # Create physics bodies for any remaining dynamic obstacles
-            bodies_created = 0
-            for obstacle_data in obstacles_to_create:
-                try:
-                    body = self._create_single_obstacle_body(obstacle_data)
-                    if body:
-                        self.obstacle_bodies[obstacle_data['id']] = body
-                        bodies_created += 1
-                except Exception as e:
-                    print(f"⚠️ Error creating physics body for dynamic obstacle {obstacle_data['id']}: {e}")
-            
-            if bodies_created > 0:
-                print(f"🏃 Created {bodies_created} dynamic obstacle physics bodies. Total active: {len(self.obstacle_bodies)}")
-            
-            # Clean up bodies for obstacles that no longer exist
-            self._cleanup_removed_obstacles()
-            
-        except Exception as e:
-            print(f"⚠️ Error in obstacle physics body creation: {e}")
-    
-    def _create_single_obstacle_body(self, obstacle_data):
-        """Create a Box2D physics body for a single obstacle."""
-        try:
-            obstacle_type = obstacle_data['type']
-            position = obstacle_data['position']
-            size = obstacle_data.get('size', 2.0)
-            
-            # Create static body for obstacle
-            obstacle_body = self.world.CreateStaticBody(position=position)
-            
-            # Choose shape based on obstacle type
-            if obstacle_type in ['boulder', 'wall']:
-                # Rectangular obstacles
-                width = size if obstacle_type == 'boulder' else min(size, 1.0)  # Walls are thinner
-                height = size if obstacle_type == 'boulder' else max(size, 3.0)  # Walls are taller
-                
-                fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2PolygonShape(box=(width/2, height/2)),
-                    density=0.0,  # Static body
-                    friction=0.7,
-                    restitution=0.2,
-                                    filter=b2.b2Filter(
-                    categoryBits=self.OBSTACLE_CATEGORY,
-                    maskBits=self.AGENT_CATEGORY  # ONLY collide with agents, NOT other obstacles (performance optimization)
-                )
-                )
-                
-            elif obstacle_type == 'pit':
-                # Create pit as a low rectangular obstacle
-                fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2PolygonShape(box=(size/2, 0.5)),  # Low height for pit
-                    density=0.0,
-                    friction=0.3,  # Slippery
-                    restitution=0.0,
-                    filter=b2.b2Filter(
-                        categoryBits=self.OBSTACLE_CATEGORY,
-                        maskBits=self.AGENT_CATEGORY
-                    )
-                )
-                
-            else:
-                # Default: circular obstacle for other types
-                fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2CircleShape(radius=size/2),
-                    density=0.0,
-                    friction=0.5,
-                    restitution=0.3,
-                    filter=b2.b2Filter(
-                        categoryBits=self.OBSTACLE_CATEGORY,
-                        maskBits=self.AGENT_CATEGORY
-                    )
-                )
-            
-            # Store obstacle type on the body for identification
-            obstacle_body.userData = {
-                'type': 'obstacle',
-                'obstacle_type': obstacle_type,
-                'obstacle_id': obstacle_data['id']
-            }
-            
-            return obstacle_body
-            
-        except Exception as e:
-            print(f"⚠️ Error creating obstacle body: {e}")
-            return None
-    
-    def _cleanup_removed_obstacles(self):
-        """Remove physics bodies for obstacles that no longer exist."""
-        try:
-            if not hasattr(self, 'obstacle_bodies'):
-                return
-            
-            # Get current obstacle IDs
-            current_obstacle_ids = set()
-            
-            # Environmental obstacles
-            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
-                for i, obstacle in enumerate(self.environmental_system.obstacles):
-                    current_obstacle_ids.add(f"env_{i}_{obstacle['type']}")
-            
-            # Evolution obstacles
-            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
-                for i, obstacle in enumerate(self.evolution_engine.environment_obstacles):
-                    if obstacle.get('active', True):
-                        current_obstacle_ids.add(f"evo_{i}_{obstacle['type']}")
-            
-            # Remove bodies for obstacles that no longer exist
-            bodies_to_remove = []
-            for obstacle_id, body in self.obstacle_bodies.items():
-                if obstacle_id not in current_obstacle_ids:
-                    bodies_to_remove.append(obstacle_id)
-            
-            removed_count = 0
-            for obstacle_id in bodies_to_remove:
-                try:
-                    body = self.obstacle_bodies.pop(obstacle_id)
-                    self.world.DestroyBody(body)
-                    removed_count += 1
-                except Exception as e:
-                    print(f"⚠️ Error removing obstacle body {obstacle_id}: {e}")
-            
-            if removed_count > 0:
-                print(f"🗑️ Removed {removed_count} obsolete obstacle bodies")
-                
-        except Exception as e:
-            print(f"⚠️ Error cleaning up obstacle bodies: {e}")
-    
-    def _get_obstacle_data_for_ui(self):
-        """Get obstacle data for the web UI visualization."""
-        try:
-            obstacles_for_ui = []
-            
-            # Add terrain segments from the generated terrain
-            if hasattr(self, 'terrain_collision_bodies'):
-                for terrain_body in self.terrain_collision_bodies:
-                    terrain_type = terrain_body.get('type', 'terrain_segment')
-                    position = terrain_body.get('position', (0, 0))
-                    size = terrain_body.get('size', 2.0)
-                    height = terrain_body.get('height', size)
-                    
-                    # Convert position tuple to array for JavaScript
-                    position_array = [position[0], position[1]]
-                    
-                    # Add terrain to UI data
-                    obstacles_for_ui.append({
-                        'type': terrain_type,
-                        'position': position_array,
-                        'size': size,
-                        'height': height,
-                        'source': 'terrain_generation',
-                        'danger_level': 0.2,  # Terrain is natural, less dangerous
-                        'active': True
-                    })
-            
-            # Add obstacles that have physics bodies (including any remaining dynamic ones)
-            if hasattr(self, 'obstacle_bodies'):
-                for obstacle_id, body in self.obstacle_bodies.items():
-                    if body and hasattr(body, 'userData') and body.userData:
-                        obstacle_type = body.userData.get('obstacle_type', 'unknown')
-                        position = (body.position.x, body.position.y)
-                        
-                        # Determine size based on fixtures
-                        size = 2.0  # Default
-                        if body.fixtures:
-                            fixture = body.fixtures[0]
-                            shape = fixture.shape
-                            if hasattr(shape, 'radius'):  # Circle
-                                size = shape.radius * 2
-                            elif hasattr(shape, 'vertices'):  # Polygon
-                                # Approximate size from polygon bounds
-                                vertices = shape.vertices
-                                if vertices:
-                                    x_coords = [v[0] for v in vertices]
-                                    y_coords = [v[1] for v in vertices]
-                                    size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
-                        
-                        # Convert position tuple to array for JavaScript
-                        position_array = [position[0], position[1]]
-                        
-                        # Add danger level based on obstacle type
-                        danger_level = 0.5  # Default
-                        if obstacle_type == 'pit':
-                            danger_level = 0.8  # High danger
-                        elif obstacle_type == 'wall':
-                            danger_level = 0.3  # Low danger
-                        elif obstacle_type == 'boulder':
-                            danger_level = 0.6  # Medium danger
-                        
-                        obstacles_for_ui.append({
-                            'id': obstacle_id,
-                            'type': obstacle_type,
-                            'position': position_array,  # JavaScript expects array [x, y]
-                            'size': size,
-                            'danger_level': danger_level,  # JavaScript expects this for coloring
-                            'active': True
-                        })
-            
-            return obstacles_for_ui
-            
-        except Exception as e:
-            print(f"⚠️ Error getting obstacle data for UI: {e}")
-            return []
 
     def _cleanup_attention_networks(self):
         """Dedicated cleanup for attention networks to prevent memory accumulation."""
@@ -5538,15 +5134,6 @@ def switch_learning_approach():
             return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
         else:
             return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/test_carnivore_feeding', methods=['POST'])
-def test_carnivore_feeding():
-    """Test carnivore feeding mechanics."""
-    try:
-        env.test_carnivore_feeding()
-        return jsonify({'status': 'success', 'message': 'Carnivore feeding test executed'})
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
