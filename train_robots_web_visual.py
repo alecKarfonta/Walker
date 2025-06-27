@@ -5087,7 +5087,7 @@ class TrainingEnvironment:
                     )
                 )
                 
-            else:
+    else:
                 # Default: circular obstacle for other types
                 fixture = obstacle_body.CreateFixture(
                     shape=b2.b2CircleShape(radius=size/2),
@@ -5226,7 +5226,7 @@ class TrainingEnvironment:
             
             return obstacles_for_ui
             
-        except Exception as e:
+    except Exception as e:
             print(f"⚠️ Error getting obstacle data for UI: {e}")
             return []
 
@@ -5283,7 +5283,7 @@ class TrainingEnvironment:
             # Memory pool handles its own cleanup automatically
             print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
             
-        except Exception as e:
+    except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
 
 # Create Flask app and SocketIO instance
@@ -5488,7 +5488,7 @@ def update_agent_params():
         
         result = env.update_agent_params(params, target_agent_id)
         return jsonify({'status': 'success', 'updated_params': result})
-    except Exception as e:
+            except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/switch_learning_approach', methods=['POST'])
@@ -5505,9 +5505,9 @@ def switch_learning_approach():
         success = env.switch_agent_learning_approach(agent_id, approach)
         if success:
             return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
-        else:
+            else:
             return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
-    except Exception as e:
+        except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 @app.route('/test_carnivore_feeding', methods=['POST'])
