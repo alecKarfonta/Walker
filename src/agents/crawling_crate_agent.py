@@ -110,15 +110,19 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.steps = 0
         self.action_history = []
         
+        # Track individual rewards for web interface
+        self.immediate_reward = 0.0
+        self.last_reward = 0.0
+        
         # Adaptive learning rate and epsilon
         self.min_learning_rate = 0.01
         self.max_learning_rate = 0.3
         self.max_epsilon = 0.6
         self.impatience = 0.002  # Increased for faster adaptation
 
-        # Reward clipping to stabilize learning (REDUCED: to match new reward scale)
-        self.reward_clip_min = -0.05  # REDUCED from -0.1 to -0.05 for tighter control
-        self.reward_clip_max = 0.05   # REDUCED from 0.1 to 0.05 for tighter control
+        # Reward clipping to stabilize learning (EXPANDED: allow higher positive rewards)
+        self.reward_clip_min = -0.05  # Keep negative clipping tight
+        self.reward_clip_max = 0.15   # INCREASED: Allow higher positive rewards for good behavior
 
         # For state calculation
         self.last_x_position = self.body.position.x
@@ -288,11 +292,11 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         current_x = self.body.position.x
         total_reward = 0.0
         
-        # 1. FORWARD PROGRESS REWARD (Primary - 35% of total reward, reduced from 40%)
+        # 1. FORWARD PROGRESS REWARD (Primary - 40% of total reward, increased back)
         # Reward consistent forward movement, not just acceleration spikes
         displacement = current_x - prev_x
         if displacement > 0.003:  # Slightly lower threshold so small but real moves count
-            progress_reward = displacement * 4.0  # Boost base movement reward
+            progress_reward = displacement * 8.0  # BOOSTED: Much higher base movement reward
             # Bonus for sustained movement (not just single-step acceleration)
             if hasattr(self, 'recent_displacements'):
                 self.recent_displacements.append(displacement)
@@ -302,169 +306,32 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 if len(self.recent_displacements) >= 5:
                     avg_displacement = sum(self.recent_displacements) / len(self.recent_displacements)
                     if avg_displacement > 0.005:  # INCREASED: Consistent forward movement
-                        progress_reward *= 1.2  # REDUCED: Smaller bonus
+                        progress_reward *= 1.5  # BOOSTED: Higher bonus for consistency
             else:
                 self.recent_displacements = [displacement]
         elif displacement < -0.0005:
-            progress_reward = displacement * 1.0  # REDUCED: Moderate penalty for backward movement
+            progress_reward = displacement * 1.0  # Keep moderate penalty for backward movement
         else:
-            progress_reward = 0.0  # FIXED: NO reward for tiny movements or standing still
+            progress_reward = 0.0  # NO reward for tiny movements or standing still
         
-        total_reward += progress_reward * 0.35  # Reduced from 0.4 to make room for food reward
+        total_reward += progress_reward * 0.4  # INCREASED: Back to 40% for forward progress
         
         # 2. FOOD APPROACH REWARD (NEW - 15% of total reward)
         # Reward moving toward nearest food source
         food_approach_reward = self._get_food_approach_reward()
         total_reward += food_approach_reward * 0.15
-        
-        # 3. ARM GROUND CONTACT REWARD (25% of total reward)
-        # Reward arms being in contact with ground for pushing
-        arm_contact_reward = 0.0
-        
-        # Check if arms are low enough to be "touching" ground (simplified)
-        upper_arm_height = self.upper_arm.position.y
-        lower_arm_height = self.lower_arm.position.y
-        ground_level = 0.0  # World ground level is at y = 0 for our simulation
-        
-        # Contact reward independent of displacement; proxies how well arms are braced
-        if upper_arm_height < ground_level + 0.4:
-            arm_contact_reward += 0.003
-        if lower_arm_height < ground_level + 0.25:
-            arm_contact_reward += 0.005
-
-        # Extra reward if both arms are working together (both near ground)
-        if (upper_arm_height < ground_level + 0.2 and 
-            lower_arm_height < ground_level + 0.1):
-            arm_contact_reward += 0.002  # Coordination bonus
-
-        # If we aren't really moving, damp the bonus by 50%
-        if abs(displacement) < 0.0005:
-            arm_contact_reward *= 0.5
-        
-        total_reward += arm_contact_reward * 0.25
-        
-        # 4. ARM COORDINATION REWARD (20% of total reward)
-        # Reward alternating or coordinated arm movements
-        coordination_reward = 0.0
-        
-        # Track arm velocities to detect coordinated movement
-        upper_arm_vel = abs(self.upper_arm.angularVelocity)
-        lower_arm_vel = abs(self.lower_arm.angularVelocity)
-        
-        # Reward active arm movement (not static)
-        if upper_arm_vel > 0.1 or lower_arm_vel > 0.1:
-            coordination_reward += 0.002  # REDUCED
-            
-        # Reward coordinated movement (both arms moving in useful directions)
-        if upper_arm_vel > 0.05 and lower_arm_vel > 0.05:
-            # Check if arms are moving in complementary ways
-            upper_angle = self.upper_arm.angle
-            lower_angle = self.lower_arm.angle
-            
-            # Reward if arm configuration suggests pushing motion
-            if -np.pi/3 < upper_angle < np.pi/3 and 0 < lower_angle < 2*np.pi/3:
-                coordination_reward += 0.003  # REDUCED
                 
-        #total_reward += coordination_reward * 0.20
-        
-        # 5. STABILITY REWARD (10% of total reward)
-        # Reward maintaining body stability while crawling
-        body_angle = abs(self.body.angle)
-        if body_angle < np.pi/6:  # Within 30 degrees
-            stability_reward = 0.003 * (1.0 - (body_angle / (np.pi/6)))  # REDUCED
-        else:
-            stability_reward = -0.003 * (body_angle - np.pi/6)  # REDUCED: Penalty for excessive tilt
-            
-        #total_reward += stability_reward * 0.10
-        
-        # 6. ENERGY EFFICIENCY REWARD (5% of total reward)
-        # Reward achieving progress with reasonable energy expenditure
-        energy_used = abs(self.current_action_tuple[0]) + abs(self.current_action_tuple[1])
-        efficiency_reward = 0.0
-        
-        if displacement > 0.001 and energy_used > 0:  # Only if making progress
-            # Efficiency = progress per unit energy
-            efficiency = displacement / (energy_used + 0.1)
-            efficiency_reward = min(0.002, efficiency * 0.02)  # REDUCED
-        elif energy_used > 1.5:  # Penalty for high energy use without progress
-            efficiency_reward = -0.001  # REDUCED
-            
-        #total_reward += efficiency_reward * 0.05
-        
-        # 7. BEHAVIORAL PATTERN REWARDS (Bonus)
-        # Reward sequences that resemble crawling patterns
-        pattern_bonus = 0.0
-        
-        # Track recent actions to detect crawling-like patterns
-        if not hasattr(self, 'action_sequence'):
-            self.action_sequence = []
-        
-        self.action_sequence.append(self.current_action)
-        if len(self.action_sequence) > 8:  # Keep last 8 actions
-            self.action_sequence.pop(0)
-            
-        # Look for alternating patterns in actions (simplified)
-        if len(self.action_sequence) >= 4:
-            # Check for variation in actions (not stuck in one action)
-            unique_actions = len(set(self.action_sequence[-4:]))
-            if unique_actions >= 2:  # At least 2 different actions
-                pattern_bonus += 0.001  # REDUCED
-                
-        #total_reward += pattern_bonus
-        
-        # 8. GROUND INTERACTION BONUS
-        # Bonus for maintaining contact with ground while moving
-        body_height = self.body.position.y
-        if (body_height < ground_level + 0.5 and
-            displacement > 0.0005):
-            ground_interaction_bonus = 0.001  # REDUCED
-        else:
-            ground_interaction_bonus = 0.0
-            
-        total_reward += ground_interaction_bonus
-        
-        # 9. PENALTIES
-        # Penalty for getting stuck or falling
-        if body_height < ground_level - 0.5:  # Fallen through ground
-            total_reward -= 0.01  # REDUCED
-        if abs(body_angle) > np.pi/2:  # Flipped over
-            total_reward -= 0.02  # REDUCED
-            
-        # IMPATIENCE PENALTY: Apply negative reward when stuck (inspired by Java implementation)
-        impatience_penalty = 0.0
-        if self.time_since_good_value > 50.0:  # After ~1s without improvement
-            if self.time_since_good_value < 100.0:  # Cap the time range to prevent explosion
-                # Quadratic punishment like Java: timeSinceGoodValue^2 * impatience
-                impatience_penalty = -(self.time_since_good_value ** 2) * self.impatience
-                # Cap the penalty to prevent reward explosion
-                impatience_penalty = max(impatience_penalty, -0.02)  # Max penalty of -0.02
-                
-                if self.id == 0 and self.steps % 100 == 0 and impatience_penalty < -0.001:  # Debug
-                    print(f"⏰ Agent {self.id}: Impatience penalty {impatience_penalty:.4f} (stuck for {self.time_since_good_value:.1f} steps)")
-        
-        total_reward += impatience_penalty
-        
-        # SANITY CHECK: If no significant forward progress, cap positive rewards
-        if displacement <= 0.0005 and total_reward > 0.005:
-            total_reward = min(total_reward, 0.005)  # Cap positive reward when not progressing
-        
-        # Clip final reward to reasonable range (CRITICAL: Q-learning appropriate range)
-        total_reward = np.clip(total_reward, -0.05, 0.05)  # REDUCED from (-0.1, 0.2) to (-0.05, 0.05)
+        # Clip final reward to reasonable range (EXPANDED: Allow higher positive rewards)
+        total_reward = np.clip(total_reward, -0.05, 0.05)  # Allow up to 0.15 positive reward per step
         
         # Debug logging for first agent (MORE FREQUENT TO CATCH THE ISSUE)
-        if self.id == 0 and self.steps % 50 == 0:  # Every 50 steps instead of 300
+        if self.id == 0 and self.steps % 1000 == 0:  # Every 1000 steps
             print(f"🐛 DETAILED Reward Debug Agent {self.id} Step {self.steps}:")
             print(f"  Position: prev_x={prev_x:.4f}, current_x={current_x:.4f}")
             print(f"  Displacement: {displacement:.6f}")
-            print(f"  Progress reward: {progress_reward:.6f} (weighted: {progress_reward * 0.35:.6f})")
+            print(f"  Progress reward: {progress_reward:.6f} (weighted: {progress_reward * 0.4:.6f})")
             print(f"  Food approach reward: {food_approach_reward:.6f} (weighted: {food_approach_reward * 0.15:.6f})")
-            print(f"  Upper arm height: {upper_arm_height:.4f}, Lower arm height: {lower_arm_height:.4f}")
-            print(f"  Ground level: {ground_level}")
-            print(f"  Arm contact raw: {arm_contact_reward:.6f} (weighted: {arm_contact_reward * 0.25:.6f})")
-            print(f"  Body height: {body_height:.4f}")
-            print(f"  Ground interaction: {ground_interaction_bonus:.6f}")
             print(f"  Body angle: {np.degrees(abs(self.body.angle)):.2f}°")
-            print(f"  Impatience penalty: {impatience_penalty:.6f} (stuck for {self.time_since_good_value:.1f} steps)")
             print(f"  TOTAL BEFORE CLIP: {total_reward:.6f}")
             print(f"  TOTAL AFTER CLIP: {np.clip(total_reward, -0.05, 0.05):.6f}")
             print(f"  Episode total so far: {getattr(self, 'total_reward', 'N/A')}")
@@ -694,15 +561,20 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         reward = self.get_reward(self.prev_x)
         self.total_reward += reward
         
+        # Store the immediate reward for web interface display
+        self.immediate_reward = reward
+        self.last_reward = reward  # Also store as last_reward for compatibility
+        
         # CRITICAL: Update prev_x for next step
         self.prev_x = current_x
         
-        # Prevent total reward from exploding negatively (ADJUSTED: for new reward scale)
-        if self.total_reward < -2.0:  # REDUCED from -5.0 to -2.0 for smaller reward scale  
-            self.total_reward = max(self.total_reward, -2.0)
-        # Prevent total reward from exploding positively (NEW: cap positive rewards too)
-        elif self.total_reward > 2.0:  # Cap positive total rewards for Q-learning stability
-            self.total_reward = min(self.total_reward, 2.0)
+        # Use soft capping to prevent reward explosion but allow recovery
+        if self.total_reward < -5.0:  # Only cap at very negative values
+            # Soft cap: gradually reduce impact of further negative rewards
+            self.total_reward = -5.0 + (self.total_reward + 5.0) * 0.1
+        elif self.total_reward > 10.0:  # Allow much higher positive rewards
+            # Soft cap: gradually reduce impact of further positive rewards  
+            self.total_reward = 10.0 + (self.total_reward - 10.0) * 0.1
         
         # Combined debug logging for agent 0, on a longer interval
         if self.id == 0 and self.steps % 600 == 0:
@@ -904,6 +776,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.total_reward = 0.0
         self.episode_steps = 0
         self.immediate_reward = 0.0  # Track immediate reward for Q-learning
+        self.last_reward = 0.0  # Reset last reward for web interface
         self.best_distance = 0.0
         self.consecutive_failures = 0
         
@@ -1321,8 +1194,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.lower_arm_joint.motorSpeed = elbow_speed
         
         # Ensure joints are enabled and awake
-        self.upper_arm_joint.enableMotor = True
-        self.lower_arm_joint.enableMotor = True
+        #self.upper_arm_joint.enableMotor = True
+        #self.lower_arm_joint.enableMotor = True
         
         # Wake up the bodies to ensure they respond
         self.upper_arm.awake = True
@@ -1366,19 +1239,19 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             
             # Primary reward: moving closer to food (increased threshold for physics simulation)
             if distance_change > 0.5:  # INCREASED: Moved significantly closer (was 0.1)
-                food_reward += min(0.03, distance_change * 0.15)  # INCREASED: Scale reward based on distance improvement
+                food_reward += min(0.08, distance_change * 0.3)  # BOOSTED: Much higher reward for approaching food
             elif distance_change < -0.5:  # INCREASED: Moved significantly away (was -0.1)
-                food_reward -= min(0.008, abs(distance_change) * 0.03)  # INCREASED: Small penalty for moving away
+                food_reward -= min(0.008, abs(distance_change) * 0.03)  # Keep penalty small
             
             # Bonus for being very close to food
             if current_food_distance < 5.0:  # INCREASED: Within consumption range (was 3.0)
-                food_reward += 0.015 * (5.0 - current_food_distance) / 5.0  # INCREASED: Proximity bonus
+                food_reward += 0.04 * (5.0 - current_food_distance) / 5.0  # BOOSTED: Much higher proximity bonus
             
             # Bonus for consistent approach (trend reward)
             if len(self.food_distance_history) >= 5:
                 trend = self.food_distance_history[0] - self.food_distance_history[-1]
                 if trend > 0:  # Generally getting closer over time
-                    food_reward += min(0.008, trend * 0.015)  # INCREASED: Trend reward
+                    food_reward += min(0.02, trend * 0.04)  # BOOSTED: Higher trend reward
             
             # Update previous distance for next calculation
             self.prev_food_distance = current_food_distance
@@ -1404,65 +1277,54 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         Returns float('inf') if no food is available.
         """
         try:
-            # Try to access the training environment through the world attribute
-            # This is a bit of a hack but necessary for the crawling agent to access ecosystem data
-            training_env = None
+            # Access the training environment directly through the agent's reference
+            # This is set when the agent is created: agent._training_env = training_environment
+            #training_env = getattr(self, '_training_env', None)
+            training_env = self.world._training_env
+
+            #if training_env and hasattr(training_env, 'ecosystem_dynamics'):
+            agent_pos = (self.body.position.x, self.body.position.y)
             
-            # Look for training environment in various possible locations
-            if hasattr(self.world, '_training_env'):
-                training_env = self.world._training_env
-            elif hasattr(self.world, 'training_environment'):
-                training_env = self.world.training_environment
+            # Get agent's ecosystem role for food type filtering
+            agent_role = 'omnivore'  # Default
+            if hasattr(training_env, 'agent_statuses') and self.id in training_env.agent_statuses:
+                agent_role = training_env.agent_statuses[self.id].get('role', 'omnivore')
             
-            if training_env and hasattr(training_env, 'ecosystem_dynamics'):
-                agent_pos = (self.body.position.x, self.body.position.y)
+            nearest_distance = float('inf')
+            food_sources_checked = 0
+            edible_food_sources = 0
+            
+            # Check all food sources
+            for food_source in training_env.ecosystem_dynamics.food_sources:
+                food_sources_checked += 1
+                if food_source.amount <= 0.1:  # Skip depleted food
+                    continue
                 
-                # Get agent's ecosystem role for food type filtering
-                agent_role = 'omnivore'  # Default
-                if hasattr(training_env, 'agent_statuses') and self.id in training_env.agent_statuses:
-                    agent_role = training_env.agent_statuses[self.id].get('role', 'omnivore')
+                # Check if this agent can eat this food type
+                consumption_efficiency = training_env.ecosystem_dynamics._get_consumption_efficiency(
+                    training_env.ecosystem_dynamics.agent_roles.get(self.id, training_env.ecosystem_dynamics.EcosystemRole.OMNIVORE),
+                    food_source.food_type
+                )
                 
-                nearest_distance = float('inf')
-                food_sources_checked = 0
-                edible_food_sources = 0
+                if consumption_efficiency <= 0.01:
+                    continue  # Skip food this agent can't eat
                 
-                # Check all food sources
-                for food_source in training_env.ecosystem_dynamics.food_sources:
-                    food_sources_checked += 1
-                    if food_source.amount <= 0.1:  # Skip depleted food
-                        continue
-                    
-                    # Check if this agent can eat this food type
-                    consumption_efficiency = training_env.ecosystem_dynamics._get_consumption_efficiency(
-                        training_env.ecosystem_dynamics.agent_roles.get(self.id, training_env.ecosystem_dynamics.EcosystemRole.OMNIVORE),
-                        food_source.food_type
-                    )
-                    
-                    if consumption_efficiency <= 0.0:
-                        continue  # Skip food this agent can't eat
-                    
-                    edible_food_sources += 1
-                    
-                    # Calculate distance
-                    food_x, food_y = food_source.position
-                    distance = ((agent_pos[0] - food_x) ** 2 + (agent_pos[1] - food_y) ** 2) ** 0.5
-                    
-                    if distance < nearest_distance:
-                        nearest_distance = distance
+                edible_food_sources += 1
                 
-                # Debug logging for food calculation issues
-                if self.id == 0 and self.steps % 300 == 0:
-                    print(f"🍎 Agent {self.id} Food Debug: checked={food_sources_checked}, edible={edible_food_sources}, nearest_dist={nearest_distance:.2f}")
-                    print(f"   Agent pos: ({agent_pos[0]:.1f}, {agent_pos[1]:.1f}), Role: {agent_role}")
+                # Calculate distance
+                food_x, food_y = food_source.position
+                distance = ((agent_pos[0] - food_x) ** 2 + (agent_pos[1] - food_y) ** 2) ** 0.5
                 
-                return nearest_distance
-            else:
-                # CRITICAL FIX: Instead of wrong fallback, return inf and log the issue
-                if self.id == 0 and self.steps % 200 == 0:  # Log for debugging
-                    print(f"⚠️ Agent {self.id}: Cannot access ecosystem data - no food approach reward")
-                    print(f"   training_env={training_env is not None}, ecosystem={hasattr(training_env, 'ecosystem_dynamics') if training_env else False}")
-                return float('inf')  # No food distance calculation possible
-                
+                if distance < nearest_distance:
+                    nearest_distance = distance
+            
+            # Debug logging for food calculation issues
+            if self.id == 0 and self.steps % 300 == 0:
+                print(f"🍎 Agent {self.id} Food Debug: checked={food_sources_checked}, edible={edible_food_sources}, nearest_dist={nearest_distance:.2f}")
+                print(f"   Agent pos: ({agent_pos[0]:.1f}, {agent_pos[1]:.1f}), Role: {agent_role}")
+            
+            return nearest_distance
+
         except Exception as e:
             if self.id == 0 and self.steps % 500 == 0:  # Rare debug output
                 print(f"⚠️ Error getting food distance for agent {self.id}: {e}")
