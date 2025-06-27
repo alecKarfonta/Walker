@@ -320,8 +320,8 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         self.current_action_tuple = (1, 0)
         
         # Reward clipping (UPDATED FOR Q-LEARNING SCALE)
-        self.reward_clip_min = -0.05  # REDUCED to match new Q-learning scale
-        self.reward_clip_max = 0.05   # REDUCED to match new Q-learning scale
+        self.reward_clip_min = -0.05  # Keep negative clipping tight  
+        self.reward_clip_max = 0.15   # INCREASED: Allow higher positive rewards for good behavior
         
         # Position tracking
         self.last_x_position = self.body.position.x

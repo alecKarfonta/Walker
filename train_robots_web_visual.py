@@ -340,6 +340,9 @@ HTML_TEMPLATE = """
         <div id="canvas-wrapper">
             <canvas id="simulation-canvas"></canvas>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
+            <button id="toggleViewportCulling" onclick="toggleViewportCulling()" style="position:absolute; top:10px; left:250px; z-index:50; background:#00BCD4; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">🔍 Viewport Culling: ON</button>
+            <button id="toggleViewportBounds" onclick="toggleViewportBounds()" style="position:absolute; top:45px; left:250px; z-index:50; background:#9C27B0; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer; font-size:11px;">🔍 Debug: Bounds</button>
+            <button id="toggleAiOptimization" onclick="toggleAiOptimization()" style="position:absolute; top:80px; left:250px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer; font-size:11px;">🧠 AI Opt: ON</button>
             
             <!-- Simulation Speed Controls -->
             <div id="speed-controls" style="position:absolute; top:90px; right:10px; z-index:50; background:rgba(0,0,0,0.8); color:white; padding:8px 12px; border-radius:6px; border:1px solid #3498db;">
@@ -352,6 +355,8 @@ HTML_TEMPLATE = """
                     <button onclick="setSimulationSpeed(2.0)" style="min-width: 28px; background: #e67e22; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">2x</button>
                     <button onclick="setSimulationSpeed(5.0)" style="min-width: 28px; background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">5x</button>
                     <button onclick="setSimulationSpeed(10.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">10x</button>
+                    <button onclick="setSimulationSpeed(50.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">50x</button>
+                    <button onclick="setSimulationSpeed(100.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">100x</button>
                 </div>
             </div>
             
@@ -427,6 +432,8 @@ HTML_TEMPLATE = """
         let lastLeaderboardHtml = ''; // Variable to store the last state of the leaderboard HTML
         let showFoodLines = false; // Food lines disabled by default for performance
         let showFpsCounters = true; // FPS counters enabled by default
+        let viewportCullingEnabled = true; // Viewport culling enabled by default for performance
+        let showViewportBounds = false; // Debug mode to visualize viewport bounds
         
         // FPS Tracking
         let uiFpsCounter = 0;
@@ -950,14 +957,6 @@ HTML_TEMPLATE = """
                     
                     <div class="detail-section">
                         <div class="detail-row">
-                            <span class="detail-label">Position:</span>
-                            <span class="detail-value">(${agent.body.x.toFixed(2)}, ${agent.body.y.toFixed(2)})</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Velocity:</span>
-                            <span class="detail-value">(${agent.body.velocity.x.toFixed(2)}, ${agent.body.velocity.y.toFixed(2)})</span>
-                        </div>
-                        <div class="detail-row">
                             <span class="detail-label">Episode Reward:</span>
                             <span class="detail-value">${agent.total_reward.toFixed(2)}</span>
                         </div>
@@ -1025,6 +1024,11 @@ HTML_TEMPLATE = """
             ctx.scale(cameraZoom, -cameraZoom); // Zoom and flip Y-axis
             ctx.translate(-cameraPosition.x, -cameraPosition.y); // Pan
 
+            // Draw viewport bounds for debugging (if enabled)
+            if (showViewportBounds && data.viewport_culling && data.viewport_culling.enabled) {
+                drawViewportBounds(data.viewport_culling.viewport_bounds);
+            }
+
             // Draw environmental elements first (background layer)
             drawEnvironmentalElements(data);
             
@@ -1064,6 +1068,32 @@ HTML_TEMPLATE = """
             if (showFpsCounters) {
                 drawFpsCounters(data);
             }
+        }
+
+        function drawViewportBounds(bounds) {
+            if (!bounds) return;
+            
+            // Draw viewport bounds as a semi-transparent rectangle
+            ctx.strokeStyle = '#FF00FF'; // Magenta color for visibility
+            ctx.fillStyle = 'rgba(255, 0, 255, 0.1)'; // Semi-transparent fill
+            ctx.lineWidth = 0.5;
+            
+            const width = bounds.right - bounds.left;
+            const height = bounds.top - bounds.bottom;
+            
+            ctx.beginPath();
+            ctx.rect(bounds.left, bounds.bottom, width, height);
+            ctx.fill();
+            ctx.stroke();
+            
+            // Add viewport bounds label
+            ctx.save();
+            ctx.scale(1, -1); // Counter the Y-axis flip for text
+            ctx.fillStyle = '#FF00FF';
+            ctx.font = '2px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('Viewport Bounds', bounds.left + 2, -(bounds.top - 4));
+            ctx.restore();
         }
         
         function drawEnvironmentalElements(data) {
@@ -1480,6 +1510,40 @@ HTML_TEMPLATE = """
                               (currentUiFps >= 15 && currentPhysicsFps >= 30) ? 'GOOD' : 'SLOW';
             ctx.fillText(`Status: ${perfStatus}`, fpsBoxX + 10, fpsBoxY + 60);
             
+            // Viewport culling stats (if available)
+            if (data && data.viewport_culling) {
+                const vc = data.viewport_culling;
+                const cullBoxY = fpsBoxY + 80;
+                const cullBoxHeight = 50;
+                
+                // Background for culling stats
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(fpsBoxX, cullBoxY, fpsBoxWidth, cullBoxHeight);
+                ctx.strokeStyle = '#444444';
+                ctx.strokeRect(fpsBoxX, cullBoxY, fpsBoxWidth, cullBoxHeight);
+                
+                // Culling statistics
+                const statusColor = vc.enabled ? '#00BCD4' : '#FF5722';
+                const statusText = vc.enabled ? 'ON' : 'OFF';
+                ctx.fillStyle = statusColor;
+                ctx.font = '10px monospace';
+                ctx.fillText(`🔍 Culling: ${statusText}`, fpsBoxX + 10, cullBoxY + 15);
+                
+                if (vc.enabled) {
+                    const cullingEfficiency = (vc.culling_ratio * 100).toFixed(0);
+                    const efficiencyColor = vc.culling_ratio > 0.5 ? '#4CAF50' : vc.culling_ratio > 0.2 ? '#FF9800' : '#666666';
+                    ctx.fillStyle = efficiencyColor;
+                    ctx.fillText(`Efficiency: ${cullingEfficiency}%`, fpsBoxX + 10, cullBoxY + 28);
+                    
+                    ctx.fillStyle = '#BBBBBB';
+                    ctx.fillText(`Visible: ${vc.visible_agents}/${vc.total_agents}`, fpsBoxX + 10, cullBoxY + 41);
+                } else {
+                    ctx.fillStyle = '#BBBBBB';
+                    ctx.fillText(`All objects rendered`, fpsBoxX + 10, cullBoxY + 28);
+                    ctx.fillText(`Objects: ${vc.total_agents}`, fpsBoxX + 10, cullBoxY + 41);
+                }
+            }
+            
             // Restore context
             ctx.restore();
         }
@@ -1495,7 +1559,12 @@ HTML_TEMPLATE = """
             }
             lastFetchTime = now;
             
-            fetch('./status')  // Use relative path
+            // Send canvas dimensions and culling preference for viewport culling
+            const canvasWidth = canvas.width;
+            const canvasHeight = canvas.height;
+            const cullingParam = viewportCullingEnabled ? '&viewport_culling=true' : '&viewport_culling=false';
+            
+            fetch(`./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}${cullingParam}`)
                 .then(response => response.json())
                 .then(data => {
                     window.lastData = data; // Store latest data globally
@@ -1616,6 +1685,75 @@ HTML_TEMPLATE = """
                 button.style.background = '#4CAF50';
             }
             console.log(`🎯 Food lines ${showFoodLines ? 'enabled' : 'disabled'}`);
+        }
+
+        // Toggle viewport culling
+        function toggleViewportCulling() {
+            viewportCullingEnabled = !viewportCullingEnabled;
+            const button = document.getElementById('toggleViewportCulling');
+            if (viewportCullingEnabled) {
+                button.textContent = '🔍 Viewport Culling: ON';
+                button.style.background = '#00BCD4';
+            } else {
+                button.textContent = '🔍 Viewport Culling: OFF';
+                button.style.background = '#FF5722';
+            }
+            console.log(`🔍 Viewport culling ${viewportCullingEnabled ? 'enabled' : 'disabled'}`);
+        }
+
+        // Toggle viewport bounds visualization (debug mode)
+        function toggleViewportBounds() {
+            showViewportBounds = !showViewportBounds;
+            const button = document.getElementById('toggleViewportBounds');
+            if (showViewportBounds) {
+                button.textContent = '🔍 Debug: Bounds ON';
+                button.style.background = '#673AB7';
+            } else {
+                button.textContent = '🔍 Debug: Bounds';
+                button.style.background = '#9C27B0';
+            }
+            console.log(`🔍 Viewport bounds visualization ${showViewportBounds ? 'enabled' : 'disabled'}`);
+        }
+
+        // Toggle AI optimization
+        function toggleAiOptimization() {
+            // Get current settings first
+            fetch('./ai_optimization_settings')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const currentlyEnabled = data.settings.ai_optimization_enabled;
+                        const newEnabled = !currentlyEnabled;
+                        
+                        // Update the setting
+                        return fetch('./ai_optimization_settings', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ ai_optimization_enabled: newEnabled })
+                        });
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const button = document.getElementById('toggleAiOptimization');
+                        const enabled = data.settings.ai_optimization_enabled;
+                        
+                        if (enabled) {
+                            button.textContent = '🧠 AI Opt: ON';
+                            button.style.background = '#4CAF50';
+                        } else {
+                            button.textContent = '🧠 AI Opt: OFF';
+                            button.style.background = '#FF5722';
+                        }
+                        console.log(`🧠 AI optimization ${enabled ? 'enabled' : 'disabled'}`);
+                    } else {
+                        console.error('❌ Failed to toggle AI optimization:', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('❌ Error toggling AI optimization:', error);
+                });
         }
 
         // Set simulation speed
@@ -1804,7 +1942,7 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 12000  # 200 seconds at 60 Hz - much longer to prevent constant resets
+        self.episode_length = 12000000  # 200 seconds at 60 Hz - much longer to prevent constant resets
         
         # Enhanced thread safety for Box2D operations
         import threading
@@ -1854,9 +1992,9 @@ class TrainingEnvironment:
         self.last_ecosystem_update = time.time()
         self.ecosystem_update_interval = 20.0  # Update ecosystem every 20 seconds for better responsiveness
         
-        # Resource generation system - REDUCED FREQUENCY for stability
+        # Resource generation system - BALANCED FREQUENCY for survival
         self.last_resource_generation = time.time()
-        self.resource_generation_interval = 120.0  # Generate strategic resources every 2 minutes (was 45s) for stable rewards
+        self.resource_generation_interval = 60.0  # Generate strategic resources every 1 minute for better survival balance
         self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
         
         # Death and survival system
@@ -1931,7 +2069,13 @@ class TrainingEnvironment:
         
         # Simulation speed control
         self.simulation_speed_multiplier = 1.0  # 1x normal speed by default
-        self.max_speed_multiplier = 10.0  # Maximum 10x speed
+        self.max_speed_multiplier = 100.0  # Maximum 100x speed
+        
+        # AI Processing optimization settings
+        self.ai_optimization_enabled = True  # Enable AI processing optimizations
+        self.ai_batch_percentage = 0.25  # Process 25% of agents per frame
+        self.ai_spatial_culling_enabled = False  # Only update AI for agents near camera
+        self.ai_spatial_culling_distance = 50.0  # Distance from camera to update AI
         
         # Physics FPS tracking
         self.physics_fps_counter = 0
@@ -2531,13 +2675,13 @@ class TrainingEnvironment:
                 energy_gain, consumed_food_type, consumed_food_position = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
                 # Energy gain is now properly scaled in the consume_resource function
                 
-                # Apply consistent energy decay (not paused during eating)
-                base_decay = 0.0001  
+                # Apply consistent energy decay (not paused during eating) - REDUCED for better survival
+                base_decay = 0.00005  # Reduced from 0.0001 to 0.00005 (50% reduction)
                 
                 # Minimal additional decay based on movement 
                 velocity = agent.body.linearVelocity
                 speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
-                movement_cost = speed * 0.0001  # Very minimal movement cost
+                movement_cost = speed * 0.0005  # Reduced movement cost to match base decay
                 
                 # Role-based energy costs (minimal differences)
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -3192,7 +3336,8 @@ class TrainingEnvironment:
         step_count = 0
 
         while self.is_running:
-            current_time = time.time()
+            frame_start_time = time.time()
+            current_time = frame_start_time
             frame_time = current_time - last_time
             last_time = current_time
             
@@ -3201,6 +3346,7 @@ class TrainingEnvironment:
             
             # Fixed-step physics updates with enhanced thread safety
             while accumulator >= self.dt:
+                physics_start = time.time()
                 with self._physics_lock:  # Protect ALL Box2D operations
                     try:
                         # Process any pending destructions first
@@ -3209,15 +3355,51 @@ class TrainingEnvironment:
                         # Step the physics world only if not evolving
                         if not self._is_evolving:
                             # Run multiple physics steps based on simulation speed multiplier
+                            physics_step_start = time.time()
                             physics_steps = max(1, int(self.simulation_speed_multiplier))
                             for _ in range(physics_steps):
                                 self.world.Step(self.dt, 8, 3)
+                            physics_step_time = time.time() - physics_step_start
                             
                             # Update all agents (copy list to avoid iteration issues)
+                            ai_processing_start = time.time()
                             current_agents = self.agents.copy()
                             agents_to_reset = []
                             
-                            for agent in current_agents:
+                            # AI OPTIMIZATION: Intelligent AI update scheduling
+                            ai_agents_this_frame = []
+                            
+                            if self.ai_optimization_enabled and len(current_agents) > 0:
+                                # Batch processing: Only update AI for a subset of agents each frame
+                                ai_batch_size = max(5, int(len(current_agents) * self.ai_batch_percentage))
+                                ai_start_index = (self.step_count * ai_batch_size) % len(current_agents)
+                                
+                                for i, agent in enumerate(current_agents):
+                                    should_update_ai = False
+                                    
+                                    # Always update AI for focused agent
+                                    if self.focused_agent and agent.id == self.focused_agent.id:
+                                        should_update_ai = True
+                                    else:
+                                        # Batch scheduling for other agents
+                                        agent_index = (ai_start_index + i) % len(current_agents)
+                                        if agent_index < ai_batch_size:
+                                            # Additional spatial culling check
+                                            if self.ai_spatial_culling_enabled:
+                                                agent_pos = agent.body.position
+                                                camera_pos = self.camera_position
+                                                distance = ((agent_pos.x - camera_pos[0])**2 + (agent_pos.y - camera_pos[1])**2)**0.5
+                                                should_update_ai = distance <= self.ai_spatial_culling_distance
+                                            else:
+                                                should_update_ai = True
+                                    
+                                    ai_agents_this_frame.append((agent, should_update_ai))
+                            else:
+                                # No optimization: update all agents (original behavior)
+                                for agent in current_agents:
+                                    ai_agents_this_frame.append((agent, True))
+                            
+                            for agent, should_update_ai in ai_agents_this_frame:
                                 # Skip destroyed agents or agents without bodies
                                 if getattr(agent, '_destroyed', False) or not agent.body:
                                     continue
@@ -3244,7 +3426,19 @@ class TrainingEnvironment:
                                         if hasattr(agent, 'lower_arm_joint') and agent.lower_arm_joint:
                                             agent.lower_arm_joint.enableMotor = True
                                     
-                                    agent.step(self.dt)
+                                    # AI OPTIMIZATION: Use different step modes based on AI update schedule
+                                    if should_update_ai:
+                                        # Full AI update with learning
+                                        agent.step(self.dt)
+                                    else:
+                                        # Physics-only update - continue previous action without AI decision
+                                        if hasattr(agent, 'step_physics_only'):
+                                            agent.step_physics_only(self.dt)
+                                        else:
+                                            # Fallback: continue previous action
+                                            if hasattr(agent, 'current_action_tuple') and agent.current_action_tuple is not None:
+                                                agent.apply_action(agent.current_action_tuple)
+                                            agent.steps += 1
 
                                     # Check for reset conditions but don't reset immediately
                                     if agent.body and agent.body.position.y < self.world_bounds_y:
@@ -3271,6 +3465,45 @@ class TrainingEnvironment:
                                         agent.reset_position()
                                 except Exception as e:
                                     print(f"⚠️  Error resetting agent {agent.id}: {e}")
+                            
+                            ai_processing_time = time.time() - ai_processing_start
+                            
+                            # Store performance timings and AI optimization stats
+                            if not hasattr(self, 'performance_timings'):
+                                self.performance_timings = {
+                                    'physics_simulation': [],
+                                    'agent_ai_processing': [],
+                                    'ecosystem_updates': [],
+                                    'statistics_updates': [],
+                                    'data_serialization': [],
+                                    'total_frame_time': []
+                                }
+                                self.ai_optimization_stats = {
+                                    'total_agents': [],
+                                    'ai_updated_agents': [],
+                                    'ai_optimization_ratio': []
+                                }
+                            
+                            self.performance_timings['physics_simulation'].append(physics_step_time)
+                            self.performance_timings['agent_ai_processing'].append(ai_processing_time)
+                            
+                            # Track AI optimization effectiveness
+                            ai_updated_count = sum(1 for _, should_update in ai_agents_this_frame if should_update)
+                            total_agents = len(current_agents)
+                            ai_optimization_ratio = 1.0 - (ai_updated_count / max(1, total_agents))
+                            
+                            self.ai_optimization_stats['total_agents'].append(total_agents)
+                            self.ai_optimization_stats['ai_updated_agents'].append(ai_updated_count)
+                            self.ai_optimization_stats['ai_optimization_ratio'].append(ai_optimization_ratio)
+                            
+                            # Keep only last 100 measurements
+                            for key in self.performance_timings:
+                                if len(self.performance_timings[key]) > 100:
+                                    self.performance_timings[key] = self.performance_timings[key][-100:]
+                            
+                            for key in self.ai_optimization_stats:
+                                if len(self.ai_optimization_stats[key]) > 100:
+                                    self.ai_optimization_stats[key] = self.ai_optimization_stats[key][-100:]
                                     
                     except Exception as e:
                         print(f"❌ Critical error in physics loop: {e}")
@@ -3295,7 +3528,11 @@ class TrainingEnvironment:
             
             # Update ecosystem dynamics periodically
             if current_time - self.last_ecosystem_update > self.ecosystem_update_interval:
+                ecosystem_start = time.time()
                 self._update_ecosystem_dynamics()
+                ecosystem_time = time.time() - ecosystem_start
+                if hasattr(self, 'performance_timings'):
+                    self.performance_timings['ecosystem_updates'].append(ecosystem_time)
                 self.last_ecosystem_update = current_time
             
             # Create obstacle physics bodies periodically (every 10 seconds)
@@ -3386,7 +3623,11 @@ class TrainingEnvironment:
                 last_debug_time = current_time
             
             if current_time - last_stats_time > self.stats_update_interval:
+                stats_start = time.time()
                 self._update_statistics()
+                stats_time = time.time() - stats_start
+                if hasattr(self, 'performance_timings'):
+                    self.performance_timings['statistics_updates'].append(stats_time)
                 
                 # Queue evaluation metrics for background collection (non-blocking)
                 if self.enable_evaluation and self.metrics_collector:
@@ -3462,6 +3703,19 @@ class TrainingEnvironment:
                     print(f"❌ Evolution failed: {e}")
                     import traceback
                     traceback.print_exc()
+            
+            # Calculate total frame time and store performance data
+            total_frame_time = time.time() - frame_start_time
+            if hasattr(self, 'performance_timings'):
+                self.performance_timings['total_frame_time'].append(total_frame_time)
+                
+                # Print performance report every 30 seconds
+                if not hasattr(self, 'last_performance_report'):
+                    self.last_performance_report = time.time()
+                
+                if current_time - self.last_performance_report > 30.0:
+                    self._print_performance_report()
+                    self.last_performance_report = current_time
             
             # Sleep to maintain target FPS
             time.sleep(max(0, self.dt - (time.time() - current_time)))
@@ -3543,8 +3797,87 @@ class TrainingEnvironment:
         print(f"✅ Updated {target_desc} parameters: {params}")
         return True
 
-    def get_status(self):
-        """Returns the current state of the simulation for rendering with enhanced safety."""
+    def _print_performance_report(self):
+        """Print a detailed performance analysis report."""
+        try:
+            if not hasattr(self, 'performance_timings') or not self.performance_timings:
+                return
+            
+            print(f"\n📊 === PERFORMANCE ANALYSIS REPORT ===")
+            print(f"📏 Sample size: {len(self.performance_timings.get('total_frame_time', []))} frames")
+            
+            # Calculate averages for each category
+            for category, timings in self.performance_timings.items():
+                if timings:
+                    avg_time = sum(timings) / len(timings) * 1000  # Convert to milliseconds
+                    max_time = max(timings) * 1000
+                    min_time = min(timings) * 1000
+                    
+                    # Calculate percentage of total frame time
+                    if category != 'total_frame_time' and self.performance_timings.get('total_frame_time'):
+                        total_avg = sum(self.performance_timings['total_frame_time']) / len(self.performance_timings['total_frame_time'])
+                        percentage = (avg_time / 1000) / total_avg * 100 if total_avg > 0 else 0
+                        print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg ({percentage:.1f}% of frame), {min_time:.2f}-{max_time:.2f}ms range")
+                    else:
+                        print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg, {min_time:.2f}-{max_time:.2f}ms range")
+            
+            # Identify the bottleneck
+            bottlenecks = []
+            for category, timings in self.performance_timings.items():
+                if category != 'total_frame_time' and timings:
+                    avg_time = sum(timings) / len(timings)
+                    bottlenecks.append((category, avg_time))
+            
+            if bottlenecks:
+                bottlenecks.sort(key=lambda x: x[1], reverse=True)
+                print(f"🚩 Primary bottleneck: {bottlenecks[0][0].replace('_', ' ').title()} ({bottlenecks[0][1]*1000:.2f}ms)")
+                
+                # Recommendations
+                if bottlenecks[0][0] == 'physics_simulation':
+                    print(f"💡 Recommendation: Physics simulation is the bottleneck - consider reducing simulation frequency or agent count")
+                elif bottlenecks[0][0] == 'agent_ai_processing':
+                    print(f"💡 Recommendation: AI processing is the bottleneck - consider optimizing learning algorithms or reducing update frequency")
+                elif bottlenecks[0][0] == 'ecosystem_updates':
+                    print(f"💡 Recommendation: Ecosystem updates are the bottleneck - consider reducing update frequency or optimizing ecosystem calculations")
+                elif bottlenecks[0][0] == 'statistics_updates':
+                    print(f"💡 Recommendation: Statistics updates are the bottleneck - consider reducing statistics calculation frequency")
+            
+            # Frame rate analysis
+            if self.performance_timings.get('total_frame_time'):
+                total_times = self.performance_timings['total_frame_time']
+                target_frame_time = 1.0 / 60.0  # 60 FPS
+                frames_meeting_target = sum(1 for t in total_times if t <= target_frame_time)
+                performance_percentage = frames_meeting_target / len(total_times) * 100
+                print(f"🎯 Performance: {performance_percentage:.1f}% of frames meet 60 FPS target")
+                
+                if performance_percentage < 80:
+                    print(f"⚠️  Performance Warning: Less than 80% of frames meet the 60 FPS target!")
+            
+            # AI Optimization effectiveness
+            if hasattr(self, 'ai_optimization_stats') and self.ai_optimization_stats.get('ai_optimization_ratio'):
+                avg_optimization_ratio = sum(self.ai_optimization_stats['ai_optimization_ratio']) / len(self.ai_optimization_stats['ai_optimization_ratio'])
+                avg_ai_updated = sum(self.ai_optimization_stats['ai_updated_agents']) / len(self.ai_optimization_stats['ai_updated_agents'])
+                avg_total_agents = sum(self.ai_optimization_stats['total_agents']) / len(self.ai_optimization_stats['total_agents'])
+                
+                print(f"🧠 AI Optimization: {avg_optimization_ratio:.1%} AI processing reduction")
+                print(f"🔄 AI Updates: {avg_ai_updated:.1f}/{avg_total_agents:.1f} agents per frame ({(avg_ai_updated/avg_total_agents):.1%})")
+                
+                if avg_optimization_ratio > 0.5:
+                    print(f"✅ AI optimization is highly effective - over 50% reduction in AI processing!")
+                elif avg_optimization_ratio > 0.2:
+                    print(f"👍 AI optimization is working - {avg_optimization_ratio:.0%} reduction achieved")
+                else:
+                    print(f"⚠️  AI optimization is minimal - consider adjusting ai_batch_percentage or ai_spatial_culling_distance")
+            
+            print(f"📊 === END PERFORMANCE REPORT ===\n")
+            
+        except Exception as e:
+            print(f"⚠️ Error generating performance report: {e}")
+
+    def get_status(self, canvas_width=1200, canvas_height=800, viewport_culling=True):
+        """Returns the current state of the simulation for rendering with enhanced safety and optional viewport culling."""
+        serialization_start = time.time()
+        
         if not self.is_running:
             return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
@@ -3556,9 +3889,43 @@ class TrainingEnvironment:
                 # Create a safe copy of agents list
                 current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
                 
-                # 1. Get agent shapes for drawing
+                if viewport_culling:
+                    # Calculate viewport bounds for culling using actual canvas dimensions
+                    viewport_bounds = self._calculate_viewport_bounds(canvas_width, canvas_height)
+                    # Filter agents by viewport for performance optimization
+                    viewport_agents = self._filter_agents_by_viewport(current_agents, viewport_bounds)
+                else:
+                    # No viewport culling - render all agents
+                    viewport_bounds = {'left': -9999, 'right': 9999, 'bottom': -9999, 'top': 9999}
+                    viewport_agents = current_agents
+                
+                # Store viewport culling statistics for monitoring
+                zoom_used = getattr(self, 'user_zoom_level', 1.0)
+                viewport_stats = {
+                    'enabled': viewport_culling,
+                    'total_agents': len(current_agents),
+                    'visible_agents': len(viewport_agents),
+                    'culled_agents': len(current_agents) - len(viewport_agents),
+                    'culling_ratio': (len(current_agents) - len(viewport_agents)) / max(1, len(current_agents)),
+                    'viewport_bounds': viewport_bounds,
+                    'zoom_level': zoom_used,
+                    'camera_position': self.camera_position,
+                    'canvas_size': [canvas_width, canvas_height],
+                    'performance_note': 'Viewport culling only affects frontend rendering - backend simulation still processes all agents'
+                }
+                
+                # Log viewport culling effectiveness occasionally for monitoring
+                if viewport_culling and self.step_count % 300 == 0:  # Every 5 seconds
+                    if viewport_stats['culled_agents'] > 0:
+                        print(f"🔍 Viewport culling active: {viewport_stats['visible_agents']}/{viewport_stats['total_agents']} agents visible ({viewport_stats['culling_ratio']:.1%} culled)")
+                        print(f"   📐 Zoom: {zoom_used:.2f}x, Camera: ({self.camera_position[0]:.1f}, {self.camera_position[1]:.1f})")
+                        print(f"   📏 Viewport: {viewport_bounds['left']:.1f} to {viewport_bounds['right']:.1f} (width: {viewport_bounds['right'] - viewport_bounds['left']:.1f})")
+                    else:
+                        print(f"🔍 Viewport culling: ALL {viewport_stats['total_agents']} agents visible (zoom: {zoom_used:.2f}x)")
+                
+                # 1. Get agent shapes for drawing (only for viewport-visible agents)
                 robot_shapes = []
-                for agent in current_agents:
+                for agent in viewport_agents:
                     try:
                         if not agent.body:  # Skip agents without bodies
                             continue
@@ -3613,7 +3980,8 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️  Error getting ground shapes: {e}")
                 
-                # 3. Get leaderboard data (top 10 robots) - safely sorted by food consumption
+                # 3. Get leaderboard data (top 10 robots) - use all agents for leaderboard fairness
+                # NOTE: Leaderboard should show all agents regardless of viewport for fair ranking
                 try:
                     valid_stats = {k: v for k, v in self.robot_stats.items() 
                                   if k in {agent.id for agent in current_agents}}
@@ -3662,9 +4030,15 @@ class TrainingEnvironment:
                     robot_details = []
 
                 # 5. Get minimal agent data for rendering + detailed data for focused agent only
+                # Use viewport_agents for rendering, but always include focused agent
                 agents_data = []
                 try:
-                    for agent in current_agents:
+                    # Ensure focused agent is included even if outside viewport
+                    visible_agents_set = set(viewport_agents)
+                    if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
+                        visible_agents_set.add(self.focused_agent)
+                    
+                    for agent in visible_agents_set:
                         if not agent.body:  # Skip agents without bodies
                             continue
                             
@@ -3708,8 +4082,9 @@ class TrainingEnvironment:
                             #agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
                             closest_food_info = self._get_closest_food_distance_for_agent(agent)
                             
-                            # Get recent reward information
-                            recent_reward = float(getattr(agent, 'last_reward', 0.0))
+                            # Get recent reward information - use the last reward from current step
+                            recent_reward = float(getattr(agent, 'last_reward', 
+                                                 getattr(agent, 'immediate_reward', 0.0)))
                             
                             # Add detailed data to the basic agent data
                             basic_agent_data.update({
@@ -3741,9 +4116,30 @@ class TrainingEnvironment:
                 if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
                     focused_agent_id = self.focused_agent.id
 
-                # 7. Get ecosystem and environmental data
+                # 7. Get ecosystem and environmental data with viewport filtering
                 ecosystem_status = self.ecosystem_dynamics.get_ecosystem_status()
                 environmental_status = self.environmental_system.get_status()
+                
+                # Calculate filtered counts for viewport statistics
+                all_food_sources = self.ecosystem_dynamics.food_sources
+                all_obstacles = self._get_obstacle_data_for_ui()
+                
+                if viewport_culling:
+                    visible_food_sources = self._filter_food_sources_by_viewport(all_food_sources, viewport_bounds)
+                    visible_obstacles = self._filter_obstacles_by_viewport(all_obstacles, viewport_bounds)
+                else:
+                    visible_food_sources = all_food_sources
+                    visible_obstacles = all_obstacles
+                
+                # Update viewport statistics with all object types
+                viewport_stats.update({
+                    'total_food_sources': len(all_food_sources),
+                    'visible_food_sources': len(visible_food_sources),
+                    'culled_food_sources': len(all_food_sources) - len(visible_food_sources),
+                    'total_obstacles': len(all_obstacles),
+                    'visible_obstacles': len(visible_obstacles),
+                    'culled_obstacles': len(all_obstacles) - len(visible_obstacles)
+                })
                 
                 # 8. Get recent predation events for visualization
                 recent_predation_events = [
@@ -3776,7 +4172,7 @@ class TrainingEnvironment:
                                 'amount': f.amount,
                                 'max_capacity': f.max_capacity
                             }
-                            for f in self.ecosystem_dynamics.food_sources
+                            for f in visible_food_sources
                         ],
                         'predation_events': recent_predation_events,
                         'death_events': [
@@ -3811,11 +4207,19 @@ class TrainingEnvironment:
                     },
                     'environment': {
                         'status': environmental_status,
-                        'obstacles': self._get_obstacle_data_for_ui()  # Use new physics-body-based obstacle data
+                        'obstacles': visible_obstacles
                     },
                     'physics_fps': getattr(self, 'current_physics_fps', 0),
-                    'simulation_speed': self.simulation_speed_multiplier
+                    'simulation_speed': self.simulation_speed_multiplier,
+                    'viewport_culling': viewport_stats
                 }
+                
+                # Track data serialization time for performance analysis
+                serialization_time = time.time() - serialization_start
+                if hasattr(self, 'performance_timings'):
+                    self.performance_timings['data_serialization'].append(serialization_time)
+                
+                return response_data
                 
             except Exception as e:
                 print(f"❌ Critical error in get_status: {e}")
@@ -4323,7 +4727,95 @@ class TrainingEnvironment:
             'focused_agent_id': focused_agent_id,
             'zoom_override': getattr(self, '_zoom_override', None)  # Only send zoom when we want to override
         }
-    
+
+    def _calculate_viewport_bounds(self, canvas_width=1200, canvas_height=800):
+        """Calculate the world-space bounds of the current viewport using ACTUAL frontend zoom level."""
+        # Get camera parameters
+        cam_x, cam_y = self.camera_position
+        # CRITICAL FIX: Use actual frontend zoom level, not backend camera zoom
+        zoom = getattr(self, 'user_zoom_level', 1.0)  # Use the actual frontend zoom level
+        
+        # Calculate half-dimensions of the viewport in world units
+        half_width_world = (canvas_width / 2) / zoom
+        half_height_world = (canvas_height / 2) / zoom
+        
+        # Calculate viewport bounds in world coordinates
+        viewport_bounds = {
+            'left': cam_x - half_width_world,
+            'right': cam_x + half_width_world,
+            'bottom': cam_y - half_height_world,
+            'top': cam_y + half_height_world
+        }
+        
+        # Add a small margin for objects partially visible
+        margin = max(5.0, min(half_width_world, half_height_world) * 0.1)
+        viewport_bounds['left'] -= margin
+        viewport_bounds['right'] += margin
+        viewport_bounds['bottom'] -= margin
+        viewport_bounds['top'] += margin
+        
+        return viewport_bounds
+
+    def _is_object_in_viewport(self, position, size, viewport_bounds):
+        """Check if an object is visible within the viewport bounds."""
+        x, y = position
+        
+        # Object bounds
+        half_size = size / 2
+        obj_left = x - half_size
+        obj_right = x + half_size
+        obj_bottom = y - half_size
+        obj_top = y + half_size
+        
+        # Check if object overlaps with viewport
+        return not (obj_right < viewport_bounds['left'] or 
+                   obj_left > viewport_bounds['right'] or
+                   obj_top < viewport_bounds['bottom'] or 
+                   obj_bottom > viewport_bounds['top'])
+
+    def _filter_agents_by_viewport(self, agents, viewport_bounds):
+        """Filter agents to only include those visible in the viewport."""
+        visible_agents = []
+        
+        for agent in agents:
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
+            # Agent position and approximate size
+            position = (agent.body.position.x, agent.body.position.y)
+            agent_size = 4.0  # Approximate robot size including arms
+            
+            if self._is_object_in_viewport(position, agent_size, viewport_bounds):
+                visible_agents.append(agent)
+                
+        return visible_agents
+
+    def _filter_food_sources_by_viewport(self, food_sources, viewport_bounds):
+        """Filter food sources to only include those visible in the viewport."""
+        visible_food = []
+        
+        for food in food_sources:
+            position = food.position
+            food_size = 3.0  # Approximate food source size
+            
+            if self._is_object_in_viewport(position, food_size, viewport_bounds):
+                visible_food.append(food)
+                
+        return visible_food
+
+    def _filter_obstacles_by_viewport(self, obstacles, viewport_bounds):
+        """Filter obstacles to only include those visible in the viewport."""
+        visible_obstacles = []
+        
+        for obstacle in obstacles:
+            position = obstacle.get('position', (0, 0))
+            obstacle_size = obstacle.get('size', 2.0)
+            
+            if self._is_object_in_viewport(position, obstacle_size, viewport_bounds):
+                visible_obstacles.append(obstacle)
+                
+        return visible_obstacles
+
     def update_user_zoom(self, zoom_level):
         """Update the user's zoom level preference."""
         self.user_zoom_level = max(0.01, min(20, zoom_level))  # Clamp to reasonable bounds
@@ -4898,7 +5390,11 @@ def index():
 @app.route('/status')
 def status():
     """Get current training status for the web interface."""
-    return jsonify(env.get_status())
+    # Get canvas dimensions and culling preference if provided via query parameters
+    canvas_width = request.args.get('canvas_width', type=int, default=1200)
+    canvas_height = request.args.get('canvas_height', type=int, default=800)
+    viewport_culling = request.args.get('viewport_culling', default='true').lower() == 'true'
+    return jsonify(env.get_status(canvas_width, canvas_height, viewport_culling))
 
 # Add missing reward signal endpoints to training system's Flask app
 @app.route('/reward_signal_status')
@@ -5128,6 +5624,59 @@ def set_simulation_speed():
             'message': f'Simulation speed set to {speed}x',
             'speed': speed
         })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/ai_optimization_settings', methods=['GET', 'POST'])
+def ai_optimization_settings():
+    """Get or set AI optimization settings."""
+    try:
+        if request.method == 'GET':
+            return jsonify({
+                'status': 'success',
+                'settings': {
+                    'ai_optimization_enabled': env.ai_optimization_enabled,
+                    'ai_batch_percentage': env.ai_batch_percentage,
+                    'ai_spatial_culling_enabled': env.ai_spatial_culling_enabled,
+                    'ai_spatial_culling_distance': env.ai_spatial_culling_distance
+                }
+            })
+        
+        elif request.method == 'POST':
+            data = request.get_json()
+            
+            # Update settings if provided
+            if 'ai_optimization_enabled' in data:
+                env.ai_optimization_enabled = bool(data['ai_optimization_enabled'])
+            
+            if 'ai_batch_percentage' in data:
+                percentage = float(data['ai_batch_percentage'])
+                if 0.1 <= percentage <= 1.0:
+                    env.ai_batch_percentage = percentage
+                else:
+                    return jsonify({'status': 'error', 'message': 'ai_batch_percentage must be between 0.1 and 1.0'}), 400
+            
+            if 'ai_spatial_culling_enabled' in data:
+                env.ai_spatial_culling_enabled = bool(data['ai_spatial_culling_enabled'])
+            
+            if 'ai_spatial_culling_distance' in data:
+                distance = float(data['ai_spatial_culling_distance'])
+                if distance > 0:
+                    env.ai_spatial_culling_distance = distance
+                else:
+                    return jsonify({'status': 'error', 'message': 'ai_spatial_culling_distance must be positive'}), 400
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'AI optimization settings updated',
+                'settings': {
+                    'ai_optimization_enabled': env.ai_optimization_enabled,
+                    'ai_batch_percentage': env.ai_batch_percentage,
+                    'ai_spatial_culling_enabled': env.ai_spatial_culling_enabled,
+                    'ai_spatial_culling_distance': env.ai_spatial_culling_distance
+                }
+            })
+            
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
