@@ -851,9 +851,21 @@ HTML_TEMPLATE = """
                 return;
             }
             
-            // Calculate arm angles from positions
-            const shoulderAngle = Math.atan2(agent.upper_arm.y - agent.body.y, agent.upper_arm.x - agent.body.x);
-            const elbowAngle = Math.atan2(agent.lower_arm.y - agent.upper_arm.y, agent.lower_arm.x - agent.upper_arm.x);
+            // Check if agent is outside viewport (limited data available)
+            const isOutsideViewport = !data.agents.find(a => a.id === focusedAgentId);
+            const viewportWarning = isOutsideViewport ? `
+                <div style="background: rgba(255, 152, 0, 0.1); border: 1px solid #FF9800; border-radius: 4px; padding: 6px; margin-bottom: 8px; font-size: 11px;">
+                    <span style="color: #FF9800;">⚠️ Robot outside viewport - Limited data available. Pan camera to robot for full details.</span>
+                </div>
+            ` : '';
+            
+            // Calculate arm angles from positions (only if arm data is available)
+            let shoulderAngle = 0;
+            let elbowAngle = 0;
+            if (agent.upper_arm && agent.lower_arm && agent.upper_arm.x !== undefined && agent.upper_arm.y !== undefined) {
+                shoulderAngle = Math.atan2(agent.upper_arm.y - agent.body.y, agent.upper_arm.x - agent.body.x);
+                elbowAngle = Math.atan2(agent.lower_arm.y - agent.upper_arm.y, agent.lower_arm.x - agent.upper_arm.x);
+            }
             
             // Get ecosystem data
             const ecosystem = agent.ecosystem || {};
@@ -887,6 +899,7 @@ HTML_TEMPLATE = """
             const details = `
                 <div class="robot-details-title">🤖 Robot ${agent.id}</div>
                 <div class="robot-details-content">
+                    ${viewportWarning}
                     <div class="detail-section">
                         <div class="detail-row">
                             <span class="detail-label">Ecosystem Role:</span>
@@ -911,14 +924,14 @@ HTML_TEMPLATE = """
                         <!-- Alliances and territories removed -->
                         <div class="detail-row">
                             <span class="detail-label">Closest Food:</span>
-                            <span class="detail-value" style="color: ${ecosystem.closest_food_distance >= 999999 || ecosystem.closest_food_distance > 50 ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
-                                ${ecosystem.closest_food_distance >= 999999 ? 'None available' : ecosystem.closest_food_distance.toFixed(1) + 'm'}
+                            <span class="detail-value" style="color: ${(ecosystem.closest_food_distance === undefined || ecosystem.closest_food_distance >= 999999 || ecosystem.closest_food_distance > 50) ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
+                                ${ecosystem.closest_food_distance === undefined ? 'N/A (outside viewport)' : ecosystem.closest_food_distance >= 999999 ? 'None available' : ecosystem.closest_food_distance.toFixed(1) + 'm'}
                             </span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">X-Axis Distance:</span>
                             <span class="detail-value" style="color: ${ecosystem.closest_food_signed_x_distance === undefined ? '#888' : ecosystem.closest_food_signed_x_distance > 0 ? '#4CAF50' : '#FF9800'};">
-                                ${ecosystem.closest_food_signed_x_distance === undefined ? 'N/A' : (ecosystem.closest_food_signed_x_distance > 0 ? '+' : '') + ecosystem.closest_food_signed_x_distance.toFixed(1) + 'm ' + (ecosystem.closest_food_signed_x_distance > 0 ? '→' : '←')}
+                                ${ecosystem.closest_food_signed_x_distance === undefined ? 'N/A (outside viewport)' : (ecosystem.closest_food_signed_x_distance > 0 ? '+' : '') + ecosystem.closest_food_signed_x_distance.toFixed(1) + 'm ' + (ecosystem.closest_food_signed_x_distance > 0 ? '→' : '←')}
                             </span>
                         </div>
                         <div class="detail-row">
@@ -963,7 +976,7 @@ HTML_TEMPLATE = """
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Recent Reward:</span>
-                            <span class="detail-value" style="color: ${agent.recent_reward > 0 ? '#27ae60' : agent.recent_reward < 0 ? '#e74c3c' : '#f39c12'};">${(agent.recent_reward || 0).toFixed(4)}</span>
+                            <span class="detail-value" style="color: ${(agent.recent_reward || 0) > 0 ? '#27ae60' : (agent.recent_reward || 0) < 0 ? '#e74c3c' : '#f39c12'};">${(agent.recent_reward || 0).toFixed(4)}</span>
                         </div>
                         <div class="detail-row">
                             <span class="detail-label">Best Reward:</span>
@@ -979,7 +992,7 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                     
-                    ${agent.reward_components && Object.keys(agent.reward_components).length > 0 ? `
+                    ${agent.reward_components && typeof agent.reward_components === 'object' && Object.keys(agent.reward_components).length > 0 ? `
                     <div class="detail-section">
                         <div style="margin-bottom: 6px; font-weight: bold; color: #3498db;">Reward Components</div>
                         ${Object.entries(agent.reward_components).map(([key, value]) => `
