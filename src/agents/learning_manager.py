@@ -50,6 +50,11 @@ class LearningManager:
         # Individual network creation counter for logging
         self._network_creation_count = 0
         
+        # ATTENTION NETWORK MEMORY POOL - Reuse networks to prevent resource explosion
+        self._attention_network_pool: List[Any] = []  # Available networks
+        self._attention_network_pool_max_size = 10    # Max pooled networks
+        self._attention_networks_in_use: Dict[str, Any] = {}  # agent_id -> network
+        
         # Performance tracking for comparison
         self.approach_performance: Dict[LearningApproach, Dict[str, float]] = {
             approach: {
@@ -277,17 +282,11 @@ class LearningManager:
                     print(f"❌ Attention Deep Q-Learning not available for agent {agent.id}")
                     return None
                 
-                from .attention_deep_q_learning import AttentionDeepQLearning
-                
-                # Create individual attention network with fixed dimensions (don't call _get_agent_state_data during setup)
-                self._network_creation_count += 1
-                print(f"🧠 Creating Attention Network #{self._network_creation_count} for agent {agent.id[:8]}")
-                
-                attention_dqn = AttentionDeepQLearning(
-                    state_dim=5,  # Fixed: [arm_angle, elbow_angle, food_distance, food_direction, ground_contact]
-                    action_dim=len(agent.actions) if hasattr(agent, 'actions') else 9,
-                    learning_rate=0.001
-                )
+                # Acquire attention network from pool (reuse existing or create new if needed)
+                attention_dqn = self._acquire_attention_network(agent.id)
+                if not attention_dqn:
+                    print(f"❌ Failed to acquire attention network for agent {agent.id}")
+                    return None
                 
                 # Setup attention learning wrapper
                 self._setup_attention_learning_wrapper(agent, attention_dqn)
@@ -493,21 +492,17 @@ class LearningManager:
                 agent.step = agent._original_step_method
                 delattr(agent, '_original_step_method')
             
-            # CRITICAL FIX: Clean up attention deep Q-learning networks
+            # CRITICAL FIX: Return attention networks to pool instead of destroying them
             if hasattr(agent, '_attention_dqn'):
                 try:
-                    # Clear GPU memory if using CUDA
-                    if hasattr(agent._attention_dqn, 'device') and 'cuda' in str(agent._attention_dqn.device):
-                        try:
-                            import torch
-                            if torch.cuda.is_available():
-                                torch.cuda.empty_cache()
-                        except ImportError:
-                            pass  # Torch not available, skip GPU cleanup
-                    del agent._attention_dqn
-                    print(f"🧹 Cleaned up attention network for agent {agent_id}")
+                    # Return network to pool for reuse
+                    self._return_attention_network(agent_id)
+                    
+                    # Remove reference from agent
+                    delattr(agent, '_attention_dqn')
+                    print(f"♻️ Returned attention network to pool from agent {agent_id}")
                 except Exception as e:
-                    print(f"⚠️ Error cleaning attention network for agent {agent_id}: {e}")
+                    print(f"⚠️ Error returning attention network for agent {agent_id}: {e}")
             
             # Restore original choose_action method
             if hasattr(agent, '_original_choose_action'):
@@ -1054,4 +1049,79 @@ class LearningManager:
                 return (0, 0)  # Default state
         except Exception as e:
             logger.warning(f"Error getting agent state: {e}")
-            return (0, 0) 
+            return (0, 0)
+    
+    def _acquire_attention_network(self, agent_id: str):
+        """Acquire an attention network from the pool or create a new one if pool is empty."""
+        try:
+            # Try to reuse an existing network from the pool
+            if self._attention_network_pool:
+                network = self._attention_network_pool.pop()
+                self._attention_networks_in_use[agent_id] = network
+                print(f"♻️ Reused Attention Network for agent {agent_id[:8]} (pool: {len(self._attention_network_pool)} available)")
+                return network
+            
+            # Pool is empty, create a new network
+            from .attention_deep_q_learning import AttentionDeepQLearning
+            
+            self._network_creation_count += 1
+            print(f"🧠 Creating NEW Attention Network #{self._network_creation_count} for agent {agent_id[:8]} (pool empty)")
+            
+            network = AttentionDeepQLearning(
+                state_dim=5,  # Fixed: [arm_angle, elbow_angle, food_distance, food_direction, ground_contact]
+                action_dim=6,  # Fixed: Must match agent action count (not 9)
+                learning_rate=0.001
+            )
+            
+            self._attention_networks_in_use[agent_id] = network
+            return network
+            
+        except Exception as e:
+            print(f"❌ Error acquiring attention network for agent {agent_id}: {e}")
+            return None
+    
+    def _return_attention_network(self, agent_id: str):
+        """Return an attention network to the pool when agent no longer needs it."""
+        try:
+            if agent_id not in self._attention_networks_in_use:
+                return  # Agent doesn't have a network
+            
+            network = self._attention_networks_in_use.pop(agent_id)
+            
+            # Only return to pool if we have space and network is valid
+            if (len(self._attention_network_pool) < self._attention_network_pool_max_size and 
+                network is not None):
+                
+                # Reset network state for reuse (optional - could preserve some learning)
+                try:
+                    # Clear attention history but keep learned weights
+                    if hasattr(network, 'attention_history'):
+                        network.attention_history.clear()
+                    print(f"♻️ Returned Attention Network to pool from agent {agent_id[:8]} (pool: {len(self._attention_network_pool) + 1} total)")
+                except Exception as e:
+                    print(f"⚠️ Error resetting network state: {e}")
+                
+                self._attention_network_pool.append(network)
+            else:
+                # Pool is full or network is invalid, destroy it
+                try:
+                    if hasattr(network, 'device') and 'cuda' in str(network.device):
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    del network
+                    print(f"🧹 Destroyed excess Attention Network from agent {agent_id[:8]} (pool full or invalid)")
+                except Exception as e:
+                    print(f"⚠️ Error destroying attention network: {e}")
+                    
+        except Exception as e:
+            print(f"⚠️ Error returning attention network for agent {agent_id}: {e}")
+    
+    def get_attention_pool_stats(self) -> Dict[str, int]:
+        """Get statistics about the attention network pool."""
+        return {
+            'networks_in_pool': len(self._attention_network_pool),
+            'networks_in_use': len(self._attention_networks_in_use), 
+            'total_networks_created': self._network_creation_count,
+            'pool_max_size': self._attention_network_pool_max_size
+        } 
