@@ -313,25 +313,91 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             super().apply_action(action)
 
     def get_evolutionary_fitness(self) -> float:
-        """Calculate comprehensive fitness including morphological efficiency."""
+        """Calculate comprehensive fitness including morphological efficiency and coordination."""
         base_fitness = self.total_reward
         
-        # Efficiency bonus: reward for achieving good results with reasonable parameters
+        # Enhanced fitness calculation for multi-limb robots
+        total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+        
+        # 1. MORPHOLOGICAL COMPLEXITY BONUS
+        # Reward for successfully controlling complex morphologies
+        complexity_bonus = 0.0
+        if base_fitness > 0.1:  # Only if robot is actually successful
+            if total_joints > 6:  # Complex robots
+                # Graduated complexity bonus
+                if total_joints <= 10:
+                    complexity_bonus = 0.05  # Moderate complexity
+                elif total_joints <= 15:
+                    complexity_bonus = 0.08  # High complexity  
+                else:
+                    complexity_bonus = 0.12  # Very high complexity
+                
+                # Scale bonus by actual performance
+                complexity_bonus *= min(1.0, base_fitness / 0.5)
+        
+        # 2. EFFICIENCY SCORING
+        # Reward for achieving good results with reasonable parameters
         efficiency_score = 0.0
         
-        # Penalize extreme parameter values
-        param_penalty = 0.0
-        if self.physical_params.body_width > 2.5 or self.physical_params.body_height > 1.2:
-            param_penalty += 0.1
-        if self.physical_params.motor_torque > 250:
-            param_penalty += 0.05
-        
-        # Bonus for moderate, efficient designs
+        # Parameter efficiency (existing logic enhanced)
         if (0.8 < self.physical_params.body_width < 2.0 and
             100 < self.physical_params.motor_torque < 200):
-            efficiency_score += 0.1
+            efficiency_score += 0.08
         
-        return base_fitness + efficiency_score - param_penalty
+        # Joint count efficiency - reward for not over-engineering
+        if 4 <= total_joints <= 12:  # Sweet spot for complexity
+            efficiency_score += 0.04
+        elif total_joints > 18:  # Potentially over-engineered
+            efficiency_score -= 0.02
+        
+        # 3. PARAMETER PENALTIES (Enhanced)
+        param_penalty = 0.0
+        
+        # Size penalties
+        if self.physical_params.body_width > 2.5 or self.physical_params.body_height > 1.2:
+            param_penalty += 0.08
+        
+        # Motor penalties  
+        if self.physical_params.motor_torque > 250:
+            param_penalty += 0.04
+        
+        # Extreme complexity penalty
+        if total_joints > 20:  # Very high complexity
+            param_penalty += 0.06 * ((total_joints - 20) / 10.0)
+        
+        # 4. SPECIALIZATION BONUS
+        # Reward for specialized morphologies that perform well
+        specialization_bonus = 0.0
+        if hasattr(self.physical_params, 'limb_specialization') and base_fitness > 0.2:
+            if self.physical_params.limb_specialization != "general":
+                # Specialized robots get bonus if they're performing well
+                specialization_bonus = 0.03
+        
+        # 5. GENERATION BONUS
+        # Small bonus for evolved robots (not first generation)
+        generation_bonus = 0.0
+        if self.generation > 0 and base_fitness > 0.1:
+            # Reward for successful evolution (up to 5 generations)
+            generation_bonus = min(0.02, self.generation * 0.005)
+        
+        # 6. LONGEVITY BONUS  
+        # Reward for robots that survive longer (if step count available)
+        longevity_bonus = 0.0
+        if hasattr(self, 'steps') and self.steps > 100:
+            # Small bonus for long-lived successful robots
+            if base_fitness > 0.05:
+                longevity_bonus = min(0.03, (self.steps - 100) / 5000.0)
+        
+        # Calculate final fitness
+        final_fitness = (base_fitness + 
+                        complexity_bonus + 
+                        efficiency_score + 
+                        specialization_bonus + 
+                        generation_bonus + 
+                        longevity_bonus - 
+                        param_penalty)
+        
+        return final_fitness
 
     def evolve_with(self, other: 'EvolutionaryCrawlingAgent', 
                    mutation_rate: float = 0.1) -> 'EvolutionaryCrawlingAgent':
@@ -801,3 +867,125 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         except Exception as e:
             print(f"⚠️ Error in destroy() for agent {getattr(self, 'id', 'unknown')}: {e}")
             self._destroyed = True 
+
+    def _get_coordination_reward(self) -> float:
+        """Calculate advanced coordination reward for multi-limb robots."""
+        try:
+            if not hasattr(self, 'limb_joints') or not self.limb_joints:
+                return super()._get_coordination_reward()  # Fall back to basic coordination
+            
+            total_coordination_reward = 0.0
+            total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+            
+            # 1. INTER-LIMB COORDINATION REWARD
+            # Reward for symmetric limb movement patterns  
+            if self.physical_params.num_arms >= 2:
+                limb_speeds = []
+                for limb_joints in self.limb_joints:
+                    limb_speed = 0.0
+                    for joint in limb_joints:
+                        if joint:
+                            limb_speed += abs(joint.motorSpeed)
+                    limb_speeds.append(limb_speed)
+                
+                if len(limb_speeds) >= 2:
+                    # Reward for balanced limb usage (avoid over-reliance on one limb)
+                    speed_variance = np.var(limb_speeds) if len(limb_speeds) > 1 else 0
+                    if speed_variance < 1.0:  # Low variance = good balance
+                        total_coordination_reward += 0.04
+                    
+                    # Bonus for symmetric movement (front limbs similar, back limbs similar)
+                    if len(limb_speeds) == 2:  # Two limbs
+                        speed_diff = abs(limb_speeds[0] - limb_speeds[1])
+                        if speed_diff < 0.5:  # Similar speeds
+                            total_coordination_reward += 0.03
+            
+            # 2. INTRA-LIMB COORDINATION REWARD  
+            # Reward for smooth joint chains within each limb
+            for limb_joints in self.limb_joints:
+                if len(limb_joints) >= 2:
+                    joint_speeds = [abs(joint.motorSpeed) if joint else 0 for joint in limb_joints]
+                    
+                    # Reward for proximal-to-distal coordination (base joint leads, tip follows)
+                    if len(joint_speeds) >= 2:
+                        base_speed = joint_speeds[0]
+                        tip_speed = joint_speeds[-1]
+                        
+                        # Natural coordination: base joint slightly more active
+                        if 0.1 < base_speed < 3.0 and 0.1 < tip_speed < 2.0:
+                            if base_speed >= tip_speed * 0.8:  # Base leads or matches
+                                total_coordination_reward += 0.02
+            
+            # 3. COMPLEXITY BONUS/PENALTY
+            # More complex robots get bonus for successful coordination
+            # But penalty if they're just flailing around
+            if total_joints > 6:  # Complex robots (more than 6 joints)
+                active_joints = sum(1 for limb_joints in self.limb_joints 
+                                  for joint in limb_joints 
+                                  if joint and abs(joint.motorSpeed) > 0.1)
+                
+                joint_usage_ratio = active_joints / total_joints
+                
+                # Reward for using reasonable portion of joints (not all or none)
+                if 0.3 <= joint_usage_ratio <= 0.8:
+                    complexity_bonus = 0.03 * (total_joints / 18.0)  # Scale with complexity
+                    total_coordination_reward += complexity_bonus
+                elif joint_usage_ratio < 0.2:  # Under-utilizing complex morphology
+                    total_coordination_reward -= 0.02
+                elif joint_usage_ratio > 0.9:  # Over-activating (likely inefficient)
+                    total_coordination_reward -= 0.01
+            
+            # 4. MORPHOLOGY-SPECIFIC REWARDS
+            # Reward based on limb specialization
+            if hasattr(self.physical_params, 'limb_specialization'):
+                if self.physical_params.limb_specialization == "climbing":
+                    # Climbing robots benefit from alternating limb patterns
+                    # (Implementation would check for alternating patterns)
+                    total_coordination_reward += 0.01
+                elif self.physical_params.limb_specialization == "digging":
+                    # Digging robots benefit from synchronized power strokes
+                    # (Implementation would check for synchronized patterns)
+                    total_coordination_reward += 0.01
+            
+            # Cap the coordination reward to prevent it from dominating
+            return np.clip(total_coordination_reward, -0.05, 0.08)
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating coordination reward for agent {self.id}: {e}")
+            return 0.0
+    
+    def _get_energy_efficiency_reward(self, displacement: float) -> float:
+        """Enhanced energy efficiency reward for multi-limb robots."""
+        try:
+            if displacement <= 0:
+                return 0.0
+            
+            # Multi-limb robots have more complex energy calculations
+            if hasattr(self, 'limb_joints') and self.limb_joints:
+                total_energy_cost = 0.0
+                active_joints = 0
+                
+                for limb_joints in self.limb_joints:
+                    for joint in limb_joints:
+                        if joint and abs(joint.motorSpeed) > 0.1:
+                            # Energy cost proportional to torque and speed
+                            energy_cost = joint.maxMotorTorque * abs(joint.motorSpeed) / 1000.0
+                            total_energy_cost += energy_cost
+                            active_joints += 1
+                
+                if total_energy_cost > 0 and active_joints > 0:
+                    # Efficiency = movement achieved per unit energy
+                    efficiency = displacement / total_energy_cost
+                    
+                    # Scale reward based on morphology complexity
+                    total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+                    complexity_factor = min(1.0, total_joints / 10.0)  # More complex = higher standards
+                    
+                    efficiency_reward = min(0.08, efficiency * 0.05 * complexity_factor)
+                    return efficiency_reward
+            
+            # Fallback to parent class method
+            return super()._get_energy_efficiency_reward(displacement)
+            
+        except Exception as e:
+            return super()._get_energy_efficiency_reward(displacement) 

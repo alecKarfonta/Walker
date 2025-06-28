@@ -209,15 +209,16 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             print(f"❌ Error in learning for agent {self.id}: {e}")
 
     def get_crawling_reward(self, prev_x: float) -> float:
-        """Calculate reward for crawling behavior."""
+        """Calculate enhanced reward for crawling behavior with multi-limb robot support."""
         current_x = self.body.position.x
         total_reward = 0.0
         
-        # Forward progress reward
+        # 1. FORWARD PROGRESS REWARD (Core movement reward)
         displacement = current_x - prev_x
         if displacement > 0.003:
             progress_reward = displacement * 8.0
-            # Bonus for sustained movement
+            
+            # Sustained movement bonus
             if hasattr(self, 'recent_displacements'):
                 self.recent_displacements.append(displacement)
                 if len(self.recent_displacements) > 10:
@@ -225,25 +226,97 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 if len(self.recent_displacements) >= 5:
                     avg_displacement = sum(self.recent_displacements) / len(self.recent_displacements)
                     if avg_displacement > 0.005:
-                        progress_reward *= 1.5
+                        progress_reward *= 1.5  # Sustained movement bonus
             else:
                 self.recent_displacements = [displacement]
         elif displacement < -0.0005:
-            progress_reward = displacement * 1.0
+            progress_reward = displacement * 1.0  # Small backward penalty
         else:
             progress_reward = 0.0
         
-        total_reward += progress_reward * 0.4
+        total_reward += progress_reward * 0.35  # Reduced from 0.4 to make room for other rewards
         
-        # Food approach reward
+        # 2. FOOD APPROACH REWARD (Enhanced weight)
         food_approach_reward = self._get_food_approach_reward()
-        total_reward += food_approach_reward * 0.15
-                
-        # Clip reward
-        total_reward = np.clip(total_reward, -0.5, 0.5)
+        total_reward += food_approach_reward * 0.20  # Increased from 0.15
+        
+        # 3. STABILITY REWARD (New - especially important for multi-limb robots)
+        stability_reward = self._get_stability_reward()
+        total_reward += stability_reward * 0.15
+        
+        # 4. ENERGY EFFICIENCY REWARD (New - rewards efficient movement)
+        efficiency_reward = self._get_energy_efficiency_reward(displacement)
+        total_reward += efficiency_reward * 0.15
+        
+        # 5. COORDINATION REWARD (New - for multi-limb robots)
+        coordination_reward = self._get_coordination_reward()
+        total_reward += coordination_reward * 0.15
+        
+        # Clip final reward
+        total_reward = np.clip(total_reward, -0.75, 0.75)  # Slightly expanded range
         
         return total_reward
         
+    def _get_stability_reward(self) -> float:
+        """Calculate reward for maintaining stable posture."""
+        try:
+            if not hasattr(self, 'body') or not self.body:
+                return 0.0
+            
+            # Reward for staying upright (angle close to 0)
+            body_angle = abs(self.body.angle)
+            if body_angle < 0.2:  # Very stable
+                return 0.08
+            elif body_angle < 0.5:  # Moderately stable  
+                return 0.04
+            elif body_angle > 1.5:  # Very unstable
+                return -0.04
+            else:
+                return 0.0
+                
+        except Exception:
+            return 0.0
+    
+    def _get_energy_efficiency_reward(self, displacement: float) -> float:
+        """Calculate reward for energy-efficient movement."""
+        try:
+            if displacement <= 0:
+                return 0.0
+            
+            # Calculate "energy cost" based on action intensity
+            if hasattr(self, 'current_action_tuple') and self.current_action_tuple:
+                action_intensity = sum(abs(a) for a in self.current_action_tuple) / len(self.current_action_tuple)
+                
+                # Reward high movement with low action intensity (efficiency)
+                if action_intensity > 0.1:
+                    efficiency = displacement / action_intensity
+                    return min(0.06, efficiency * 0.02)
+            
+            return 0.0
+            
+        except Exception:
+            return 0.0
+    
+    def _get_coordination_reward(self) -> float:
+        """Calculate reward for good limb coordination (for multi-limb robots)."""
+        try:
+            # This is overridden in EvolutionaryCrawlingAgent for multi-limb robots
+            # Basic robots get a small base coordination reward for smooth joint movement
+            if hasattr(self, 'upper_arm_joint') and hasattr(self, 'lower_arm_joint'):
+                if self.upper_arm_joint and self.lower_arm_joint:
+                    # Reward for coordinated joint movement (not fighting each other)
+                    upper_speed = abs(self.upper_arm_joint.motorSpeed)
+                    lower_speed = abs(self.lower_arm_joint.motorSpeed)
+                    
+                    # Small bonus for active but coordinated movement
+                    if 0.1 < upper_speed < 2.0 and 0.1 < lower_speed < 2.0:
+                        return 0.02
+            
+            return 0.0
+            
+        except Exception:
+            return 0.0
+
     def step(self, dt: float):
         """Main step function with clean learning integration."""
         # Initialize action if needed
