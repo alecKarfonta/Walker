@@ -708,30 +708,104 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         ]
     
     def _create_evolutionary_wheels(self):
-        """Create wheels using evolved physical parameters."""
+        """Create wheels using evolved physical parameters with advanced variability."""
         self.wheels = []
-        leg_spread = self.physical_params.leg_spread
-        suspension = self.physical_params.suspension
         
-        wheel_positions = [(-leg_spread/2, -suspension), (leg_spread/2, -suspension)]
+        # Check if robot has any wheels at all
+        if self.physical_params.num_wheels == 0:
+            return  # Wheel-less robot (pure arm-based locomotion)
         
-        for wheel_pos in wheel_positions:
-            wheel = self.world.CreateDynamicBody(
-                position=self.body.GetWorldPoint(wheel_pos),
-                fixtures=[
-                    b2.b2FixtureDef(
-                        shape=b2.b2CircleShape(radius=self.physical_params.wheel_radius),
-                        density=self.physical_params.wheel_density,
-                        friction=self.physical_params.wheel_friction,
-                        restitution=self.physical_params.wheel_restitution,
-                        filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
-                    )
-                ]
-            )
-            self.wheels.append(wheel)
+        # Use advanced wheel configuration
+        for i in range(self.physical_params.num_wheels):
+            if i < len(self.physical_params.wheel_positions):
+                wheel_pos = self.physical_params.wheel_positions[i]
+                wheel_size = self.physical_params.wheel_sizes[i] if i < len(self.physical_params.wheel_sizes) else 0.5
+                wheel_angle = self.physical_params.wheel_angles[i] if i < len(self.physical_params.wheel_angles) else 0.0
+                wheel_type = self.physical_params.wheel_types[i] if i < len(self.physical_params.wheel_types) else "circle"
+                wheel_stiffness = self.physical_params.wheel_stiffness[i] if i < len(self.physical_params.wheel_stiffness) else 1.0
+                
+                # Apply asymmetry if specified
+                if "wheels" in self.physical_params.asymmetric_features:
+                    asymmetry_factor = self.physical_params.left_right_asymmetry
+                    if self.physical_params.dominant_side == "left" and wheel_pos[0] < 0:
+                        wheel_size *= (1.0 + asymmetry_factor * 0.5)
+                    elif self.physical_params.dominant_side == "right" and wheel_pos[0] > 0:
+                        wheel_size *= (1.0 + asymmetry_factor * 0.5)
+                    elif wheel_pos[0] < 0:  # Left side smaller if right dominant
+                        wheel_size *= (1.0 - asymmetry_factor * 0.3)
+                    elif wheel_pos[0] > 0:  # Right side smaller if left dominant
+                        wheel_size *= (1.0 - asymmetry_factor * 0.3)
+                
+                # Create wheel shape based on type
+                wheel_shape = self._create_wheel_shape(wheel_type, wheel_size)
+                
+                # Calculate world position with angle offset
+                local_pos = (wheel_pos[0], wheel_pos[1] + wheel_angle * 0.2)  # Slight height adjustment for angled wheels
+                world_pos = self.body.GetWorldPoint(local_pos)
+                
+                # Create wheel body with dynamic properties
+                wheel_density = self.physical_params.wheel_density * wheel_stiffness
+                wheel_friction = self.physical_params.wheel_friction
+                
+                # Adjust friction based on wheel type
+                if wheel_type == "bumpy":
+                    wheel_friction *= 1.4  # Better grip
+                elif wheel_type == "star":
+                    wheel_friction *= 1.2  # Slightly better grip
+                elif wheel_type == "oval":
+                    wheel_friction *= 0.9  # Slightly less grip
+                
+                wheel = self.world.CreateDynamicBody(
+                    position=world_pos,
+                    fixtures=[
+                        b2.b2FixtureDef(
+                            shape=wheel_shape,
+                            density=wheel_density,
+                            friction=wheel_friction,
+                            restitution=self.physical_params.wheel_restitution,
+                            filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
+                        )
+                    ]
+                )
+                self.wheels.append(wheel)
+    
+    def _create_wheel_shape(self, wheel_type: str, radius: float):
+        """Create different wheel shapes based on type."""
+        if wheel_type == "circle":
+            return b2.b2CircleShape(radius=radius)
+        elif wheel_type == "oval":
+            # Approximate oval with elongated circle
+            return b2.b2CircleShape(radius=radius * 0.8)  # Will be stretched during attachment
+        elif wheel_type == "star":
+            # Star shape using polygon (simplified to pentagon for physics stability)
+            vertices = []
+            num_points = 5
+            for i in range(num_points):
+                angle = 2 * np.pi * i / num_points
+                # Alternate between inner and outer radius for star effect
+                r = radius if i % 2 == 0 else radius * 0.6
+                x = r * np.cos(angle)
+                y = r * np.sin(angle)
+                vertices.append((x, y))
+            return b2.b2PolygonShape(vertices=vertices)
+        elif wheel_type == "bumpy":
+            # Bumpy wheel using octagon for better ground contact
+            vertices = []
+            num_sides = 8
+            for i in range(num_sides):
+                angle = 2 * np.pi * i / num_sides
+                # Slight radius variation for bumpy effect
+                r = radius * (0.9 + 0.2 * (i % 2))
+                x = r * np.cos(angle)
+                y = r * np.sin(angle)
+                vertices.append((x, y))
+            return b2.b2PolygonShape(vertices=vertices)
+        else:
+            # Default to circle
+            return b2.b2CircleShape(radius=radius)
     
     def _create_evolutionary_joints(self):
-        """Create joints using evolved physical parameters."""
+        """Create joints using evolved physical parameters with advanced wheel support."""
         # Set primary joint references for backward compatibility
         if hasattr(self, 'limb_joints') and self.limb_joints:
             first_limb_joints = self.limb_joints[0]
@@ -740,24 +814,38 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             if len(first_limb_joints) >= 2:
                 self.lower_arm_joint = first_limb_joints[1]
         
-        # Create wheel joints
+        # Create wheel joints for advanced wheel system
         self.wheel_joints = []
-        if hasattr(self, 'wheels') and self.wheels:
-            leg_spread = self.physical_params.leg_spread
-            suspension = self.physical_params.suspension
-            wheel_positions = [(-leg_spread/2, -suspension), (leg_spread/2, -suspension)]
-            
-            for i, wheel_pos in enumerate(wheel_positions):
-                if i < len(self.wheels):
-                    joint = self.world.CreateRevoluteJoint(
-                        bodyA=self.body,
-                        bodyB=self.wheels[i],
-                        localAnchorA=wheel_pos,
-                        localAnchorB=(0, 0),
-                        enableMotor=False,
-                    )
+        if hasattr(self, 'wheels') and self.wheels and self.physical_params.num_wheels > 0:
+            for i, wheel in enumerate(self.wheels):
+                if i < len(self.physical_params.wheel_positions):
+                    wheel_pos = self.physical_params.wheel_positions[i]
+                    wheel_angle = self.physical_params.wheel_angles[i] if i < len(self.physical_params.wheel_angles) else 0.0
+                    wheel_stiffness = self.physical_params.wheel_stiffness[i] if i < len(self.physical_params.wheel_stiffness) else 1.0
+                    
+                    # Create different joint types based on wheel configuration
+                    if abs(wheel_angle) < 0.1:  # Standard vertical wheel
+                        joint = self.world.CreateRevoluteJoint(
+                            bodyA=self.body,
+                            bodyB=wheel,
+                            localAnchorA=wheel_pos,
+                            localAnchorB=(0, 0),
+                            enableMotor=False,
+                        )
+                    else:  # Angled wheel (like castor wheels or splayed legs)
+                        # Use distance joint for more flexible attachment
+                        joint = self.world.CreateDistanceJoint(
+                            bodyA=self.body,
+                            bodyB=wheel,
+                            localAnchorA=wheel_pos,
+                            localAnchorB=(0, 0),
+                            length=0.0,  # Rigid connection
+                            frequency=wheel_stiffness * 5.0,  # Suspension frequency
+                            dampingRatio=0.7
+                        )
+                    
                     self.wheel_joints.append(joint)
-    
+
     def apply_action_to_joints(self, action_tuple: Tuple) -> None:
         """Apply action tuple to the robot's joints."""
         if not hasattr(self, 'limb_joints') or not self.limb_joints:

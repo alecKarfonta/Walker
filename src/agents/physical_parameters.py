@@ -36,12 +36,25 @@ class PhysicalParameters:
     overall_scale: float = 1.0    # Overall size multiplier (0.5 = tiny, 2.0 = giant)
     body_aspect_ratio: float = 2.0 # Length to width ratio (like different animal proportions)
     
+    # NEW: Body segmentation (like insects, arthropods, vertebrates)
+    num_body_segments: int = 1    # Number of body segments (1-3: single, thorax+abdomen, head+thorax+abdomen)
+    segment_size_ratios: List[float] = field(default_factory=lambda: [1.0])  # Relative sizes of each segment
+    segment_connections: List[str] = field(default_factory=lambda: ["rigid"])  # Connection types: "rigid", "flexible", "ball_joint"
+    inter_segment_spacing: float = 0.0  # Gap between segments (0.0 = touching, 0.5 = significant gap)
+    segment_angles: List[float] = field(default_factory=lambda: [0.0])  # Relative angles between segments
+    
     # NEW: Arm attachment and configuration (massive biological diversity!)
     arm_attachment_x: float = 0.0     # Where along body length arm attaches (-1.0 to 1.0)
     arm_attachment_y: float = 0.5     # How high on body arm attaches (0.0 = bottom, 1.0 = top)
     num_arms: int = 1                 # Number of arms (1-6, like insects, spiders, etc.)
     arm_symmetry: float = 1.0         # Symmetry between left/right arms (1.0 = identical, 0.0 = completely different)
     arm_angle_offset: float = 0.0     # Base angle offset for arm positioning
+    
+    # NEW: Enhanced arm attachment system (arms can attach anywhere around body perimeter!)
+    arm_attachment_positions: List[Tuple[float, float, float]] = field(default_factory=lambda: [(0.0, 0.5, 0.0)])  # (x_along_body, y_height, angle_around_perimeter)
+    arm_attachment_styles: List[str] = field(default_factory=lambda: ["side"])  # "side", "top", "bottom", "angled", "radial"
+    per_arm_asymmetry: List[float] = field(default_factory=lambda: [0.0])  # Individual arm asymmetry factors
+    arm_spacing_pattern: str = "even"  # "even", "clustered", "front_heavy", "back_heavy", "random"
     
     # NEW: Variable limb segments (like different joint configurations!)
     segments_per_limb: int = 2        # Number of segments per limb (2-3, like different animals)
@@ -90,10 +103,17 @@ class PhysicalParameters:
     
     # NEW: Wheel/leg evolution (like different animal feet!)
     wheel_shape: str = "circle"       # "circle", "oval", "star", "bumpy" (like paws, hooves, etc.)
-    num_wheels: int = 2               # Number of wheels/legs (2-8, like different animals)
+    num_wheels: int = 2               # Number of wheels/legs (0-6, like different animals)
     wheel_asymmetry: float = 0.0      # Left/right wheel size difference
     leg_angle: float = 0.0            # Angle of leg attachment (splayed out vs straight down)
     wheel_size_variation: float = 0.0 # Variation in wheel sizes (0.0 = all same, 1.0 = very different)
+    
+    # NEW: Advanced wheel configuration
+    wheel_positions: List[Tuple[float, float]] = field(default_factory=lambda: [(-1.0, -0.75), (1.0, -0.75)])  # (x, y) positions relative to body
+    wheel_sizes: List[float] = field(default_factory=lambda: [0.5, 0.5])  # Individual wheel radii
+    wheel_angles: List[float] = field(default_factory=lambda: [0.0, 0.0])  # Individual wheel mounting angles
+    wheel_types: List[str] = field(default_factory=lambda: ["circle", "circle"])  # Individual wheel shapes
+    wheel_stiffness: List[float] = field(default_factory=lambda: [1.0, 1.0])  # Individual wheel suspension stiffness
     
     # NEW: Action space configuration for dynamic control
     action_combination_style: str = "independent"  # "independent", "paired", "sequential", "coordinated"
@@ -110,6 +130,25 @@ class PhysicalParameters:
     tail_length: float = 1.0          # Length of tail if present
     tail_flexibility: float = 1.0     # How flexible the tail is
     appendage_count: int = 0          # Additional small appendages (0-3)
+    
+    # NEW: Structural features and surface details
+    surface_features: str = "smooth"  # "smooth", "spiny", "bumpy", "ridged", "plated"
+    spine_count: int = 0              # Number of defensive spines (0-8)
+    spine_positions: List[str] = field(default_factory=lambda: [])  # "top", "sides", "back", "front"
+    surface_texture_scale: float = 1.0  # How pronounced surface features are
+    armor_thickness: float = 1.0      # Thickness of protective plating
+    
+    # NEW: Asymmetric design system (like flatfish, crabs with different-sized claws)
+    left_right_asymmetry: float = 0.0   # Overall left-right asymmetry (0.0 = symmetric, 1.0 = very different)
+    asymmetric_features: List[str] = field(default_factory=lambda: [])  # "arms", "wheels", "body", "spines"
+    dominant_side: str = "none"         # "left", "right", "none" - which side is larger/stronger
+    asymmetry_type: str = "size"       # "size", "shape", "position", "function"
+    
+    # NEW: Modular attachments (like barnacles, symbiotic growths)
+    has_modules: bool = False          # Whether robot has modular attachments
+    module_count: int = 0              # Number of modules (0-4)
+    module_types: List[str] = field(default_factory=lambda: [])  # "sensor", "storage", "armor", "spike"
+    module_positions: List[Tuple[float, float]] = field(default_factory=lambda: [])  # Where modules attach
     
     # NEW: Material and structural properties (like bone vs cartilage)
     body_rigidity: float = 1.0        # How rigid the body structure is (0.5 = flexible, 2.0 = very rigid)
@@ -358,7 +397,7 @@ class PhysicalParameters:
             wheel_shapes = ["circle", "oval", "star", "bumpy"]
             mutated.wheel_shape = random.choice(wheel_shapes)
         if random.random() < mutation_rate:
-            mutated.num_wheels = max(2, min(8, self.num_wheels + random.choice([-1, 0, 1])))
+            mutated.num_wheels = max(0, min(6, self.num_wheels + random.choice([-1, 0, 1])))
         if random.random() < mutation_rate:
             mutated.wheel_asymmetry = self._mutate_bounded(
                 self.wheel_asymmetry, 0.3, 0.0, 0.5
@@ -424,6 +463,165 @@ class PhysicalParameters:
                 self.structural_reinforcement, 0.3, 0.5, 2.0
             )
         
+        # NEW: Body segmentation mutations (insect-like evolution!)
+        if random.random() < mutation_rate:
+            new_segments = max(1, min(3, self.num_body_segments + random.choice([-1, 0, 1])))
+            mutated.num_body_segments = new_segments
+            
+            # Resize segment arrays to match new segment count
+            mutated.segment_size_ratios = self._resize_array(
+                self.segment_size_ratios, new_segments, default_value=1.0
+            )
+            mutated.segment_connections = self._resize_string_array(
+                self.segment_connections, new_segments, default_value="rigid"
+            )
+            mutated.segment_angles = self._resize_array(
+                self.segment_angles, new_segments, default_value=0.0
+            )
+        
+        if random.random() < mutation_rate:
+            mutated.segment_size_ratios = [
+                self._mutate_bounded(ratio, 0.3, 0.3, 2.5) for ratio in mutated.segment_size_ratios
+            ]
+        if random.random() < mutation_rate:
+            connection_types = ["rigid", "flexible", "ball_joint"]
+            mutated.segment_connections = [
+                random.choice(connection_types) if random.random() < 0.3 else conn 
+                for conn in mutated.segment_connections
+            ]
+        if random.random() < mutation_rate:
+            mutated.inter_segment_spacing = self._mutate_bounded(
+                self.inter_segment_spacing, 0.3, 0.0, 0.8
+            )
+        if random.random() < mutation_rate:
+            mutated.segment_angles = [
+                self._mutate_bounded(angle, 0.3, -np.pi/6, np.pi/6) for angle in mutated.segment_angles
+            ]
+        
+        # NEW: Advanced wheel system mutations (revolutionary locomotion!)
+        if random.random() < mutation_rate:
+            new_wheel_count = max(0, min(6, self.num_wheels + random.choice([-1, 0, 1])))
+            mutated.num_wheels = new_wheel_count
+            
+            # Resize wheel arrays to match new wheel count
+            mutated.wheel_positions = self._resize_wheel_positions(new_wheel_count)
+            mutated.wheel_sizes = self._resize_array(
+                self.wheel_sizes, new_wheel_count, default_value=0.5
+            )
+            mutated.wheel_angles = self._resize_array(
+                self.wheel_angles, new_wheel_count, default_value=0.0
+            )
+            mutated.wheel_types = self._resize_string_array(
+                self.wheel_types, new_wheel_count, default_value="circle"
+            )
+            mutated.wheel_stiffness = self._resize_array(
+                self.wheel_stiffness, new_wheel_count, default_value=1.0
+            )
+        
+        # Mutate individual wheel properties
+        if random.random() < mutation_rate:
+            mutated.wheel_sizes = [
+                self._mutate_bounded(size, 0.3, 0.2, 1.2) for size in mutated.wheel_sizes
+            ]
+        if random.random() < mutation_rate:
+            mutated.wheel_angles = [
+                self._mutate_bounded(angle, 0.3, -np.pi/3, np.pi/3) for angle in mutated.wheel_angles
+            ]
+        if random.random() < mutation_rate:
+            wheel_shape_options = ["circle", "oval", "star", "bumpy"]
+            mutated.wheel_types = [
+                random.choice(wheel_shape_options) if random.random() < 0.3 else wtype 
+                for wtype in mutated.wheel_types
+            ]
+        if random.random() < mutation_rate:
+            mutated.wheel_stiffness = [
+                self._mutate_bounded(stiff, 0.3, 0.3, 3.0) for stiff in mutated.wheel_stiffness
+            ]
+        
+        # NEW: Enhanced arm attachment mutations (arms anywhere on body!)
+        if random.random() < mutation_rate:
+            new_arm_count = mutated.num_arms
+            # Resize arm attachment arrays
+            mutated.arm_attachment_positions = self._resize_arm_positions(new_arm_count)
+            mutated.arm_attachment_styles = self._resize_string_array(
+                self.arm_attachment_styles, new_arm_count, default_value="side"
+            )
+            mutated.per_arm_asymmetry = self._resize_array(
+                self.per_arm_asymmetry, new_arm_count, default_value=0.0
+            )
+        
+        if random.random() < mutation_rate:
+            attachment_styles = ["side", "top", "bottom", "angled", "radial"]
+            mutated.arm_attachment_styles = [
+                random.choice(attachment_styles) if random.random() < 0.3 else style 
+                for style in mutated.arm_attachment_styles
+            ]
+        if random.random() < mutation_rate:
+            spacing_patterns = ["even", "clustered", "front_heavy", "back_heavy", "random"]
+            mutated.arm_spacing_pattern = random.choice(spacing_patterns)
+        if random.random() < mutation_rate:
+            mutated.per_arm_asymmetry = [
+                self._mutate_bounded(asym, 0.3, 0.0, 1.0) for asym in mutated.per_arm_asymmetry
+            ]
+        
+        # NEW: Structural features mutations (spines, bumps, armor!)
+        if random.random() < mutation_rate:
+            surface_types = ["smooth", "spiny", "bumpy", "ridged", "plated"]
+            mutated.surface_features = random.choice(surface_types)
+        if random.random() < mutation_rate:
+            mutated.spine_count = max(0, min(8, self.spine_count + random.choice([-1, 0, 1])))
+            # Update spine positions based on count
+            if mutated.spine_count > 0:
+                position_options = ["top", "sides", "back", "front"]
+                mutated.spine_positions = random.sample(position_options, 
+                    min(mutated.spine_count, len(position_options)))
+            else:
+                mutated.spine_positions = []
+        if random.random() < mutation_rate:
+            mutated.surface_texture_scale = self._mutate_bounded(
+                self.surface_texture_scale, 0.3, 0.5, 3.0
+            )
+        if random.random() < mutation_rate:
+            mutated.armor_thickness = self._mutate_bounded(
+                self.armor_thickness, 0.3, 0.5, 2.5
+            )
+        
+        # NEW: Asymmetric design mutations (like real animals!)
+        if random.random() < mutation_rate:
+            mutated.left_right_asymmetry = self._mutate_bounded(
+                self.left_right_asymmetry, 0.3, 0.0, 1.0
+            )
+        if random.random() < mutation_rate:
+            asymmetric_options = ["arms", "wheels", "body", "spines"]
+            # Randomly add or remove asymmetric features
+            if random.random() < 0.5 and len(mutated.asymmetric_features) < 3:
+                new_feature = random.choice(asymmetric_options)
+                if new_feature not in mutated.asymmetric_features:
+                    mutated.asymmetric_features.append(new_feature)
+            elif mutated.asymmetric_features:
+                mutated.asymmetric_features.pop(random.randint(0, len(mutated.asymmetric_features) - 1))
+        if random.random() < mutation_rate:
+            dominant_options = ["left", "right", "none"]
+            mutated.dominant_side = random.choice(dominant_options)
+        if random.random() < mutation_rate:
+            asymmetry_types = ["size", "shape", "position", "function"]
+            mutated.asymmetry_type = random.choice(asymmetry_types)
+        
+        # NEW: Modular attachment mutations (barnacle-like growths!)
+        if random.random() < mutation_rate:
+            mutated.has_modules = not self.has_modules if random.random() < 0.3 else self.has_modules
+        if random.random() < mutation_rate:
+            mutated.module_count = max(0, min(4, self.module_count + random.choice([-1, 0, 1])))
+            # Update module arrays based on count
+            if mutated.module_count > 0:
+                module_type_options = ["sensor", "storage", "armor", "spike"]
+                mutated.module_types = [random.choice(module_type_options) for _ in range(mutated.module_count)]
+                mutated.module_positions = [(random.uniform(-1.0, 1.0), random.uniform(-0.5, 1.0)) 
+                                          for _ in range(mutated.module_count)]
+            else:
+                mutated.module_types = []
+                mutated.module_positions = []
+        
         return mutated
     
     def _mutate_bounded(self, value: float, mutation_strength: float, 
@@ -470,6 +668,55 @@ class PhysicalParameters:
             result.extend([default_value] * (new_size - len(result)))
         
         return result
+    
+    def _resize_string_array(self, original_array: List[str], new_size: int, default_value: str) -> List[str]:
+        """Resize a string array to a new size, preserving existing values and filling with defaults."""
+        result = original_array.copy()
+        
+        if len(result) > new_size:
+            result = result[:new_size]
+        elif len(result) < new_size:
+            result.extend([default_value] * (new_size - len(result)))
+        
+        return result
+    
+    def _resize_wheel_positions(self, new_wheel_count: int) -> List[Tuple[float, float]]:
+        """Generate wheel positions for the specified number of wheels."""
+        if new_wheel_count == 0:
+            return []
+        elif new_wheel_count == 1:
+            return [(0.0, -0.75)]  # Center wheel
+        elif new_wheel_count == 2:
+            return [(-1.0, -0.75), (1.0, -0.75)]  # Standard left-right
+        elif new_wheel_count == 3:
+            return [(-1.0, -0.75), (0.0, -0.75), (1.0, -0.75)]  # Tricycle
+        elif new_wheel_count == 4:
+            return [(-1.2, -0.75), (-0.4, -0.75), (0.4, -0.75), (1.2, -0.75)]  # Quad
+        elif new_wheel_count == 5:
+            return [(-1.5, -0.75), (-0.75, -0.75), (0.0, -0.75), (0.75, -0.75), (1.5, -0.75)]  # Five wheels
+        else:  # 6 wheels
+            return [(-1.5, -0.75), (-0.9, -0.75), (-0.3, -0.75), (0.3, -0.75), (0.9, -0.75), (1.5, -0.75)]
+    
+    def _resize_arm_positions(self, new_arm_count: int) -> List[Tuple[float, float, float]]:
+        """Generate arm attachment positions for the specified number of arms."""
+        if new_arm_count == 0:
+            return []
+        elif new_arm_count == 1:
+            return [(0.0, 0.5, 0.0)]  # Single arm at center-side
+        elif new_arm_count == 2:
+            return [(0.0, 0.5, 0.0), (0.0, 0.5, np.pi)]  # Left and right sides
+        elif new_arm_count == 3:
+            return [(0.2, 0.5, 0.0), (-0.2, 0.5, 0.0), (0.0, 0.8, np.pi/2)]  # Two sides + top
+        elif new_arm_count == 4:
+            return [(0.0, 0.5, 0.0), (0.0, 0.5, np.pi), (0.0, 0.8, np.pi/2), (0.0, 0.2, -np.pi/2)]  # Four cardinal directions
+        elif new_arm_count == 5:
+            # Pentagon arrangement
+            angles = [i * 2 * np.pi / 5 for i in range(5)]
+            return [(0.0, 0.6, angle) for angle in angles]
+        else:  # 6 arms
+            # Hexagon arrangement
+            angles = [i * np.pi / 3 for i in range(6)]
+            return [(0.0, 0.6, angle) for angle in angles]
     
     def crossover(self, other: 'PhysicalParameters', 
                  crossover_rate: float = 0.5) -> 'PhysicalParameters':
@@ -678,7 +925,7 @@ class PhysicalParameters:
         valid_wheel_shapes = ["circle", "oval", "star", "bumpy"]
         if repaired.wheel_shape not in valid_wheel_shapes:
             repaired.wheel_shape = "circle"
-        repaired.num_wheels = max(2, min(8, int(repaired.num_wheels)))
+        repaired.num_wheels = max(0, min(6, int(repaired.num_wheels)))
         repaired.wheel_asymmetry = np.clip(repaired.wheel_asymmetry, 0.0, 0.5)
         repaired.leg_angle = np.clip(repaired.leg_angle, -np.pi/4, np.pi/4)
         repaired.wheel_size_variation = np.clip(repaired.wheel_size_variation, 0.0, 1.0)
@@ -707,6 +954,121 @@ class PhysicalParameters:
         if repaired.weight_distribution not in valid_weight_distributions:
             repaired.weight_distribution = "center"
         repaired.structural_reinforcement = np.clip(repaired.structural_reinforcement, 0.5, 2.0)
+        
+        # NEW: Body segmentation validation
+        repaired.num_body_segments = max(1, min(3, int(repaired.num_body_segments)))
+        
+        # Ensure segment arrays match the number of segments
+        target_segments = repaired.num_body_segments
+        repaired.segment_size_ratios = repaired._resize_array(
+            repaired.segment_size_ratios, target_segments, 1.0
+        )
+        repaired.segment_connections = repaired._resize_string_array(
+            repaired.segment_connections, target_segments, "rigid"
+        )
+        repaired.segment_angles = repaired._resize_array(
+            repaired.segment_angles, target_segments, 0.0
+        )
+        
+        # Validate segment parameter values
+        repaired.segment_size_ratios = [np.clip(ratio, 0.3, 2.5) for ratio in repaired.segment_size_ratios]
+        valid_connections = ["rigid", "flexible", "ball_joint"]
+        repaired.segment_connections = [
+            conn if conn in valid_connections else "rigid" for conn in repaired.segment_connections
+        ]
+        repaired.inter_segment_spacing = np.clip(repaired.inter_segment_spacing, 0.0, 0.8)
+        repaired.segment_angles = [np.clip(angle, -np.pi/6, np.pi/6) for angle in repaired.segment_angles]
+        
+        # NEW: Advanced wheel system validation
+        repaired.num_wheels = max(0, min(6, int(repaired.num_wheels)))
+        
+        # Ensure wheel arrays match the number of wheels
+        target_wheels = repaired.num_wheels
+        if len(repaired.wheel_positions) != target_wheels:
+            repaired.wheel_positions = repaired._resize_wheel_positions(target_wheels)
+        repaired.wheel_sizes = repaired._resize_array(
+            repaired.wheel_sizes, target_wheels, 0.5
+        )
+        repaired.wheel_angles = repaired._resize_array(
+            repaired.wheel_angles, target_wheels, 0.0
+        )
+        repaired.wheel_types = repaired._resize_string_array(
+            repaired.wheel_types, target_wheels, "circle"
+        )
+        repaired.wheel_stiffness = repaired._resize_array(
+            repaired.wheel_stiffness, target_wheels, 1.0
+        )
+        
+        # Validate wheel parameter values
+        repaired.wheel_sizes = [np.clip(size, 0.2, 1.2) for size in repaired.wheel_sizes]
+        repaired.wheel_angles = [np.clip(angle, -np.pi/3, np.pi/3) for angle in repaired.wheel_angles]
+        valid_wheel_types = ["circle", "oval", "star", "bumpy"]
+        repaired.wheel_types = [
+            wtype if wtype in valid_wheel_types else "circle" for wtype in repaired.wheel_types
+        ]
+        repaired.wheel_stiffness = [np.clip(stiff, 0.3, 3.0) for stiff in repaired.wheel_stiffness]
+        
+        # NEW: Enhanced arm attachment validation
+        target_arms = repaired.num_arms
+        if len(repaired.arm_attachment_positions) != target_arms:
+            repaired.arm_attachment_positions = repaired._resize_arm_positions(target_arms)
+        repaired.arm_attachment_styles = repaired._resize_string_array(
+            repaired.arm_attachment_styles, target_arms, "side"
+        )
+        repaired.per_arm_asymmetry = repaired._resize_array(
+            repaired.per_arm_asymmetry, target_arms, 0.0
+        )
+        
+        # Validate arm attachment values
+        valid_arm_styles = ["side", "top", "bottom", "angled", "radial"]
+        repaired.arm_attachment_styles = [
+            style if style in valid_arm_styles else "side" for style in repaired.arm_attachment_styles
+        ]
+        valid_spacing_patterns = ["even", "clustered", "front_heavy", "back_heavy", "random"]
+        if repaired.arm_spacing_pattern not in valid_spacing_patterns:
+            repaired.arm_spacing_pattern = "even"
+        repaired.per_arm_asymmetry = [np.clip(asym, 0.0, 1.0) for asym in repaired.per_arm_asymmetry]
+        
+        # NEW: Structural features validation
+        valid_surface_features = ["smooth", "spiny", "bumpy", "ridged", "plated"]
+        if repaired.surface_features not in valid_surface_features:
+            repaired.surface_features = "smooth"
+        repaired.spine_count = max(0, min(8, int(repaired.spine_count)))
+        valid_spine_positions = ["top", "sides", "back", "front"]
+        repaired.spine_positions = [
+            pos for pos in repaired.spine_positions if pos in valid_spine_positions
+        ]
+        repaired.surface_texture_scale = np.clip(repaired.surface_texture_scale, 0.5, 3.0)
+        repaired.armor_thickness = np.clip(repaired.armor_thickness, 0.5, 2.5)
+        
+        # NEW: Asymmetric design validation
+        repaired.left_right_asymmetry = np.clip(repaired.left_right_asymmetry, 0.0, 1.0)
+        valid_asymmetric_features = ["arms", "wheels", "body", "spines"]
+        repaired.asymmetric_features = [
+            feat for feat in repaired.asymmetric_features if feat in valid_asymmetric_features
+        ]
+        valid_dominant_sides = ["left", "right", "none"]
+        if repaired.dominant_side not in valid_dominant_sides:
+            repaired.dominant_side = "none"
+        valid_asymmetry_types = ["size", "shape", "position", "function"]
+        if repaired.asymmetry_type not in valid_asymmetry_types:
+            repaired.asymmetry_type = "size"
+        
+        # NEW: Modular attachments validation
+        repaired.module_count = max(0, min(4, int(repaired.module_count)))
+        valid_module_types = ["sensor", "storage", "armor", "spike"]
+        repaired.module_types = [
+            mtype for mtype in repaired.module_types if mtype in valid_module_types
+        ]
+        # Ensure module arrays match module count
+        if len(repaired.module_types) != repaired.module_count:
+            if repaired.module_count > 0:
+                repaired.module_types = [random.choice(valid_module_types) for _ in range(repaired.module_count)]
+                repaired.module_positions = [(random.uniform(-1.0, 1.0), random.uniform(-0.5, 1.0)) 
+                                          for _ in range(repaired.module_count)]
+            else:
+                repaired.module_types = []
+                repaired.module_positions = []
         
         return repaired
     
