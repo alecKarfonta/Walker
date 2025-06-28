@@ -187,11 +187,11 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
         # Copy weights to target network
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        self.attention_history = deque(maxlen=1000) 
+        self.attention_history = deque(maxlen=5000)  # Increased from 1000 to 5000
         
-        # Performance optimization tracking
+        # Performance optimization tracking - MUCH less aggressive
         self._last_cleanup_time = time.time()
-        self._cleanup_interval = 30.0  # Clean up every 30 seconds
+        self._cleanup_interval = 300.0  # Clean up every 5 minutes instead of 30 seconds
         
         print(f"🦾 Arm Control Attention-based Deep Q-Learning initialized with {self.device}")
         print(f"   📊 Network parameters: {sum(p.numel() for p in self.q_network.parameters()):,}")
@@ -377,25 +377,26 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
         }
     
     def _cleanup_attention_data(self):
-        """Clean up accumulated attention data to prevent memory growth."""
+        """Clean up accumulated attention data to prevent memory growth - LESS AGGRESSIVE."""
         try:
-            # Clear old attention history entries (keep only recent ones)
+            # Much more conservative cleanup to preserve learning data
             current_time = time.time()
             if hasattr(self, 'attention_history'):
-                # Remove entries older than 5 minutes
-                cutoff_time = current_time - 300.0
+                # Remove entries older than 30 minutes (was 5 minutes)
+                cutoff_time = current_time - 1800.0  # 30 minutes instead of 5 minutes
+                
+                # Keep more records - minimum 500, maximum 5000
+                old_size = len(self.attention_history)
                 self.attention_history = deque([
                     entry for entry in self.attention_history 
                     if entry.get('timestamp', current_time) > cutoff_time
-                ], maxlen=50)
+                ], maxlen=5000)  # Increased from 50 to 5000
+                
+                # Only log if significant cleanup happened
+                if old_size - len(self.attention_history) > 100:
+                    print(f"🧹 Cleaned attention data: {len(self.attention_history)} records remaining (removed {old_size - len(self.attention_history)} old entries)")
             
-            # Force garbage collection of GPU memory if available
-            if self.device.type == 'cuda':
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            
-            print(f"🧹 Cleaned attention data: {len(self.attention_history)} records remaining")
+            # REMOVED: GPU cache clearing - this was too aggressive and frequent
             
         except Exception as e:
             print(f"⚠️ Error cleaning attention data: {e}")

@@ -58,7 +58,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             (-1, 0), (0, -1), (-1, -1)
         ]
         
-        self.state_size = 5  # For attention networks: [joint_angles, velocity, spatial_info]
+        # Dynamic state size: 2 joints + 3 metadata for basic robots
+        self.state_size = 5  # For attention networks: 2 joint angles + 3 metadata (velocity, stability, progress)
         self.action_size = len(self.actions)
         
         # Basic tracking
@@ -102,7 +103,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
             
             if learning_manager:
                 # Use Learning Manager's pooling system - this is the ONLY way to get networks
-                self._learning_system = learning_manager._acquire_attention_network(self.id)
+                self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
                 if self._learning_system:
                     print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
                     return
@@ -139,25 +140,40 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
     def get_state_representation(self):
         """
         Get state representation for attention-based neural networks.
+        Uses dynamic size based on robot morphology (2 joints + 3 metadata for basic robots).
         Always returns numpy array for neural network input.
         """
         try:
-            # Neural network state representation
+            # DYNAMIC STATE SIZE: 2 joints + 3 metadata = 5 elements for basic robots
+            joint_count = 2  # Basic robots have 2 joints (shoulder, elbow)
+            state_size = joint_count + 3
+            
+            # Initialize state array with exact size needed
+            state_array = np.zeros(state_size, dtype=np.float32)
+            
+            # Get basic robot joint angles
             state = self.get_state()
             shoulder_angle = np.tanh(state[5])  # Normalize to [-1, 1]
             elbow_angle = np.tanh(state[6])     # Normalize to [-1, 1]
             
+            # Fill joint positions
+            state_array[0] = shoulder_angle  # First joint
+            state_array[1] = elbow_angle     # Second joint
+            
+            # Physical state information (last 3 elements)
             velocity = np.tanh(self.body.linearVelocity.x / 5.0)
             stability = np.tanh(self.body.angle * 2.0)
             progress = np.tanh((self.body.position.x - self.prev_x) * 10.0)
             
-            return np.array([
-                shoulder_angle, elbow_angle, velocity, stability, progress
-            ], dtype=np.float32)
+            state_array[joint_count] = velocity      # velocity
+            state_array[joint_count + 1] = stability  # stability  
+            state_array[joint_count + 2] = progress   # progress
+            
+            return state_array
                 
         except Exception as e:
             print(f"⚠️ Error getting state for agent {self.id}: {e}")
-            return np.zeros(5, dtype=np.float32)
+            return np.zeros(5, dtype=np.float32)  # Basic robot: 2 joints + 3 metadata
 
     def choose_action(self) -> int:
         """Choose action using attention-based learning system."""

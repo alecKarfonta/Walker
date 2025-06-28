@@ -32,137 +32,153 @@ class LearningManager:
     """
     
     def __init__(self, ecosystem_interface=None, training_environment=None):
-        self.ecosystem_interface = ecosystem_interface
-        self.training_environment = training_environment
-        
-        # Track which approach each agent is using
-        self.agent_approaches: Dict[str, LearningApproach] = {}
-        
-        # Store learning adapters for each agent
-        self.agent_adapters: Dict[str, Any] = {}
-        
-        # Store original Q-tables for fallback
-        self.agent_original_qtables: Dict[str, Any] = {}
-        
-        # Deep learning training coordination
-        self._agents_currently_training: set = set()
-        
-        # Individual network creation counter for logging
-        self._network_creation_count = 0
-        
-        # ATTENTION NETWORK MEMORY POOL - Reuse networks to prevent resource explosion
-        self._attention_network_pool: List[Any] = []  # Available networks
-        self._attention_network_pool_max_size = 10    # Max pooled networks
-        self._attention_networks_in_use: Dict[str, Any] = {}  # agent_id -> network
-        
-        # Missing attribute that was causing the error
-        self._attention_networks_created = 0
-        
-        # NETWORK CREATION TRACKING
-        self._network_stats = {
-            'total_created': 0,
-            'total_reused': 0,
-            'current_in_use': 0,
-            'current_in_pool': 0,
-            'peak_networks_in_use': 0,
-            'networks_destroyed': 0
-        }
-        
-        # GPU USAGE TRACKING
-        self._gpu_stats = {
-            'initial_memory_mb': 0,
-            'current_memory_mb': 0,
-            'peak_memory_mb': 0,
-            'last_update_time': 0
-        }
-        
-        # Initialize GPU baseline
-        self._update_gpu_stats()
-        
-        # Performance tracking for comparison
-        self.approach_performance: Dict[LearningApproach, Dict[str, float]] = {
-            approach: {
-                'total_reward': 0.0,
-                'learning_speed': 0.0,
-                'food_consumed': 0,
-                'survival_time': 0.0,
-                'agent_count': 0
-            }
-            for approach in LearningApproach
-        }
-        
-        # Learning approach metadata
-        self.approach_info = {
-            LearningApproach.BASIC_Q_LEARNING: {
-                'name': 'Basic Q-Learning',
-                'description': 'Simple tabular Q-learning with fixed exploration',
-                'color': '#808080',  # Gray
-                'icon': '🔤',
-                'state_space': '~144 states',
-                'advantages': ['Fast', 'Simple', 'Interpretable'],
-                'disadvantages': ['Limited state representation', 'Slow learning']
-            },
-            LearningApproach.ENHANCED_Q_LEARNING: {
-                'name': 'Enhanced Q-Learning',
-                'description': 'Advanced tabular Q-learning with adaptive rates and exploration bonuses',
-                'color': '#3498db',  # Blue
-                'icon': '⚡',
-                'state_space': '~144 states',
-                'advantages': ['Adaptive learning', 'Confidence-based actions', 'Experience replay'],
-                'disadvantages': ['Still limited state space', 'Movement-focused rewards']
-            },
-            LearningApproach.SURVIVAL_Q_LEARNING: {
-                'name': 'Survival Q-Learning',
-                'description': 'Enhanced Q-learning focused on survival with ecosystem awareness',
-                'color': '#27ae60',  # Green
-                'icon': '🍃',
-                'state_space': '~40,960 states',
-                'advantages': ['Survival-focused', 'Food awareness', 'Progressive learning stages'],
-                'disadvantages': ['Larger state space', 'More complex']
-            },
-            LearningApproach.DEEP_Q_LEARNING: {
-                'name': 'Deep Q-Learning',
-                'description': 'Neural network-based Q-learning with continuous state representation',
-                'color': '#9b59b6',  # Purple
-                'icon': '🧠',
-                'state_space': 'Continuous',
-                'advantages': ['Scalable', 'Continuous states', 'High performance ceiling'],
-                'disadvantages': ['Requires GPU', 'Slower startup', 'Less interpretable']
-            },
-            LearningApproach.ATTENTION_DEEP_Q_LEARNING: {
-                'name': 'Attention Deep Q-Learning',
-                'icon': '🔍',
-                'description': 'Neural network with multi-head attention mechanisms'
-            },
-            LearningApproach.ELITE_IMITATION_LEARNING: {
-                'name': 'Elite Imitation Learning',
-                'icon': '🎭',
-                'description': 'Learn from elite agent behavioral patterns'
-            }
-        }
-        
-        # Import enhanced learning systems
+        """Initialize Learning Manager with comprehensive learning approaches."""
         try:
-            from .attention_deep_q_learning import AttentionDeepQLearning
-            from .elite_imitation_learning import EliteImitationLearning
-            self.attention_deep_q_available = True
-            self.elite_imitation_available = True
-        except ImportError as e:
-            logger.warning(f"Enhanced learning systems not available: {e}")
-            self.attention_deep_q_available = False
-            self.elite_imitation_available = False
-        
-        # Elite imitation learning system (shared across all agents)
-        if self.elite_imitation_available:
-            self.elite_imitation = EliteImitationLearning(
-                imitation_probability=0.3,
-                elite_update_interval=500,
-                pattern_extraction_window=100
-            )
-        else:
+            # Core learning systems
+            self.ecosystem_interface = ecosystem_interface
+            self.training_environment = training_environment
+            
+            # Agent adapters for different learning approaches
+            self.agent_adapters = {}  # Maps agent_id to adapter instances
+            self.agent_approaches = {}  # Maps agent_id to LearningApproach
+            
+            # Store original Q-tables for fallback
+            self.agent_original_qtables = {}  # Maps agent_id to original qtable
+            
+            # Performance tracking
+            self.approach_performance = {approach: {'agent_count': 0, 'total_reward': 0.0, 'food_consumed': 0.0, 'survival_time': 0.0} for approach in LearningApproach}
+            self.approach_info = {
+                LearningApproach.BASIC_Q_LEARNING: {
+                    'name': 'Basic Q-Learning',
+                    'description': 'Standard Q-learning with state-action pairs',
+                    'complexity': 'Low',
+                    'memory_usage': 'Low',
+                    'learning_speed': 'Fast',
+                    'icon': '🔤',
+                    'color': '#808080',
+                    'state_space': '~144 states',
+                    'advantages': ['Fast', 'Simple', 'Interpretable'],
+                    'disadvantages': ['Limited state representation', 'Slow learning']
+                },
+                LearningApproach.ENHANCED_Q_LEARNING: {
+                    'name': 'Enhanced Q-Learning',
+                    'description': 'Advanced Q-learning with enhanced features',
+                    'complexity': 'Medium',
+                    'memory_usage': 'Medium',
+                    'learning_speed': 'Medium',
+                    'icon': '⚡',
+                    'color': '#3498db',
+                    'state_space': '~144 states',
+                    'advantages': ['Adaptive learning', 'Confidence-based actions', 'Experience replay'],
+                    'disadvantages': ['Still limited state space', 'Movement-focused rewards']
+                },
+                LearningApproach.SURVIVAL_Q_LEARNING: {
+                    'name': 'Survival Q-Learning',
+                    'description': 'Specialized Q-learning for survival scenarios',
+                    'complexity': 'Medium',
+                    'memory_usage': 'Medium',
+                    'learning_speed': 'Medium',
+                    'icon': '🍃',
+                    'color': '#27ae60',
+                    'state_space': '~40,960 states',
+                    'advantages': ['Survival-focused', 'Food awareness', 'Progressive learning stages'],
+                    'disadvantages': ['Larger state space', 'More complex']
+                },
+                LearningApproach.DEEP_Q_LEARNING: {
+                    'name': 'Deep Q-Learning',
+                    'description': 'Neural network-based deep Q-learning',
+                    'complexity': 'High',
+                    'memory_usage': 'High',
+                    'learning_speed': 'Slow',
+                    'icon': '🧠',
+                    'color': '#9b59b6',
+                    'state_space': 'Continuous',
+                    'advantages': ['Scalable', 'Continuous states', 'High performance ceiling'],
+                    'disadvantages': ['Requires GPU', 'Slower startup', 'Less interpretable']
+                },
+                LearningApproach.ATTENTION_DEEP_Q_LEARNING: {
+                    'name': 'Attention Deep Q-Learning',
+                    'description': 'Advanced neural networks with attention mechanisms',
+                    'complexity': 'Very High',
+                    'memory_usage': 'Very High',
+                    'learning_speed': 'Very Slow',
+                    'icon': '🔍',
+                    'color': '#e74c3c',
+                    'state_space': 'Variable (5-21 dimensions)',
+                    'advantages': ['Variable state size', 'Multi-limb support', 'Attention mechanisms'],
+                    'disadvantages': ['Very complex', 'High GPU requirements', 'Slow convergence']
+                },
+                LearningApproach.ELITE_IMITATION_LEARNING: {
+                    'name': 'Elite Imitation Learning',
+                    'description': 'Learning by imitating successful agents',
+                    'complexity': 'High',
+                    'memory_usage': 'High',
+                    'learning_speed': 'Medium',
+                    'icon': '🎭',
+                    'color': '#f39c12',
+                    'state_space': 'Behavioral patterns',
+                    'advantages': ['Learn from elite agents', 'Pattern extraction', 'Social learning'],
+                    'disadvantages': ['Requires elite agents', 'Limited to observed behaviors']
+                }
+            }
+            
+            # Check for optional deep learning systems
+            self.deep_q_available = self._check_deep_q_availability()
+            self.attention_deep_q_available = self._check_attention_deep_q_availability()
+            self.elite_imitation_available = self._check_elite_imitation_availability()
+            
+            # Initialize enhanced learning systems
             self.elite_imitation = None
-        
-        print("🎛️ LearningManager initialized - Ready for flexible approach switching")
+            if self.elite_imitation_available:
+                try:
+                    from .elite_imitation_learning import EliteImitationLearning
+                    self.elite_imitation = EliteImitationLearning()
+                    print("✅ Elite imitation learning system initialized")
+                except ImportError as e:
+                    print(f"⚠️ Elite imitation learning not available: {e}")
+                    self.elite_imitation_available = False
+            
+            # DIMENSION-AWARE ATTENTION NETWORK POOLING
+            # Replace single pool with pools for each network architecture
+            self._attention_network_pools = {}  # Dict[(state_size, action_size)] = [networks]
+            self._attention_networks_in_use = {}  # agent_id -> network
+            self._attention_networks_created = 0
+            self._attention_network_pool_max_size = 8  # Max networks per dimension combination
+            
+            # Network creation and performance tracking
+            self._agents_currently_training = set()
+            self._network_creation_count = 0
+            
+            # Statistics tracking
+            self._network_stats = {
+                'total_created': 0,
+                'total_reused': 0,
+                'current_in_use': 0,
+                'current_in_pool': 0,
+                'peak_networks_in_use': 0,
+                'networks_destroyed': 0,
+                'pool_architectures': 0  # Number of different architectures in pools
+            }
+            
+            # GPU monitoring
+            self._gpu_stats = {
+                'current_memory_mb': 0,
+                'peak_memory_mb': 0,
+                'initial_memory_mb': 0,
+                'last_update_time': 0
+            }
+            
+            print("🔧 Learning Manager initialized with dimension-aware network pooling")
+            
+        except Exception as e:
+            print(f"❌ Error initializing Learning Manager: {e}")
+            # Initialize with minimal functionality
+            self.agent_adapters = {}
+            self.agent_approaches = {}
+            self.approach_performance = {}
+            self._attention_network_pools = {}
+            self._attention_networks_in_use = {}
+            self._attention_networks_created = 0
     
     def get_agent_approach(self, agent_id: str) -> LearningApproach:
         """Get the current learning approach for an agent."""
@@ -242,7 +258,7 @@ class LearningManager:
                 return None
             
             # Acquire attention network from pool (reuse existing or create new if needed)
-            attention_dqn = self._acquire_attention_network(agent.id)
+            attention_dqn = self._acquire_attention_network(agent.id, 6, 5)  # Default to 6 actions, 5 state dimensions
             if not attention_dqn:
                 print(f"❌ Failed to acquire attention network for agent {agent.id}")
                 return None
@@ -767,7 +783,7 @@ class LearningManager:
                         action_size = len(agent.actions)
                     
                     # Get attention network with correct action space for this agent
-                    network = self._acquire_attention_network(agent.id, action_size)
+                    network = self._acquire_attention_network(agent.id, action_size, agent.state_size)
                     if network:
                         agent._learning_system = network
                         assigned_count += 1
@@ -1036,7 +1052,7 @@ class LearningManager:
             logger.warning(f"Error getting agent state: {e}")
             return (0, 0)
     
-    def _acquire_attention_network(self, agent_id: str, action_size: int = 6):
+    def _acquire_attention_network(self, agent_id: str, action_size: int = 6, state_size: int = 5):
         """Acquire an attention network from the pool or create a new one if pool is empty."""
         try:
             # CRITICAL: Check if agent already has a network (from transfer)
@@ -1046,10 +1062,10 @@ class LearningManager:
                 return existing_network
             
             # PRIORITY FIX: Try to reuse from pool FIRST before creating new networks
-            if self._attention_network_pool:
-                network = self._attention_network_pool.pop()
+            if self._attention_network_pools.get((state_size, action_size)):
+                network = self._attention_network_pools[(state_size, action_size)].pop()
                 self._attention_networks_in_use[agent_id] = network
-                print(f"♻️ REUSED Attention Network from pool for agent {agent_id[:8]} (pool: {len(self._attention_network_pool)} left)")
+                print(f"♻️ REUSED Attention Network from pool for agent {agent_id[:8]} (pool: {len(self._attention_network_pools[(state_size, action_size)])} left)")
                 return network
             
             # Create NEW network only if pool is empty (this should be rare now)
@@ -1060,7 +1076,7 @@ class LearningManager:
             from .attention_deep_q_learning import AttentionDeepQLearning
             
             attention_dqn = AttentionDeepQLearning(
-                state_dim=5,  # Fixed state size for all agents
+                state_dim=state_size,  # Dynamic state size based on robot morphology
                 action_dim=action_size,  # Correct action size for this agent's morphology
                 learning_rate=0.001
             )
@@ -1079,6 +1095,10 @@ class LearningManager:
                 
             print(f"🧠 NEW Attention Network #{self._attention_networks_created} for agent {agent_id[:8]} (created: {self._attention_networks_created}{gpu_mem})")
             print(f"⚠️ POOL WAS EMPTY - consider increasing pool size or reducing agent death rate")
+            
+            # DON'T add to pool - assign to agent
+            self._attention_networks_in_use[agent_id] = attention_dqn
+            
             return attention_dqn
             
         except Exception as e:
@@ -1096,8 +1116,27 @@ class LearningManager:
             # Update stats - network no longer in use
             self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
             
+            # Get network dimensions safely
+            network_state_dim = getattr(network, 'state_dim', None)
+            network_action_dim = getattr(network, 'action_dim', None)
+            
+            if network_state_dim is None or network_action_dim is None:
+                # Can't determine dimensions, destroy the network
+                print(f"🧹 Destroying network with unknown dimensions from agent {agent_id[:8]}")
+                try:
+                    del network
+                    self._network_stats['networks_destroyed'] += 1
+                except:
+                    pass
+                return
+            
+            # Initialize pool for this architecture if needed
+            pool_key = (network_state_dim, network_action_dim)
+            if pool_key not in self._attention_network_pools:
+                self._attention_network_pools[pool_key] = []
+            
             # Only return to pool if we have space and network is valid
-            if (len(self._attention_network_pool) < self._attention_network_pool_max_size and 
+            if (len(self._attention_network_pools[pool_key]) < self._attention_network_pool_max_size and 
                 network is not None):
                 
                 # Reset network state for reuse (optional - could preserve some learning)
@@ -1108,12 +1147,13 @@ class LearningManager:
                 except Exception as e:
                     print(f"⚠️ Error resetting network state: {e}")
                 
-                self._attention_network_pool.append(network)
+                self._attention_network_pools[pool_key].append(network)
                 
                 # Update pool stats
-                self._network_stats['current_in_pool'] = len(self._attention_network_pool)
+                self._network_stats['current_in_pool'] = sum(len(networks) for networks in self._attention_network_pools.values())
+                self._network_stats['pool_architectures'] = len(self._attention_network_pools)
                 
-                print(f"♻️ Returned Attention Network to pool from agent {agent_id[:8]} (pool: {len(self._attention_network_pool)}, in_use: {self._network_stats['current_in_use']})")
+                print(f"♻️ Returned Attention Network to pool from agent {agent_id[:8]} (pool[{network_state_dim},{network_action_dim}]: {len(self._attention_network_pools[pool_key])}, in_use: {self._network_stats['current_in_use']})")
             else:
                 # Pool is full or network is invalid, destroy it
                 try:
@@ -1135,11 +1175,18 @@ class LearningManager:
                     
         except Exception as e:
             print(f"⚠️ Error returning attention network for agent {agent_id}: {e}")
+            # Fallback: destroy the network if we have it
+            try:
+                if 'network' in locals():
+                    del network
+                    self._network_stats['networks_destroyed'] += 1
+            except:
+                pass
     
     def get_attention_pool_stats(self) -> Dict[str, int]:
         """Get statistics about the attention network pool."""
         return {
-            'networks_in_pool': len(self._attention_network_pool),
+            'networks_in_pool': sum(len(networks) for networks in self._attention_network_pools.values()),
             'networks_in_use': len(self._attention_networks_in_use), 
             'total_networks_created': self._network_creation_count,
             'pool_max_size': self._attention_network_pool_max_size
@@ -1149,7 +1196,7 @@ class LearningManager:
         """Get comprehensive statistics including network creation and GPU usage."""
         # Update current stats
         self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
-        self._network_stats['current_in_pool'] = len(self._attention_network_pool)
+        self._network_stats['current_in_pool'] = sum(len(networks) for networks in self._attention_network_pools.values())
         self._update_gpu_stats()
         
         return {
@@ -1159,7 +1206,8 @@ class LearningManager:
                 'reuse_rate': (self._network_stats['total_reused'] / 
                               max(1, self._network_stats['total_created'] + self._network_stats['total_reused']) * 100),
                 'memory_efficiency': (self._gpu_stats['current_memory_mb'] - self._gpu_stats['initial_memory_mb']),
-                'pool_utilization': (len(self._attention_network_pool) / self._attention_network_pool_max_size * 100)
+                'pool_utilization': (sum(len(networks) for networks in self._attention_network_pools.values()) / 
+                                    self._attention_network_pool_max_size * 100)
             }
         }
     
@@ -1192,9 +1240,10 @@ class LearningManager:
             'total_created': 0,
             'total_reused': 0,
             'current_in_use': len(self._attention_networks_in_use),
-            'current_in_pool': len(self._attention_network_pool),
+            'current_in_pool': sum(len(networks) for networks in self._attention_network_pools.values()),
             'peak_networks_in_use': 0,
-            'networks_destroyed': 0
+            'networks_destroyed': 0,
+            'pool_architectures': len(self._attention_network_pools)
         }
         
         # Reset GPU baseline
@@ -1254,8 +1303,10 @@ class LearningManager:
         try:
             # Clean up attention network data if present
             if hasattr(agent, '_attention_dqn') and agent._attention_dqn:
-                if hasattr(agent._attention_dqn, '_cleanup_attention_data'):
-                    agent._attention_dqn._cleanup_attention_data()
+                # REMOVED: External cleanup call that bypasses internal timing
+                # The attention network now manages its own cleanup schedule (every 5 minutes)
+                # if hasattr(agent._attention_dqn, '_cleanup_attention_data'):
+                #     agent._attention_dqn._cleanup_attention_data()
                 
                 # Limit experience replay buffer size
                 if hasattr(agent._attention_dqn, 'memory'):
@@ -1280,3 +1331,27 @@ class LearningManager:
             
         except Exception as e:
             print(f"⚠️ Error cleaning up deep learning data for agent {agent.id}: {e}") 
+
+    def _check_deep_q_availability(self) -> bool:
+        """Check if deep Q-learning is available."""
+        try:
+            import torch
+            return True
+        except ImportError:
+            return False
+
+    def _check_attention_deep_q_availability(self) -> bool:
+        """Check if attention deep Q-learning is available."""
+        try:
+            from .attention_deep_q_learning import AttentionDeepQLearning
+            return True
+        except ImportError:
+            return False
+
+    def _check_elite_imitation_availability(self) -> bool:
+        """Check if elite imitation learning is available."""
+        try:
+            from .elite_imitation_learning import EliteImitationLearning
+            return True
+        except ImportError:
+            return False 

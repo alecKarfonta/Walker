@@ -58,7 +58,9 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         
         # Set required attributes before calling parent constructor
         self.temp_action_size = len(temp_actions)
-        self.state_size = 5  # Fixed size for neural networks
+        # Dynamic state size based on actual morphology: joints + 3 metadata
+        actual_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+        self.state_size = actual_joints + 3  # Dynamic size for neural networks
         
         # FORCE attention deep Q-learning - no other options
         self.learning_approach = "attention_deep_q_learning"
@@ -117,7 +119,7 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             
             if learning_manager:
                 # Use Learning Manager's pooling system - this is the ONLY way to get networks
-                self._learning_system = learning_manager._acquire_attention_network(self.id)
+                self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
                 if self._learning_system:
                     print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
                     return
@@ -173,59 +175,97 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
                     if wheel:
                         try:
                             self.world.DestroyBody(wheel)
-                        except:
-                            pass
+                        except (RuntimeError, AttributeError) as e:
+                            print(f"⚠️ Error destroying wheel for agent {self.id}: {e}")
             
             if hasattr(self, 'lower_arm') and self.lower_arm:
                 try:
                     self.world.DestroyBody(self.lower_arm)
-                except:
-                    pass
+                except (RuntimeError, AttributeError) as e:
+                    print(f"⚠️ Error destroying lower_arm for agent {self.id}: {e}")
             
             if hasattr(self, 'upper_arm') and self.upper_arm:
                 try:
                     self.world.DestroyBody(self.upper_arm)
-                except:
-                    pass
+                except (RuntimeError, AttributeError) as e:
+                    print(f"⚠️ Error destroying upper_arm for agent {self.id}: {e}")
             
             if hasattr(self, 'body') and self.body:
                 try:
                     self.world.DestroyBody(self.body)
-                except:
-                    pass
+                except (RuntimeError, AttributeError) as e:
+                    print(f"⚠️ Error destroying body for agent {self.id}: {e}")
                     
         except Exception as e:
             print(f"⚠️ Error destroying existing body for agent {self.id}: {e}")
 
+    def get_actual_joint_count(self) -> int:
+        """Get the actual number of joints for this robot's morphology."""
+        try:
+            if hasattr(self, 'limb_joints') and self.limb_joints:
+                joint_count = 0
+                for limb_joints in self.limb_joints:
+                    joint_count += len(limb_joints)
+                return joint_count
+            else:
+                # Fallback: calculate from physical parameters
+                return self.physical_params.num_arms * self.physical_params.segments_per_limb
+        except AttributeError as e:
+            print(f"⚠️ AttributeError in get_actual_joint_count for agent {self.id}: {e}")
+            # Safe fallback only for attribute errors
+            return 2
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR in get_actual_joint_count for agent {self.id}: {e}")
+            # DO NOT return 2 - this could cause silent state corruption
+            # Let the error propagate to reveal the real problem
+            raise
+
     def get_state_representation(self) -> np.ndarray:
         """
-        Get state representation for attention-based neural networks.
+        Get comprehensive state representation for attention-based neural networks.
+        Includes ALL joint angles for multi-limb robots with VARIABLE state size.
         Always returns numpy array for consistent neural network input.
         """
         try:
-            # Get primary joint angles (from first limb)
-            primary_joint_angle = 0.0
-            secondary_joint_angle = 0.0
+            # DYNAMIC STATE SIZE: Actual number of joints + 3 metadata elements
+            actual_joints = self.get_actual_joint_count()
+            state_size = actual_joints + 3  # joint angles + velocity + stability + progress
             
+            # Initialize state array with exact size needed
+            state = np.zeros(state_size, dtype=np.float32)
+            
+            # Get ALL joint angles for multi-limb robots
+            joint_idx = 0
             if hasattr(self, 'limb_joints') and self.limb_joints:
-                first_limb = self.limb_joints[0]
-                if len(first_limb) >= 1 and first_limb[0]:
-                    primary_joint_angle = np.tanh(first_limb[0].angle)
-                if len(first_limb) >= 2 and first_limb[1]:
-                    secondary_joint_angle = np.tanh(first_limb[1].angle)
+                for limb_joints in self.limb_joints:
+                    for joint in limb_joints:
+                        if joint and joint_idx < actual_joints:
+                            # Normalize joint angles to [-1, 1] range
+                            state[joint_idx] = np.tanh(joint.angle)
+                            joint_idx += 1
             
-            # Physical state information
+            # Physical state information (last 3 elements)
             velocity = np.tanh(self.body.linearVelocity.x / 5.0) if hasattr(self, 'body') else 0.0
             stability = np.tanh(self.body.angle * 2.0) if hasattr(self, 'body') else 0.0
             progress = np.tanh((self.body.position.x - self.prev_x) * 10.0) if hasattr(self, 'body') else 0.0
             
-            return np.array([
-                primary_joint_angle, secondary_joint_angle, velocity, stability, progress
-            ], dtype=np.float32)
+            state[actual_joints] = velocity      # velocity
+            state[actual_joints + 1] = stability  # stability  
+            state[actual_joints + 2] = progress   # progress
+            
+            return state
                 
         except Exception as e:
             print(f"⚠️ Error getting evolutionary state for agent {self.id}: {e}")
-            return np.zeros(5, dtype=np.float32)
+            # Safe fallback with proper error handling
+            try:
+                actual_joints = self.get_actual_joint_count()
+                return np.zeros(actual_joints + 3, dtype=np.float32)  # Dynamic size based on morphology
+            except Exception as e2:
+                print(f"❌ CRITICAL: Could not determine joint count for agent {self.id}: {e2}")
+                # Ultimate fallback to prevent complete failure, but log it prominently
+                print(f"🚨 USING EMERGENCY FALLBACK STATE for agent {self.id} - this may indicate serious issues")
+                return np.zeros(5, dtype=np.float32)  # Emergency fallback: 2 joints + 3 metadata
 
     def choose_action(self) -> int:
         """Choose action using attention-based learning system."""
@@ -731,8 +771,8 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
                         if joint:
                             try:
                                 joint.enableMotor = False
-                            except:
-                                pass
+                            except (RuntimeError, AttributeError) as e:
+                                print(f"⚠️ Error disabling motor for agent {self.id}: {e}")
             
             # Destroy bodies in reverse order
             if hasattr(self, 'wheels'):
@@ -740,8 +780,8 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
                     if wheel:
                         try:
                             self.world.DestroyBody(wheel)
-                        except:
-                            pass
+                        except (RuntimeError, AttributeError) as e:
+                            print(f"⚠️ Error destroying wheel in destroy() for agent {self.id}: {e}")
             
             if hasattr(self, 'limbs'):
                 for limb_segments in self.limbs:
@@ -749,14 +789,14 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
                         if segment:
                             try:
                                 self.world.DestroyBody(segment)
-                            except:
-                                pass
+                            except (RuntimeError, AttributeError) as e:
+                                print(f"⚠️ Error destroying limb segment in destroy() for agent {self.id}: {e}")
             
             if hasattr(self, 'body') and self.body:
                 try:
                     self.world.DestroyBody(self.body)
-                except:
-                    pass
+                except (RuntimeError, AttributeError) as e:
+                    print(f"⚠️ Error destroying main body in destroy() for agent {self.id}: {e}")
                 
         except Exception as e:
             print(f"⚠️ Error in destroy() for agent {getattr(self, 'id', 'unknown')}: {e}")
