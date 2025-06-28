@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src'
 
 import pymunk
 import numpy as np
-from src.agents.crawling_crate import CrawlingCrate
+from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
 
 
 def test_basic_training():
@@ -27,7 +27,7 @@ def test_basic_training():
     space.add(ground)
     
     # Create agent
-    agent = CrawlingCrate(space, position=(10, 20))
+    agent = EvolutionaryCrawlingAgent(space, position=(10, 20))
     
     print(f"✅ Created agent at position: {agent.body.position}")
     
@@ -75,7 +75,7 @@ def test_population():
     # Create population
     agents = []
     for i in range(4):
-        agent = CrawlingCrate(space, position=(10 + i * 10, 20))
+        agent = EvolutionaryCrawlingAgent(space, position=(10 + i * 10, 20))
         agents.append(agent)
     
     print(f"✅ Created population of {len(agents)} agents")

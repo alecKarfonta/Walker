@@ -39,9 +39,15 @@ class PhysicalParameters:
     # NEW: Arm attachment and configuration (massive biological diversity!)
     arm_attachment_x: float = 0.0     # Where along body length arm attaches (-1.0 to 1.0)
     arm_attachment_y: float = 0.5     # How high on body arm attaches (0.0 = bottom, 1.0 = top)
-    num_arms: int = 1                 # Number of arms (1-3, like real animals)
+    num_arms: int = 1                 # Number of arms (1-6, like insects, spiders, etc.)
     arm_symmetry: float = 1.0         # Symmetry between left/right arms (1.0 = identical, 0.0 = completely different)
     arm_angle_offset: float = 0.0     # Base angle offset for arm positioning
+    
+    # NEW: Variable limb segments (like different joint configurations!)
+    segments_per_limb: int = 2        # Number of segments per limb (2-5, like different animals)
+    segment_length_ratios: List[float] = field(default_factory=lambda: [1.0, 1.0])  # Relative lengths of each segment
+    segment_width_ratios: List[float] = field(default_factory=lambda: [1.0, 0.8])   # Relative widths of each segment
+    joint_flexibility_per_segment: List[float] = field(default_factory=lambda: [1.0, 1.0])  # Flexibility of each joint
     
     # NEW: Limb specialization (like different animal locomotion)
     limb_specialization: str = "general"  # "general", "digging", "climbing", "swimming", "grasping"
@@ -57,7 +63,7 @@ class PhysicalParameters:
     arm_friction: float = 0.5
     arm_restitution: float = 0.1
     
-    # Joint parameters
+    # Joint parameters - now dynamic based on limb configuration
     arm_torque: float = 150.0
     wrist_torque: float = 150.0
     arm_speed: float = 3.0
@@ -66,6 +72,12 @@ class PhysicalParameters:
     shoulder_upper_limit: float = np.pi/2   # +90 degrees
     elbow_lower_limit: float = 0.0          # 0 degrees
     elbow_upper_limit: float = 3*np.pi/4    # 135 degrees
+    
+    # NEW: Dynamic joint parameters for variable segments
+    joint_torques: List[float] = field(default_factory=lambda: [150.0, 100.0])  # Torque for each joint
+    joint_speeds: List[float] = field(default_factory=lambda: [3.0, 3.0])       # Speed for each joint
+    joint_lower_limits: List[float] = field(default_factory=lambda: [-np.pi/2, 0.0])     # Lower angle limits
+    joint_upper_limits: List[float] = field(default_factory=lambda: [np.pi/2, 3*np.pi/4]) # Upper angle limits
     
     # Wheel parameters
     wheel_radius: float = 0.5
@@ -78,9 +90,15 @@ class PhysicalParameters:
     
     # NEW: Wheel/leg evolution (like different animal feet!)
     wheel_shape: str = "circle"       # "circle", "oval", "star", "bumpy" (like paws, hooves, etc.)
-    num_wheels: int = 2               # Number of wheels/legs (2-4, like different animals)
+    num_wheels: int = 2               # Number of wheels/legs (2-8, like different animals)
     wheel_asymmetry: float = 0.0      # Left/right wheel size difference
     leg_angle: float = 0.0            # Angle of leg attachment (splayed out vs straight down)
+    wheel_size_variation: float = 0.0 # Variation in wheel sizes (0.0 = all same, 1.0 = very different)
+    
+    # NEW: Action space configuration for dynamic control
+    action_combination_style: str = "independent"  # "independent", "paired", "sequential", "coordinated"
+    max_simultaneous_joints: int = 2   # Maximum joints that can move simultaneously
+    joint_priority_weights: List[float] = field(default_factory=lambda: [1.0, 0.8])  # Priority of each joint
     
     # NEW: Locomotion specialization (crawlers vs walkers vs rollers)
     locomotion_type: str = "crawler"  # "crawler", "walker", "roller", "jumper", "hybrid"
@@ -259,7 +277,7 @@ class PhysicalParameters:
                 self.arm_attachment_y, 0.3, 0.0, 1.0   # Height on body
             )
         if random.random() < mutation_rate:
-            mutated.num_arms = max(1, min(3, self.num_arms + random.choice([-1, 0, 1])))
+            mutated.num_arms = max(1, min(6, self.num_arms + random.choice([-1, 0, 1])))
         if random.random() < mutation_rate:
             mutated.arm_symmetry = self._mutate_bounded(
                 self.arm_symmetry, 0.3, 0.3, 1.0  # Asymmetrical evolution!
@@ -268,6 +286,59 @@ class PhysicalParameters:
             mutated.arm_angle_offset = self._mutate_bounded(
                 self.arm_angle_offset, 0.4, -np.pi/3, np.pi/3
             )
+        
+        # NEW: Variable limb segment mutations (revolutionary limb evolution!)
+        if random.random() < mutation_rate:
+            new_segments = max(2, min(5, self.segments_per_limb + random.choice([-1, 0, 1])))
+            mutated.segments_per_limb = new_segments
+            
+            # Resize segment parameter arrays to match new segment count
+            mutated.segment_length_ratios = self._resize_array(
+                self.segment_length_ratios, new_segments, default_value=1.0
+            )
+            mutated.segment_width_ratios = self._resize_array(
+                self.segment_width_ratios, new_segments, default_value=0.8
+            )
+            mutated.joint_flexibility_per_segment = self._resize_array(
+                self.joint_flexibility_per_segment, new_segments, default_value=1.0
+            )
+            mutated.joint_torques = self._resize_array(
+                self.joint_torques, new_segments, default_value=120.0
+            )
+            mutated.joint_speeds = self._resize_array(
+                self.joint_speeds, new_segments, default_value=3.0
+            )
+            mutated.joint_lower_limits = self._resize_array(
+                self.joint_lower_limits, new_segments, default_value=-np.pi/4
+            )
+            mutated.joint_upper_limits = self._resize_array(
+                self.joint_upper_limits, new_segments, default_value=np.pi/2
+            )
+            mutated.joint_priority_weights = self._resize_array(
+                self.joint_priority_weights, new_segments, default_value=0.8
+            )
+        
+        # Mutate individual segment parameters
+        if random.random() < mutation_rate:
+            mutated.segment_length_ratios = [
+                self._mutate_bounded(ratio, 0.3, 0.3, 2.0) for ratio in mutated.segment_length_ratios
+            ]
+        if random.random() < mutation_rate:
+            mutated.segment_width_ratios = [
+                self._mutate_bounded(ratio, 0.3, 0.2, 1.5) for ratio in mutated.segment_width_ratios
+            ]
+        if random.random() < mutation_rate:
+            mutated.joint_flexibility_per_segment = [
+                self._mutate_bounded(flex, 0.3, 0.2, 3.0) for flex in mutated.joint_flexibility_per_segment
+            ]
+        if random.random() < mutation_rate:
+            mutated.joint_torques = [
+                self._mutate_bounded(torque, 0.3, 30.0, 400.0) for torque in mutated.joint_torques
+            ]
+        if random.random() < mutation_rate:
+            mutated.joint_speeds = [
+                self._mutate_bounded(speed, 0.3, 0.5, 10.0) for speed in mutated.joint_speeds
+            ]
         
         # NEW: Limb specialization mutations
         if random.random() < mutation_rate:
@@ -287,7 +358,7 @@ class PhysicalParameters:
             wheel_shapes = ["circle", "oval", "star", "bumpy"]
             mutated.wheel_shape = random.choice(wheel_shapes)
         if random.random() < mutation_rate:
-            mutated.num_wheels = max(2, min(4, self.num_wheels + random.choice([-1, 0, 1])))
+            mutated.num_wheels = max(2, min(8, self.num_wheels + random.choice([-1, 0, 1])))
         if random.random() < mutation_rate:
             mutated.wheel_asymmetry = self._mutate_bounded(
                 self.wheel_asymmetry, 0.3, 0.0, 0.5
@@ -296,6 +367,22 @@ class PhysicalParameters:
             mutated.leg_angle = self._mutate_bounded(
                 self.leg_angle, 0.3, -np.pi/4, np.pi/4
             )
+        if random.random() < mutation_rate:
+            mutated.wheel_size_variation = self._mutate_bounded(
+                self.wheel_size_variation, 0.3, 0.0, 1.0
+            )
+        
+        # NEW: Action space mutations (control strategy evolution!)
+        if random.random() < mutation_rate:
+            action_styles = ["independent", "paired", "sequential", "coordinated"]
+            mutated.action_combination_style = random.choice(action_styles)
+        if random.random() < mutation_rate:
+            mutated.max_simultaneous_joints = max(1, min(mutated.segments_per_limb, 
+                self.max_simultaneous_joints + random.choice([-1, 0, 1])))
+        if random.random() < mutation_rate:
+            mutated.joint_priority_weights = [
+                self._mutate_bounded(weight, 0.3, 0.1, 2.0) for weight in mutated.joint_priority_weights
+            ]
         
         # NEW: Locomotion type mutations
         if random.random() < mutation_rate:
@@ -360,6 +447,29 @@ class PhysicalParameters:
         mutated_value = value + sign * mutation_magnitude
         
         return np.clip(mutated_value, min_val, max_val)
+    
+    def _resize_array(self, original_array: List[float], new_size: int, default_value: float) -> List[float]:
+        """
+        Resize an array to a new size, preserving existing values and filling with defaults.
+        
+        Args:
+            original_array: Original array to resize
+            new_size: Target size for the array
+            default_value: Value to use for new elements
+            
+        Returns:
+            Resized array
+        """
+        result = original_array.copy()
+        
+        if len(result) > new_size:
+            # Truncate if too large
+            result = result[:new_size]
+        elif len(result) < new_size:
+            # Extend with default values if too small
+            result.extend([default_value] * (new_size - len(result)))
+        
+        return result
     
     def crossover(self, other: 'PhysicalParameters', 
                  crossover_rate: float = 0.5) -> 'PhysicalParameters':
@@ -450,6 +560,18 @@ class PhysicalParameters:
             'limb_specialization_type': limb_spec_hash,
             'joint_characteristics': self.arm_flexibility * self.joint_stiffness,
             
+            # NEW: Variable limb segment diversity (revolutionary articulation!)
+            'segment_complexity': float(self.segments_per_limb * len(self.segment_length_ratios)),
+            'segment_proportions': float(np.std(self.segment_length_ratios)) if self.segment_length_ratios else 0.0,
+            'joint_torque_diversity': float(np.std(self.joint_torques)) if self.joint_torques else 0.0,
+            'joint_priority_balance': float(np.mean(self.joint_priority_weights)) if self.joint_priority_weights else 1.0,
+            'limb_articulation': float(self.segments_per_limb * np.mean(self.joint_flexibility_per_segment)) if self.joint_flexibility_per_segment else 1.0,
+            
+            # NEW: Action space and control diversity
+            'action_style_hash': hash(self.action_combination_style) % 1000 / 1000.0,
+            'control_complexity': self.max_simultaneous_joints / max(1, self.segments_per_limb),
+            'wheel_variation': self.wheel_size_variation + self.wheel_asymmetry,
+            
             # NEW: Locomotion diversity (different movement strategies)
             'wheel_configuration': wheel_shape_hash + self.wheel_asymmetry,
             'locomotion_strategy': locomotion_hash,
@@ -503,9 +625,47 @@ class PhysicalParameters:
         # Arm attachment and configuration
         repaired.arm_attachment_x = np.clip(repaired.arm_attachment_x, -0.8, 0.8)
         repaired.arm_attachment_y = np.clip(repaired.arm_attachment_y, 0.0, 1.0)
-        repaired.num_arms = max(1, min(3, int(repaired.num_arms)))
+        repaired.num_arms = max(1, min(6, int(repaired.num_arms)))
         repaired.arm_symmetry = np.clip(repaired.arm_symmetry, 0.3, 1.0)
         repaired.arm_angle_offset = np.clip(repaired.arm_angle_offset, -np.pi/3, np.pi/3)
+        
+        # Variable limb segments validation
+        repaired.segments_per_limb = max(2, min(5, int(repaired.segments_per_limb)))
+        
+        # Ensure segment arrays match the number of segments
+        target_size = repaired.segments_per_limb
+        repaired.segment_length_ratios = repaired._resize_array(
+            repaired.segment_length_ratios, target_size, 1.0
+        )
+        repaired.segment_width_ratios = repaired._resize_array(
+            repaired.segment_width_ratios, target_size, 0.8
+        )
+        repaired.joint_flexibility_per_segment = repaired._resize_array(
+            repaired.joint_flexibility_per_segment, target_size, 1.0
+        )
+        repaired.joint_torques = repaired._resize_array(
+            repaired.joint_torques, target_size, 120.0
+        )
+        repaired.joint_speeds = repaired._resize_array(
+            repaired.joint_speeds, target_size, 3.0
+        )
+        repaired.joint_lower_limits = repaired._resize_array(
+            repaired.joint_lower_limits, target_size, -np.pi/4
+        )
+        repaired.joint_upper_limits = repaired._resize_array(
+            repaired.joint_upper_limits, target_size, np.pi/2
+        )
+        repaired.joint_priority_weights = repaired._resize_array(
+            repaired.joint_priority_weights, target_size, 0.8
+        )
+        
+        # Validate segment parameter values
+        repaired.segment_length_ratios = [np.clip(ratio, 0.3, 2.0) for ratio in repaired.segment_length_ratios]
+        repaired.segment_width_ratios = [np.clip(ratio, 0.2, 1.5) for ratio in repaired.segment_width_ratios]
+        repaired.joint_flexibility_per_segment = [np.clip(flex, 0.2, 3.0) for flex in repaired.joint_flexibility_per_segment]
+        repaired.joint_torques = [np.clip(torque, 30.0, 400.0) for torque in repaired.joint_torques]
+        repaired.joint_speeds = [np.clip(speed, 0.5, 10.0) for speed in repaired.joint_speeds]
+        repaired.joint_priority_weights = [np.clip(weight, 0.1, 2.0) for weight in repaired.joint_priority_weights]
         
         # Limb specialization
         valid_specializations = ["general", "digging", "climbing", "swimming", "grasping"]
@@ -518,9 +678,16 @@ class PhysicalParameters:
         valid_wheel_shapes = ["circle", "oval", "star", "bumpy"]
         if repaired.wheel_shape not in valid_wheel_shapes:
             repaired.wheel_shape = "circle"
-        repaired.num_wheels = max(2, min(4, int(repaired.num_wheels)))
+        repaired.num_wheels = max(2, min(8, int(repaired.num_wheels)))
         repaired.wheel_asymmetry = np.clip(repaired.wheel_asymmetry, 0.0, 0.5)
         repaired.leg_angle = np.clip(repaired.leg_angle, -np.pi/4, np.pi/4)
+        repaired.wheel_size_variation = np.clip(repaired.wheel_size_variation, 0.0, 1.0)
+        
+        # Action space configuration
+        valid_action_styles = ["independent", "paired", "sequential", "coordinated"]
+        if repaired.action_combination_style not in valid_action_styles:
+            repaired.action_combination_style = "independent"
+        repaired.max_simultaneous_joints = max(1, min(repaired.segments_per_limb, int(repaired.max_simultaneous_joints)))
         
         # Locomotion type
         valid_locomotion_types = ["crawler", "walker", "roller", "jumper", "hybrid"]

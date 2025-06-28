@@ -30,10 +30,16 @@ class SimpleAttention(nn.Module):
     def forward(self, x):
         batch_size = x.size(0)
         
+        # Handle single state input - add sequence dimension if needed
+        if len(x.shape) == 2:  # [batch_size, embed_dim]
+            x = x.unsqueeze(1)  # [batch_size, 1, embed_dim]
+        
+        seq_len = x.size(1)
+        
         # Self-attention: query, key, value are all the same input
-        Q = self.q_linear(x).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        K = self.k_linear(x).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
-        V = self.v_linear(x).view(batch_size, -1, self.num_heads, self.head_dim).transpose(1, 2)
+        Q = self.q_linear(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = self.k_linear(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        V = self.v_linear(x).view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         
         # Attention scores
         scores = torch.matmul(Q, K.transpose(-2, -1)) / self.scale
@@ -45,10 +51,14 @@ class SimpleAttention(nn.Module):
         
         # Concatenate heads and apply output linear layer
         attended = attended.transpose(1, 2).contiguous().view(
-            batch_size, -1, self.embed_dim
+            batch_size, seq_len, self.embed_dim
         )
         
         output = self.out_linear(attended)
+        
+        # If input was single state, squeeze back to [batch_size, embed_dim]
+        if seq_len == 1:
+            output = output.squeeze(1)
         
         return output, attention_weights
 
@@ -143,6 +153,10 @@ class ArmControlAttentionDQN(nn.Module):
         # Feed-forward processing
         ff_output = self.ff(features)
         features = self.norm2(features + ff_output)
+        
+        # Ensure features are properly shaped [batch_size, embed_dim]
+        if len(features.shape) > 2:
+            features = features.squeeze(1)  # Remove sequence dimension if present
         
         # Dueling Q-value computation
         value = self.value_head(features)

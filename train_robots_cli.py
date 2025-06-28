@@ -12,7 +12,7 @@ import pymunk
 import numpy as np
 import time
 from typing import List
-from src.agents.crawling_crate import CrawlingCrate
+from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
 from src.population.population_controller import PopulationController
 from src.population.evolution import EvolutionEngine
 
@@ -56,7 +56,7 @@ class CLITrainer:
         
         for i in range(self.population_size):
             x_pos = start_x + i * spacing
-            agent = CrawlingCrate(self.space, position=(x_pos, 20))
+            agent = EvolutionaryCrawlingAgent(self.space, position=(x_pos, 20))
             self.agents.append(agent)
             
         # Initialize evolution system with correct parameters
@@ -68,7 +68,7 @@ class CLITrainer:
             
         self.evolution_engine = EvolutionEngine(self.population_controller, elite_size=2)
         
-    def evaluate_agent(self, agent: CrawlingCrate, max_steps=150) -> float:
+    def evaluate_agent(self, agent: EvolutionaryCrawlingAgent, max_steps=150) -> float:
         """Evaluate a single agent's fitness."""
         agent.reset()
         start_x = agent.body.position.x
@@ -98,7 +98,7 @@ class CLITrainer:
                 break
                 
         # Final fitness: forward progress
-        final_fitness = agent.body.position.x - agent.position[0]
+        final_fitness = agent.body.position.x - agent.initial_position[0]
         return max(0, final_fitness)
         
     def run_training_step(self):
@@ -148,7 +148,7 @@ class CLITrainer:
                 self.agents[i].destroy()
                 # Create new agent at same position
                 x_pos = 50 + i * 15
-                new_agent = CrawlingCrate(self.space, position=(x_pos, 20))
+                new_agent = EvolutionaryCrawlingAgent(self.space, position=(x_pos, 20))
                 self.agents[i] = new_agent
                 
         self.generation += 1

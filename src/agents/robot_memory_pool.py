@@ -358,46 +358,23 @@ class RobotMemoryPool:
             print(f"❌ Error restoring learning state for robot {robot.id}: {e}")
     
     def _deserialize_q_table(self, robot: EvolutionaryCrawlingAgent, q_table_data: Dict[str, Any]):
-        """Deserialize and restore Q-table data."""
+        """DISABLED: No more Q-table deserialization - only attention networks."""
         try:
-            table_type = q_table_data.get('type', 'SparseQTable')
+            # FORCE ATTENTION LEARNING: Don't create any Q-tables
+            # The learning manager will handle attention network setup
+            print(f"🧠 Skipping Q-table deserialization for {robot.id} - using attention learning instead")
             
-            # Create appropriate Q-table type
-            if table_type == 'EnhancedQTable':
-                from .q_table import EnhancedQTable
-                setattr(robot, 'q_table', EnhancedQTable(
-                    action_count=q_table_data.get('action_count', 6),
-                    default_value=q_table_data.get('default_value', 0.0),
-                    confidence_threshold=q_table_data.get('confidence_threshold', 15),
-                    exploration_bonus=q_table_data.get('exploration_bonus', 0.1)
-                ))
-            else:
-                from .q_table import SparseQTable
-                setattr(robot, 'q_table', SparseQTable(
-                    action_count=q_table_data.get('action_count', 6),
-                    default_value=q_table_data.get('default_value', 0.0)
-                ))
-            
-            # Restore Q-values
-            if 'q_values' in q_table_data:
-                if isinstance(q_table_data['q_values'], dict):
-                    robot.q_table.q_values = q_table_data['q_values'].copy()
-                else:
-                    robot.q_table.q_values = np.array(q_table_data['q_values'])
-            
-            # Restore visit counts
-            if 'visit_counts' in q_table_data:
-                if isinstance(q_table_data['visit_counts'], dict):
-                    robot.q_table.visit_counts = q_table_data['visit_counts'].copy()
-                else:
-                    robot.q_table.visit_counts = np.array(q_table_data['visit_counts'])
-            
-            # Restore enhanced Q-table specific data
-            if table_type == 'EnhancedQTable' and 'update_count' in q_table_data:
-                robot.q_table.update_count = q_table_data['update_count']
-            
+            # Ensure the robot has attention learning
+            if not hasattr(robot, '_learning_system') or robot._learning_system is None:
+                robot._initialize_attention_learning()
+                
         except Exception as e:
-            print(f"⚠️ Error deserializing Q-table: {e}")
+            print(f"⚠️ Error ensuring attention learning for {robot.id}: {e}")
+            # Try to initialize attention learning as fallback
+            try:
+                robot._initialize_attention_learning()
+            except:
+                pass
     
     def acquire_robot(self, 
                      position: Tuple[float, float] = (0, 10),
@@ -548,26 +525,19 @@ class RobotMemoryPool:
                 self._restore_learning_state(robot, snapshot)
                 print(f"🧠 Restored {snapshot.learning_approach} state from snapshot")
             else:
-                # Initialize with basic Q-learning if no snapshot available
-                if not hasattr(robot, 'q_table') or robot.q_table is None:
-                    from .q_table import EnhancedQTable
-                    robot.q_table = EnhancedQTable(
-                        action_count=getattr(robot, 'action_size', 6),
-                        default_value=0.0
-                    )
-                print(f"🆕 Initialized fresh learning state (no snapshot available)")
+                # FORCE ATTENTION LEARNING: No more Q-table fallbacks
+                try:
+                    robot._initialize_attention_learning()
+                    print(f"🧠 Initialized fresh attention learning (no snapshot available)")
+                except Exception as e:
+                    print(f"⚠️ Error initializing attention learning: {e}")
         else:
-            # Reset Q-learning state completely
-            if hasattr(robot.q_table, 'reset'):
-                robot.q_table.reset()
-            else:
-                robot.q_table.q_values.clear()
-                if hasattr(robot.q_table, 'visit_counts'):
-                    robot.q_table.visit_counts.clear()
-            
-            # Reset learning parameters to defaults
-            robot.learning_rate = robot.physical_params.learning_rate
-            robot.epsilon = robot.physical_params.epsilon
+            # FORCE ATTENTION LEARNING: No more Q-table resets
+            try:
+                robot._initialize_attention_learning()
+                print(f"🧠 Initialized fresh attention learning (reset requested)")
+            except Exception as e:
+                print(f"⚠️ Error initializing attention learning: {e}")
         
         print(f"🔄 Reset robot {robot.id} at position ({position[0]:.1f}, {position[1]:.1f})")
     

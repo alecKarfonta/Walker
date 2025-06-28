@@ -7,7 +7,7 @@ import pymunk
 import pymunk.pygame_util
 import numpy as np
 from typing import List, Dict, Any, Tuple
-from src.agents.crawling_crate import CrawlingCrate
+from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
 from src.population.population_controller import PopulationController
 from src.population.evolution import EvolutionEngine
 from src.agents.basic_agent import BasicAgent
@@ -70,9 +70,9 @@ class TrainingVisualizer:
         ground.color = (100, 100, 100, 255)
         self.space.add(ground)
         
-    def create_agent(self, x_pos: float) -> CrawlingCrate:
-        """Create a crawling crate agent at the specified position."""
-        agent = CrawlingCrate(self.space, position=(x_pos, 20))
+    def create_agent(self, x_pos: float) -> EvolutionaryCrawlingAgent:
+        """Create an evolutionary crawling agent at the specified position."""
+        agent = EvolutionaryCrawlingAgent(self.space, position=(x_pos, 20))
         return agent
         
     def create_population(self):
@@ -91,7 +91,7 @@ class TrainingVisualizer:
         for agent in self.agents:
             agent.reset()
             
-    def evaluate_fitness(self, agent: CrawlingCrate, max_steps=200) -> float:
+    def evaluate_fitness(self, agent: EvolutionaryCrawlingAgent, max_steps=200) -> float:
         """Evaluate fitness of a single agent."""
         agent.reset()
         start_x = agent.body.position.x

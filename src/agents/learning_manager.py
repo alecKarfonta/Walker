@@ -231,105 +231,28 @@ class LearningManager:
         """Create a new learning approach instance for the agent."""
         
         try:
-            if approach == LearningApproach.BASIC_Q_LEARNING:
-                # Simple sparse Q-table
-                agent.q_table = SparseQTable(
-                    action_count=agent.action_size,
-                    default_value=0.0
-                )
-                agent.learning_rate = 0.1
-                agent.epsilon = 0.3
-                agent.epsilon_decay = 0.999
-                agent.learning_approach = approach.value
-                return agent
+            # FORCE ALL APPROACHES TO USE ATTENTION DEEP Q-LEARNING
+            # No more Q-tables, no more complexity - just attention networks
             
-            elif approach == LearningApproach.ENHANCED_Q_LEARNING:
-                # Enhanced Q-table with sophisticated features
-                agent.q_table = EnhancedQTable(
-                    action_count=agent.action_size,
-                    default_value=0.0,
-                    confidence_threshold=15,
-                    exploration_bonus=0.15
-                )
-                agent.learning_rate = 0.05
-                agent.epsilon = 0.3
-                agent.epsilon_decay = 0.9999
-                agent.learning_approach = approach.value
-                return agent
-            
-            elif approach == LearningApproach.SURVIVAL_Q_LEARNING:
-                if not self.ecosystem_interface:
-                    print("❌ Cannot create survival Q-learning: No ecosystem interface")
-                    return None
-                
-                from .survival_q_integration_patch import upgrade_agent_to_survival_learning
-                survival_adapter = upgrade_agent_to_survival_learning(agent, self.ecosystem_interface)
-                return survival_adapter
-            
-            elif approach == LearningApproach.DEEP_Q_LEARNING:
-                from .deep_survival_q_learning import DeepSurvivalQLearning, TORCH_AVAILABLE
-                
-                if not TORCH_AVAILABLE:
-                    print("❌ PyTorch not available. Cannot use Deep Q-Learning.")
-                    return None
-                
-                # Create Deep Q-Learning instance
-                state_dim = 15
-                action_dim = agent.action_size
-                
-                deep_q_learner = DeepSurvivalQLearning(
-                    state_dim=state_dim,
-                    action_dim=action_dim,
-                    learning_rate=3e-4,
-                    gamma=0.99,
-                    epsilon_start=1.0,
-                    epsilon_end=0.01,
-                    epsilon_decay=150000,
-                    buffer_size=25000,
-                    batch_size=32,
-                    target_update_freq=2000,
-                    device="auto",
-                    use_dueling=True,
-                    use_prioritized_replay=True
-                )
-                
-                # Setup deep learning wrapper
-                self._setup_deep_learning_wrapper(agent, deep_q_learner)
-                agent.learning_approach = approach.value
-                return deep_q_learner
-            
-            elif approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
-                if not self.attention_deep_q_available:
-                    print(f"❌ Attention Deep Q-Learning not available for agent {agent.id}")
-                    return None
-                
-                # Acquire attention network from pool (reuse existing or create new if needed)
-                attention_dqn = self._acquire_attention_network(agent.id)
-                if not attention_dqn:
-                    print(f"❌ Failed to acquire attention network for agent {agent.id}")
-                    return None
-                
-                # Setup attention learning wrapper
-                self._setup_attention_learning_wrapper(agent, attention_dqn)
-                agent.learning_approach = approach.value
-                return attention_dqn
-            
-            elif approach == LearningApproach.ELITE_IMITATION_LEARNING:
-                if not self.elite_imitation_available:
-                    print(f"❌ Elite Imitation Learning not available for agent {agent.id}")
-                    return None
-                
-                # Setup elite imitation wrapper
-                self._setup_elite_imitation_wrapper(agent)
-                agent.learning_approach = approach.value
-                return agent
-            
-            else:
-                print(f"⚠️ Unknown learning approach: {approach}")
+            if not self.attention_deep_q_available:
+                print(f"❌ Attention Deep Q-Learning not available for agent {agent.id}")
                 return None
+            
+            # Acquire attention network from pool (reuse existing or create new if needed)
+            attention_dqn = self._acquire_attention_network(agent.id)
+            if not attention_dqn:
+                print(f"❌ Failed to acquire attention network for agent {agent.id}")
+                return None
+            
+            # Setup attention learning wrapper
+            self._setup_attention_learning_wrapper(agent, attention_dqn)
+            agent.learning_approach = "attention_deep_q_learning"  # Force attention learning
+            
+            print(f"🧠 Agent {agent.id}: Forced to attention deep Q-learning (approach was {approach.value})")
+            return attention_dqn
                 
         except Exception as e:
-            print(f"❌ Error creating learning approach {approach.value}: {e}")
+            print(f"❌ Error creating attention learning approach: {e}")
             return None
     
     def _setup_deep_learning_wrapper(self, agent, deep_q_learner):
