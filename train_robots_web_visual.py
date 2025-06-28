@@ -15,6 +15,7 @@ import json
 import logging
 import random
 import math
+from collections import deque
 from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
@@ -1958,7 +1959,7 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 12000000  # 200 seconds at 60 Hz - much longer to prevent constant resets
+        self.episode_length = 3600  # REDUCED: 60 seconds at 60 Hz for faster learning cycles
         
         # Enhanced thread safety for Box2D operations
         import threading
@@ -1971,10 +1972,10 @@ class TrainingEnvironment:
         self.stats_update_interval = 2.0
         self.last_stats_update = 0
         
-        # Evolution timing with safety
-        self.evolution_interval = 180.0  # 3 minutes between generations
+        # Evolution timing with safety (FIXED: Disabled auto-evolution for learning)
+        self.evolution_interval = 1800.0  # INCREASED: 30 minutes between generations (was 3 minutes)
         self.last_evolution_time = time.time()
-        self.auto_evolution_enabled = False
+        self.auto_evolution_enabled = False  # KEPT DISABLED: Let Q-learning work without interference
         self._evolution_requested = False  # Flag for requested evolution
         
         # Settle the world
@@ -2641,13 +2642,17 @@ class TrainingEnvironment:
             print(f"⚠️ Error generating resources: {e}")
     
     def _validate_resource_positions(self, agent_positions):
-        """Validate that resources maintain proper distance from agents - NO MORE MOVING FOOD CLOSE TO AGENTS."""
+        """Validate that resources maintain proper distance from agents and are at reachable heights."""
         try:
             minimum_safe_distance = 6.0  # Must be at least 6m from any agent (matches ecosystem_dynamics)
+            minimum_height = -2.0  # Minimum Y coordinate (below ground level)
+            maximum_height = 8.0   # Maximum Y coordinate robots can reasonably reach
             resources_to_remove = []
             
             for food_source in self.ecosystem_dynamics.food_sources:
                 food_pos = food_source.position
+                should_remove = False
+                removal_reason = ""
                 
                 # Check if this resource is too close to ANY agent
                 too_close_to_agent = False
@@ -2657,17 +2662,41 @@ class TrainingEnvironment:
                         too_close_to_agent = True
                         break
                 
-                # CRITICAL: Remove resources that are too close instead of moving them
-                # This prevents random rewards from food appearing right next to robots
                 if too_close_to_agent:
-                    resources_to_remove.append(food_source)
+                    should_remove = True
+                    removal_reason = f"too close to agents (<{minimum_safe_distance}m)"
+                
+                # NEW: Check if resource is at unreachable height
+                if food_pos[1] < minimum_height:
+                    should_remove = True
+                    removal_reason = f"too low (Y={food_pos[1]:.1f} < {minimum_height})"
+                elif food_pos[1] > maximum_height:
+                    should_remove = True
+                    removal_reason = f"too high (Y={food_pos[1]:.1f} > {maximum_height})"
+                
+                # CRITICAL: Remove resources that are invalid instead of moving them
+                # This prevents random rewards and ensures fair competition
+                if should_remove:
+                    resources_to_remove.append((food_source, removal_reason))
             
-            # Remove resources that are too close to agents
+            # Remove invalid resources and log reasons
             if resources_to_remove:
-                for food_source in resources_to_remove:
+                height_issues = 0
+                distance_issues = 0
+                
+                for food_source, reason in resources_to_remove:
                     self.ecosystem_dynamics.food_sources.remove(food_source)
-                print(f"🚫 Removed {len(resources_to_remove)} food sources that were too close to agents (<{minimum_safe_distance}m)")
-                print(f"   📍 This prevents random rewards and ensures fair competition")
+                    if "too high" in reason or "too low" in reason:
+                        height_issues += 1
+                    else:
+                        distance_issues += 1
+                
+                print(f"🚫 Removed {len(resources_to_remove)} invalid food sources:")
+                if height_issues > 0:
+                    print(f"   📏 {height_issues} resources at unreachable heights (must be {minimum_height}m to {maximum_height}m)")
+                if distance_issues > 0:
+                    print(f"   📍 {distance_issues} resources too close to agents (<{minimum_safe_distance}m)")
+                print(f"   ✅ This ensures all resources are reachable and fairly positioned")
                 
         except Exception as e:
             print(f"⚠️ Error validating resource positions: {e}")

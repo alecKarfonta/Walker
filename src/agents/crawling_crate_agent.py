@@ -79,12 +79,12 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self._create_wheels()
         self._create_joints()
 
-        # Q-learning parameters
-        self.learning_rate = 0.005
+        # Q-learning parameters (FIXED: Much faster learning)
+        self.learning_rate = 0.05     # INCREASED: 10x faster learning rate
         self.discount_factor = 0.9
         self.epsilon = 0.3
         self.min_epsilon = 0.01
-        self.epsilon_decay = 0.9999
+        self.epsilon_decay = 0.995    # INCREASED: Much faster epsilon decay for learning
         
         self.actions = [
             (1, 0), (0, 1), (1, 1),
@@ -120,18 +120,18 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.max_epsilon = 0.6
         self.impatience = 0.002  # Increased for faster adaptation
 
-        # Reward clipping to stabilize learning (EXPANDED: allow higher positive rewards)
-        self.reward_clip_min = -0.05  # Keep negative clipping tight
-        self.reward_clip_max = 0.15   # INCREASED: Allow higher positive rewards for good behavior
+        # Reward clipping to stabilize learning (FIXED: Much higher rewards for effective learning)
+        self.reward_clip_min = -0.5   # INCREASED: 10x stronger negative feedback
+        self.reward_clip_max = 1.5    # INCREASED: 10x stronger positive rewards for learning
 
         # For state calculation
         self.last_x_position = self.body.position.x
         self.last_update_step = 0
         self.reward_count = 0
         
-        # Q-value bounds to prevent explosion (ADJUSTED FOR NEW REWARD SCALE)
-        self.min_q_value = -2.0  # REDUCED from -1.0 to allow accumulation of small rewards
-        self.max_q_value = 2.0   # REDUCED from 5.0 to match smaller reward scale
+        # Q-value bounds to prevent explosion (FIXED: Allow meaningful Q-value growth)
+        self.min_q_value = -10.0  # INCREASED: Allow larger Q-value range for better learning
+        self.max_q_value = 10.0   # INCREASED: Allow Q-values to grow meaningfully
         
         # Track extreme rewards seen in current episode
         self.best_reward_received = -np.inf  # Start at -inf so first reward sets it
@@ -166,8 +166,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.current_action_tuple = (1, 0)  # FIXED: Start with a real action from the action list
         self.prev_x = position[0]  # Track previous position for reward calculation
         
-        # ACTION PERSISTENCE: Time-based action selection (0.25 seconds)
-        self.action_persistence_duration = 0.25  # 0.25 seconds
+        # ACTION PERSISTENCE: Time-based action selection (FIXED: Much faster)
+        self.action_persistence_duration = 0.05  # INCREASED: 5x faster action updates for learning
         self.last_action_time = time.time()  # Track when last action was selected
         self.action_persisted = False  # Track if we're in persistence mode
         
@@ -217,6 +217,15 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.prev_food_distance = float('inf')
         self.food_distance_history = []  # Track recent food distances
 
+        # DIAGNOSTIC: Add Q-learning diagnostics
+        self.q_learning_diagnostics = {
+            'total_updates': 0,
+            'significant_updates': 0,
+            'avg_q_change': 0.0,
+            'max_q_value_seen': 0.0,
+            'last_significant_update_step': 0
+        }
+
     def get_enhanced_discretized_state(self) -> Tuple:
         """
         Enhanced state discretization with more features (velocity, position, body angle).
@@ -231,14 +240,14 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         shoulder_deg = np.degrees(shoulder_angle)
         elbow_deg = np.degrees(elbow_angle)
         
-        # Normalize angles and create bins - use 20-degree buckets for performance balance
-        shoulder_bin = int(np.clip((shoulder_deg + 180) // 45, 0, 7))  # 18 bins (360/20)
-        elbow_bin = int(np.clip((elbow_deg + 180) // 45, 0, 7))        # 18 bins (360/20)
+        # Normalize angles and create bins - FIXED: Much higher resolution for precise control
+        shoulder_bin = int(np.clip((shoulder_deg + 180) // 10, 0, 35))  # INCREASED: 10-degree buckets (36 bins)
+        elbow_bin = int(np.clip((elbow_deg + 180) // 10, 0, 35))        # INCREASED: 10-degree buckets (36 bins)
         
-        # Add velocity discretization (clamped and binned) - reduced bins for performance
+        # Add velocity discretization (clamped and binned) - INCREASED: More velocity resolution
         vel_x = np.clip(self.body.linearVelocity.x, -3, 3)
-        vel_x_bin = int((vel_x + 3) // 1.5)  # 4 bins: [-3,-1.5), [-1.5,0), [0,1.5), [1.5,3]
-        vel_x_bin = np.clip(vel_x_bin, 0, 3)  # Ensure it's in valid range
+        vel_x_bin = int((vel_x + 3) // 0.5)  # INCREASED: 12 bins for better velocity discrimination
+        vel_x_bin = np.clip(vel_x_bin, 0, 11)  # Ensure it's in valid range
         
         return (shoulder_bin, elbow_bin, vel_x_bin)  # 3D state: angles + velocity
         
@@ -321,8 +330,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         food_approach_reward = self._get_food_approach_reward()
         total_reward += food_approach_reward * 0.15
                 
-        # Clip final reward to reasonable range (EXPANDED: Allow higher positive rewards)
-        total_reward = np.clip(total_reward, -0.05, 0.05)  # Allow up to 0.15 positive reward per step
+        # Clip final reward to reasonable range (FIXED: Much stronger reward signal)
+        total_reward = np.clip(total_reward, -0.5, 0.5)  # INCREASED: 10x stronger reward signal for learning
         
         # Debug logging for first agent (MORE FREQUENT TO CATCH THE ISSUE)
         if self.id == 0 and self.steps % 1000 == 0:  # Every 1000 steps
@@ -616,35 +625,36 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                     use_adaptive_lr=True
                 )
                 
-                # Record reward signal for evaluation using the training environment's adapter
-                try:
-                    # Try to get the training environment's adapter instance
-                    training_env = getattr(self, '_training_env', None)
-                    if training_env and hasattr(training_env, 'reward_signal_adapter'):
-                        training_env.reward_signal_adapter.record_reward_signal(
-                            agent_id=str(self.id),
-                            state=prev_state,
-                            action=prev_action,
-                            reward=reward
-                        )
-                    else:
-                        # Fallback: use singleton instance to avoid multiple instance issue
-                        from src.evaluation.reward_signal_integration import get_reward_signal_adapter
-                        reward_signal_adapter = get_reward_signal_adapter()
-                        reward_signal_adapter.record_reward_signal(
-                            agent_id=str(self.id),
-                            state=prev_state,
-                            action=prev_action,
-                            reward=reward
-                        )
-                except ImportError:
-                    # Module not available, skip silently
-                    pass
-                except Exception as e:
-                    # Log other errors for debugging
-                    if self.steps % 100 == 0:  # Only log errors occasionally
-                        print(f"⚠️ Reward signal recording failed for agent {self.id}: {e}")
-                    pass
+                # DIAGNOSTIC: Track Q-learning effectiveness
+                self.q_learning_diagnostics['total_updates'] += 1
+                
+                if abs(reward) > 0.01:  # Significant reward
+                    self.q_learning_diagnostics['significant_updates'] += 1
+                    self.q_learning_diagnostics['last_significant_update_step'] = self.steps
+                
+                # Track Q-value changes and magnitudes  
+                current_q = self.q_table.get_q_value(prev_state, prev_action)
+                self.q_learning_diagnostics['max_q_value_seen'] = max(
+                    self.q_learning_diagnostics['max_q_value_seen'], 
+                    abs(current_q)
+                )
+                
+                # Print diagnostics for first agent occasionally
+                if self.id == 0 and self.steps % 2000 == 0:
+                    updates = self.q_learning_diagnostics['total_updates']
+                    significant = self.q_learning_diagnostics['significant_updates']
+                    max_q = self.q_learning_diagnostics['max_q_value_seen']
+                    last_significant = self.q_learning_diagnostics['last_significant_update_step']
+                    
+                    print(f"🧠 DIAGNOSTIC Agent 0 Step {self.steps}:")
+                    print(f"   Q-updates: {updates} total, {significant} significant")
+                    print(f"   Max Q-value seen: {max_q:.4f}")
+                    print(f"   Last significant reward: step {last_significant}")
+                    print(f"   Current reward: {reward:.4f}, Epsilon: {self.epsilon:.3f}")
+                    print(f"   Q-table size: {len(self.q_table.q_values)} states")
+                    if updates > 0:
+                        print(f"   Significant update rate: {significant/updates*100:.1f}%")
+                    print("---")
             
             # Choose new action using enhanced method
             action_idx = self.choose_action()

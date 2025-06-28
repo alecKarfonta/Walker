@@ -17,6 +17,7 @@ class PhysicalParameters:
     """
     Comprehensive physical parameters for crawling robots.
     All parameters can be evolved through mutation and crossover.
+    Designed to simulate the incredible diversity of animal evolution.
     """
     
     # Body parameters (inspired by Java CrawlingCrate)
@@ -27,6 +28,25 @@ class PhysicalParameters:
     body_restitution: float = 0.1
     body_linear_damping: float = 0.05
     body_angular_damping: float = 0.05
+    
+    # NEW: Body shape and size evolution (like real animals!)
+    body_shape: str = "rectangle"  # "rectangle", "oval", "triangle", "trapezoid", "diamond"
+    body_taper: float = 1.0       # How much the body tapers (1.0 = no taper, 0.5 = half width at back)
+    body_curve: float = 0.0       # Curvature of body sides (0.0 = straight, 1.0 = very curved)
+    overall_scale: float = 1.0    # Overall size multiplier (0.5 = tiny, 2.0 = giant)
+    body_aspect_ratio: float = 2.0 # Length to width ratio (like different animal proportions)
+    
+    # NEW: Arm attachment and configuration (massive biological diversity!)
+    arm_attachment_x: float = 0.0     # Where along body length arm attaches (-1.0 to 1.0)
+    arm_attachment_y: float = 0.5     # How high on body arm attaches (0.0 = bottom, 1.0 = top)
+    num_arms: int = 1                 # Number of arms (1-3, like real animals)
+    arm_symmetry: float = 1.0         # Symmetry between left/right arms (1.0 = identical, 0.0 = completely different)
+    arm_angle_offset: float = 0.0     # Base angle offset for arm positioning
+    
+    # NEW: Limb specialization (like different animal locomotion)
+    limb_specialization: str = "general"  # "general", "digging", "climbing", "swimming", "grasping"
+    arm_flexibility: float = 1.0          # How flexible the arm is (0.5 = rigid, 2.0 = very flexible)
+    joint_stiffness: float = 1.0          # Joint resistance (0.5 = loose, 2.0 = stiff)
     
     # Arm parameters (extensive like Java implementation)
     arm_length: float = 1.0  # Upper arm length
@@ -55,6 +75,28 @@ class PhysicalParameters:
     leg_spread: float = 2.0  # Distance between wheels
     suspension: float = 0.75  # Height of wheels below body
     ride_height: float = 0.0  # Additional height offset
+    
+    # NEW: Wheel/leg evolution (like different animal feet!)
+    wheel_shape: str = "circle"       # "circle", "oval", "star", "bumpy" (like paws, hooves, etc.)
+    num_wheels: int = 2               # Number of wheels/legs (2-4, like different animals)
+    wheel_asymmetry: float = 0.0      # Left/right wheel size difference
+    leg_angle: float = 0.0            # Angle of leg attachment (splayed out vs straight down)
+    
+    # NEW: Locomotion specialization (crawlers vs walkers vs rollers)
+    locomotion_type: str = "crawler"  # "crawler", "walker", "roller", "jumper", "hybrid"
+    ground_contact_area: float = 1.0  # How much surface area touches ground
+    stability_preference: float = 0.5 # Trade-off between speed and stability
+    
+    # NEW: Appendages and extras (like tails, fins, etc.)
+    has_tail: bool = False            # Whether robot has a tail
+    tail_length: float = 1.0          # Length of tail if present
+    tail_flexibility: float = 1.0     # How flexible the tail is
+    appendage_count: int = 0          # Additional small appendages (0-3)
+    
+    # NEW: Material and structural properties (like bone vs cartilage)
+    body_rigidity: float = 1.0        # How rigid the body structure is (0.5 = flexible, 2.0 = very rigid)
+    weight_distribution: str = "center"  # "center", "front", "back", "low", "high"
+    structural_reinforcement: float = 1.0  # Extra structural strength (like thick bones)
     
     # Learning and behavior parameters (from Java BasicAgent)
     learning_rate: float = 0.005
@@ -186,6 +228,115 @@ class PhysicalParameters:
                 self.stability_weight, 0.5, 0.005, 0.1
             )
         
+        # NEW: Body shape and size mutations (animal-like evolution!)
+        if random.random() < mutation_rate:
+            body_shapes = ["rectangle", "oval", "triangle", "trapezoid", "diamond"]
+            mutated.body_shape = random.choice(body_shapes)
+        if random.random() < mutation_rate:
+            mutated.body_taper = self._mutate_bounded(
+                self.body_taper, 0.3, 0.3, 1.5
+            )
+        if random.random() < mutation_rate:
+            mutated.body_curve = self._mutate_bounded(
+                self.body_curve, 0.4, 0.0, 1.0
+            )
+        if random.random() < mutation_rate:
+            mutated.overall_scale = self._mutate_bounded(
+                self.overall_scale, 0.3, 0.4, 2.5  # Huge size variation!
+            )
+        if random.random() < mutation_rate:
+            mutated.body_aspect_ratio = self._mutate_bounded(
+                self.body_aspect_ratio, 0.4, 1.0, 4.0
+            )
+        
+        # NEW: Arm attachment mutations (where arms attach to body)
+        if random.random() < mutation_rate:
+            mutated.arm_attachment_x = self._mutate_bounded(
+                self.arm_attachment_x, 0.5, -0.8, 0.8  # Along body length
+            )
+        if random.random() < mutation_rate:
+            mutated.arm_attachment_y = self._mutate_bounded(
+                self.arm_attachment_y, 0.3, 0.0, 1.0   # Height on body
+            )
+        if random.random() < mutation_rate:
+            mutated.num_arms = max(1, min(3, self.num_arms + random.choice([-1, 0, 1])))
+        if random.random() < mutation_rate:
+            mutated.arm_symmetry = self._mutate_bounded(
+                self.arm_symmetry, 0.3, 0.3, 1.0  # Asymmetrical evolution!
+            )
+        if random.random() < mutation_rate:
+            mutated.arm_angle_offset = self._mutate_bounded(
+                self.arm_angle_offset, 0.4, -np.pi/3, np.pi/3
+            )
+        
+        # NEW: Limb specialization mutations
+        if random.random() < mutation_rate:
+            specializations = ["general", "digging", "climbing", "swimming", "grasping"]
+            mutated.limb_specialization = random.choice(specializations)
+        if random.random() < mutation_rate:
+            mutated.arm_flexibility = self._mutate_bounded(
+                self.arm_flexibility, 0.3, 0.3, 3.0
+            )
+        if random.random() < mutation_rate:
+            mutated.joint_stiffness = self._mutate_bounded(
+                self.joint_stiffness, 0.3, 0.3, 3.0
+            )
+        
+        # NEW: Wheel/leg mutations (feet evolution!)
+        if random.random() < mutation_rate:
+            wheel_shapes = ["circle", "oval", "star", "bumpy"]
+            mutated.wheel_shape = random.choice(wheel_shapes)
+        if random.random() < mutation_rate:
+            mutated.num_wheels = max(2, min(4, self.num_wheels + random.choice([-1, 0, 1])))
+        if random.random() < mutation_rate:
+            mutated.wheel_asymmetry = self._mutate_bounded(
+                self.wheel_asymmetry, 0.3, 0.0, 0.5
+            )
+        if random.random() < mutation_rate:
+            mutated.leg_angle = self._mutate_bounded(
+                self.leg_angle, 0.3, -np.pi/4, np.pi/4
+            )
+        
+        # NEW: Locomotion type mutations
+        if random.random() < mutation_rate:
+            locomotion_types = ["crawler", "walker", "roller", "jumper", "hybrid"]
+            mutated.locomotion_type = random.choice(locomotion_types)
+        if random.random() < mutation_rate:
+            mutated.ground_contact_area = self._mutate_bounded(
+                self.ground_contact_area, 0.3, 0.2, 3.0
+            )
+        if random.random() < mutation_rate:
+            mutated.stability_preference = self._mutate_bounded(
+                self.stability_preference, 0.3, 0.0, 1.0
+            )
+        
+        # NEW: Appendage mutations (tails and extras!)
+        if random.random() < mutation_rate:
+            mutated.has_tail = not self.has_tail if random.random() < 0.3 else self.has_tail
+        if random.random() < mutation_rate:
+            mutated.tail_length = self._mutate_bounded(
+                self.tail_length, 0.4, 0.3, 2.0
+            )
+        if random.random() < mutation_rate:
+            mutated.tail_flexibility = self._mutate_bounded(
+                self.tail_flexibility, 0.3, 0.3, 2.0
+            )
+        if random.random() < mutation_rate:
+            mutated.appendage_count = max(0, min(3, self.appendage_count + random.choice([-1, 0, 1])))
+        
+        # NEW: Material property mutations
+        if random.random() < mutation_rate:
+            mutated.body_rigidity = self._mutate_bounded(
+                self.body_rigidity, 0.3, 0.3, 3.0
+            )
+        if random.random() < mutation_rate:
+            weight_distributions = ["center", "front", "back", "low", "high"]
+            mutated.weight_distribution = random.choice(weight_distributions)
+        if random.random() < mutation_rate:
+            mutated.structural_reinforcement = self._mutate_bounded(
+                self.structural_reinforcement, 0.3, 0.5, 2.0
+            )
+        
         return mutated
     
     def _mutate_bounded(self, value: float, mutation_strength: float, 
@@ -264,24 +415,58 @@ class PhysicalParameters:
     def get_diversity_metrics(self) -> Dict[str, float]:
         """
         Get metrics that represent the diversity of this parameter set.
-        Used for maintaining population diversity.
+        Used for maintaining population diversity across all evolutionary traits.
         
         Returns:
             Dictionary of diversity metrics
         """
+        # Create hash values for categorical variables to include in diversity
+        body_shape_hash = hash(self.body_shape) % 1000 / 1000.0
+        limb_spec_hash = hash(self.limb_specialization) % 1000 / 1000.0
+        wheel_shape_hash = hash(self.wheel_shape) % 1000 / 1000.0
+        locomotion_hash = hash(self.locomotion_type) % 1000 / 1000.0
+        weight_dist_hash = hash(self.weight_distribution) % 1000 / 1000.0
+        
         return {
-            'body_size': self.body_width * self.body_height,
+            # Original diversity metrics
+            'body_size': self.body_width * self.body_height * self.overall_scale,
             'arm_length_ratio': self.arm_length / self.wrist_length,
             'wheel_body_ratio': self.wheel_radius / self.body_height,
             'motor_power': self.motor_torque * self.motor_speed,
             'learning_aggressiveness': self.learning_rate / self.epsilon,
             'stability_focus': self.stability_weight / self.speed_value_weight,
             'suspension_ratio': self.suspension / self.body_height,
+            
+            # NEW: Shape and form diversity (like different animal body plans!)
+            'body_shape_variety': body_shape_hash,
+            'body_proportions': self.body_aspect_ratio * self.body_taper,
+            'size_scaling': self.overall_scale,
+            'body_curvature': self.body_curve,
+            
+            # NEW: Limb configuration diversity (like arm placement evolution)
+            'arm_positioning': abs(self.arm_attachment_x) + self.arm_attachment_y,
+            'limb_count': self.num_arms + self.num_wheels,
+            'asymmetry_factor': 2.0 - self.arm_symmetry,  # Higher when more asymmetric
+            'limb_specialization_type': limb_spec_hash,
+            'joint_characteristics': self.arm_flexibility * self.joint_stiffness,
+            
+            # NEW: Locomotion diversity (different movement strategies)
+            'wheel_configuration': wheel_shape_hash + self.wheel_asymmetry,
+            'locomotion_strategy': locomotion_hash,
+            'ground_interaction': self.ground_contact_area * self.stability_preference,
+            'leg_positioning': abs(self.leg_angle) + self.leg_spread,
+            
+            # NEW: Structural diversity (like different animal builds)
+            'appendage_complexity': (1.0 if self.has_tail else 0.0) + self.appendage_count * 0.3,
+            'material_properties': self.body_rigidity * self.structural_reinforcement,
+            'weight_balance': weight_dist_hash,
+            'flexibility_spectrum': self.arm_flexibility + self.tail_flexibility,
         }
     
     def validate_and_repair(self) -> 'PhysicalParameters':
         """
         Ensure all parameters are within valid ranges and repair if needed.
+        Validates both original and new evolutionary parameters.
         
         Returns:
             Valid parameter set (may be modified)
@@ -304,6 +489,57 @@ class PhysicalParameters:
         repaired.learning_rate = np.clip(repaired.learning_rate, 0.001, 0.1)
         repaired.epsilon = np.clip(repaired.epsilon, 0.01, 0.8)
         repaired.discount_factor = np.clip(repaired.discount_factor, 0.1, 0.99)
+        
+        # NEW: Validate evolutionary parameters
+        # Body shape and proportions
+        valid_body_shapes = ["rectangle", "oval", "triangle", "trapezoid", "diamond"]
+        if repaired.body_shape not in valid_body_shapes:
+            repaired.body_shape = "rectangle"
+        repaired.body_taper = np.clip(repaired.body_taper, 0.3, 1.5)
+        repaired.body_curve = np.clip(repaired.body_curve, 0.0, 1.0)
+        repaired.overall_scale = np.clip(repaired.overall_scale, 0.4, 2.5)
+        repaired.body_aspect_ratio = np.clip(repaired.body_aspect_ratio, 1.0, 4.0)
+        
+        # Arm attachment and configuration
+        repaired.arm_attachment_x = np.clip(repaired.arm_attachment_x, -0.8, 0.8)
+        repaired.arm_attachment_y = np.clip(repaired.arm_attachment_y, 0.0, 1.0)
+        repaired.num_arms = max(1, min(3, int(repaired.num_arms)))
+        repaired.arm_symmetry = np.clip(repaired.arm_symmetry, 0.3, 1.0)
+        repaired.arm_angle_offset = np.clip(repaired.arm_angle_offset, -np.pi/3, np.pi/3)
+        
+        # Limb specialization
+        valid_specializations = ["general", "digging", "climbing", "swimming", "grasping"]
+        if repaired.limb_specialization not in valid_specializations:
+            repaired.limb_specialization = "general"
+        repaired.arm_flexibility = np.clip(repaired.arm_flexibility, 0.3, 3.0)
+        repaired.joint_stiffness = np.clip(repaired.joint_stiffness, 0.3, 3.0)
+        
+        # Wheel/leg configuration
+        valid_wheel_shapes = ["circle", "oval", "star", "bumpy"]
+        if repaired.wheel_shape not in valid_wheel_shapes:
+            repaired.wheel_shape = "circle"
+        repaired.num_wheels = max(2, min(4, int(repaired.num_wheels)))
+        repaired.wheel_asymmetry = np.clip(repaired.wheel_asymmetry, 0.0, 0.5)
+        repaired.leg_angle = np.clip(repaired.leg_angle, -np.pi/4, np.pi/4)
+        
+        # Locomotion type
+        valid_locomotion_types = ["crawler", "walker", "roller", "jumper", "hybrid"]
+        if repaired.locomotion_type not in valid_locomotion_types:
+            repaired.locomotion_type = "crawler"
+        repaired.ground_contact_area = np.clip(repaired.ground_contact_area, 0.2, 3.0)
+        repaired.stability_preference = np.clip(repaired.stability_preference, 0.0, 1.0)
+        
+        # Appendages
+        repaired.tail_length = max(0.3, repaired.tail_length)
+        repaired.tail_flexibility = np.clip(repaired.tail_flexibility, 0.3, 2.0)
+        repaired.appendage_count = max(0, min(3, int(repaired.appendage_count)))
+        
+        # Material properties
+        repaired.body_rigidity = np.clip(repaired.body_rigidity, 0.3, 3.0)
+        valid_weight_distributions = ["center", "front", "back", "low", "high"]
+        if repaired.weight_distribution not in valid_weight_distributions:
+            repaired.weight_distribution = "center"
+        repaired.structural_reinforcement = np.clip(repaired.structural_reinforcement, 0.5, 2.0)
         
         return repaired
     
