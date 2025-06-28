@@ -72,9 +72,9 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.prev_x = position[0]
         self.last_x_position = self.body.position.x
         
-        # Action persistence for smoother control
-        self.action_persistence_duration = 0.25
+        # Timing and action persistence - FAST for responsive control
         self.last_action_time = time.time()
+        self.action_persistence_duration = 0.1  # Reduced from 0.25s to 0.1s (6 frames at 60 FPS)
         self.current_action_tuple = (1, 0)
         self.current_action = 0
         self.current_state = None

@@ -103,7 +103,63 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         # DON'T initialize learning during __init__ - will be assigned by Learning Manager later
         self._learning_system = None
         
+        # MORPHOLOGY-AWARE ACTION PERSISTENCE: Complex robots need more time per action
+        self._set_morphology_aware_timing()
+        
+        # MULTI-ACTION SYSTEM: Very complex robots can execute multiple actions per step
+        self._set_multi_action_capability()
+        
         print(f"🧠 Created agent {self.id} with {self.physical_params.num_arms} limbs, {self.physical_params.segments_per_limb} segments each (learning will be assigned later)")
+
+    def _set_morphology_aware_timing(self):
+        """Set action persistence duration based on robot complexity."""
+        try:
+            total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+            
+            # DRAMATICALLY REDUCED action persistence for better limb control
+            # Complex robots need rapid action updates for fine-grained coordination
+            if total_joints <= 4:
+                # Simple robots: 0.1s (6 frames at 60 FPS) - much faster than before
+                self.action_persistence_duration = 0.1
+            elif total_joints <= 8:
+                # Medium complexity: 0.067s (4 frames) - very responsive
+                self.action_persistence_duration = 0.067
+            elif total_joints <= 12:
+                # Complex robots: 0.05s (3 frames) - near real-time control
+                self.action_persistence_duration = 0.05
+            else:
+                # Very complex robots: 0.033s (2 frames) - maximum responsiveness
+                self.action_persistence_duration = 0.033
+            
+            # Log timing for complex robots
+            if total_joints > 4:
+                frames_per_action = int(self.action_persistence_duration * 60)
+                print(f"⚡ {total_joints}-joint robot {self.id[:8]}: {self.action_persistence_duration:.3f}s ({frames_per_action} frames) - HIGH FREQUENCY CONTROL")
+                
+        except Exception as e:
+            print(f"⚠️ Error setting morphology-aware timing for agent {self.id}: {e}")
+            self.action_persistence_duration = 0.1  # Fast fallback
+
+    def _set_multi_action_capability(self):
+        """Set up multi-action capability for very complex robots."""
+        try:
+            total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+            
+            # Very complex robots can execute multiple actions per physics step
+            if total_joints >= 15:
+                self.actions_per_step = 3  # Triple action rate for very complex robots
+                print(f"🚀 {total_joints}-joint robot {self.id[:8]}: TRIPLE ACTION RATE (3 actions per step)")
+            elif total_joints >= 10:
+                self.actions_per_step = 2  # Double action rate for complex robots
+                print(f"🚀 {total_joints}-joint robot {self.id[:8]}: DOUBLE ACTION RATE (2 actions per step)")
+            else:
+                self.actions_per_step = 1  # Standard action rate
+                
+            self.action_counter = 0  # Track actions within each step
+                
+        except Exception as e:
+            print(f"⚠️ Error setting multi-action capability for agent {self.id}: {e}")
+            self.actions_per_step = 1  # Fallback to single action
 
     def _initialize_attention_learning(self):
         """Initialize ONLY attention-based deep Q-learning via Learning Manager."""
@@ -912,6 +968,15 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
             actions.append(tuple([-1, 1] + [0] * (total_joints - 2)))
         
         return actions
+        
+    def step(self, dt: float):
+        """Enhanced step function with multi-action capability for complex robots."""
+        # For very complex robots, execute multiple actions per step
+        if hasattr(self, 'actions_per_step') and self.actions_per_step > 1:
+            for _ in range(self.actions_per_step):
+                super().step(dt)  # Execute parent step multiple times
+        else:
+            super().step(dt)  # Standard single step
         
     def destroy(self):
         """Clean up physics bodies safely."""

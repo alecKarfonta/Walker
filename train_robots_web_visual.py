@@ -1833,7 +1833,7 @@ class TrainingEnvironment:
     Manages physics simulation and evolution of diverse crawling robots.
     Enhanced with comprehensive evaluation framework.
     """
-    def __init__(self, num_agents=30, enable_evaluation=False):  # Reduced from 50 to 30 to save memory
+    def __init__(self, num_agents=60, enable_evaluation=False):  # Reduced from 50 to 30 to save memory
         self.num_agents = num_agents
         # CRITICAL FIX: Disable sleeping at the world level to prevent static bodies from going to sleep
         self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
@@ -1959,7 +1959,22 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 3600  # REDUCED: 60 seconds at 60 Hz for faster learning cycles
+        # MORPHOLOGY-AWARE EPISODE LENGTHS: Complex robots need more time to learn
+        # Base episode length depends on robot complexity (number of joints to coordinate)
+        self.base_episode_length = 3600  # 60 seconds for simple 2-joint robots
+        self.episode_length_multipliers = {
+            'simple': 1.0,    # 2-4 joints: 60 seconds (3600 steps)
+            'medium': 5.0,    # 5-8 joints: 5 minutes (18000 steps) 
+            'complex': 15.0,  # 9-12 joints: 15 minutes (54000 steps)
+            'very_complex': 30.0  # 13+ joints: 30 minutes (108000 steps)
+        }
+        
+        # Learning preservation settings
+        self.preserve_learning_on_reset = True  # Use reset_position() instead of full reset()
+        self.learning_progress_threshold = 0.1  # Only full reset if no learning progress
+        
+        # Backward compatibility: default episode length for simple robots
+        self.episode_length = self.base_episode_length
         
         # Enhanced thread safety for Box2D operations
         import threading
@@ -2152,7 +2167,142 @@ class TrainingEnvironment:
         print(f"🌿 Ecosystem dynamics and visualization systems active")
         print(f"🏆 Elite preservation: {self.elite_manager.elite_per_generation} per generation, max {self.elite_manager.max_elite_storage} stored")
         print(f"🏞️ Realistic terrain generated: {len(self.terrain_collision_bodies)} terrain bodies using '{self.terrain_style}' style")
+        
+        # Log the morphology-aware learning time improvements
+        self.log_morphology_aware_learning_times()
 
+    def get_morphology_aware_episode_length(self, agent) -> int:
+        """Calculate episode length based on robot morphology complexity."""
+        try:
+            # Determine robot complexity based on joint count
+            if hasattr(agent, 'physical_params'):
+                total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+            elif hasattr(agent, 'get_actual_joint_count'):
+                total_joints = agent.get_actual_joint_count()
+            else:
+                total_joints = 2  # Default for basic robots
+            
+            # Classify complexity
+            if total_joints <= 4:
+                complexity = 'simple'
+            elif total_joints <= 8:
+                complexity = 'medium'
+            elif total_joints <= 12:
+                complexity = 'complex'
+            else:
+                complexity = 'very_complex'
+            
+            # Calculate episode length
+            multiplier = self.episode_length_multipliers[complexity]
+            episode_length = int(self.base_episode_length * multiplier)
+            
+            return episode_length
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating episode length for agent {getattr(agent, 'id', 'unknown')}: {e}")
+            return self.base_episode_length
+    
+    def should_preserve_learning_on_reset(self, agent) -> bool:
+        """Determine if agent's learning should be preserved during reset."""
+        try:
+            if not self.preserve_learning_on_reset:
+                return False
+            
+            # Always preserve learning for complex robots
+            if hasattr(agent, 'physical_params'):
+                total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+                if total_joints > 4:  # Medium+ complexity robots
+                    return True
+            
+            # Check learning progress for simple robots
+            if hasattr(agent, 'total_reward') and agent.total_reward > self.learning_progress_threshold:
+                return True  # Robot is making progress, preserve learning
+            
+            # Check for recent reward improvements
+            if (hasattr(agent, 'recent_displacements') and 
+                agent.recent_displacements and 
+                len(agent.recent_displacements) >= 3):
+                recent_avg = sum(agent.recent_displacements[-3:]) / 3
+                if recent_avg > 0.001:  # Recent positive movement
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"⚠️ Error checking learning preservation for agent {getattr(agent, 'id', 'unknown')}: {e}")
+            return True  # Default to preserving learning when in doubt
+
+    def log_morphology_aware_learning_times(self):
+        """Log the learning time improvements for different robot complexities."""
+        try:
+            complexity_stats = {
+                'simple': {'count': 0, 'total_time': 0, 'avg_joints': 0},
+                'medium': {'count': 0, 'total_time': 0, 'avg_joints': 0},
+                'complex': {'count': 0, 'total_time': 0, 'avg_joints': 0},
+                'very_complex': {'count': 0, 'total_time': 0, 'avg_joints': 0}
+            }
+            
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False):
+                    continue
+                    
+                try:
+                    # Get joint count
+                    if hasattr(agent, 'physical_params'):
+                        total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+                    else:
+                        total_joints = 2
+                    
+                    # Classify complexity
+                    if total_joints <= 4:
+                        complexity = 'simple'
+                    elif total_joints <= 8:
+                        complexity = 'medium'
+                    elif total_joints <= 12:
+                        complexity = 'complex'
+                    else:
+                        complexity = 'very_complex'
+                    
+                    # Get learning time
+                    episode_length = self.get_morphology_aware_episode_length(agent)
+                    learning_time_minutes = episode_length / (60 * 60)  # Convert steps to minutes
+                    
+                    # Update stats
+                    complexity_stats[complexity]['count'] += 1
+                    complexity_stats[complexity]['total_time'] += learning_time_minutes
+                    complexity_stats[complexity]['avg_joints'] += total_joints
+                    
+                except Exception as e:
+                    continue
+            
+            print(f"\n🧠 === MORPHOLOGY-AWARE LEARNING TIME REPORT ===")
+            total_robots = sum(stats['count'] for stats in complexity_stats.values())
+            print(f"📊 Population: {total_robots} robots with adaptive learning times")
+            
+            for complexity, stats in complexity_stats.items():
+                if stats['count'] > 0:
+                    avg_time = stats['total_time'] / stats['count']
+                    avg_joints = stats['avg_joints'] / stats['count']
+                    multiplier = self.episode_length_multipliers[complexity]
+                    
+                    print(f"   {complexity.upper():12} ({stats['count']:2} robots): "
+                          f"{avg_joints:.1f} joints avg, "
+                          f"{avg_time:.1f} min learning time "
+                          f"({multiplier}x multiplier)")
+            
+            # Calculate total learning capacity improvement
+            old_total_time = total_robots * (self.base_episode_length / (60 * 60))  # All robots at base time
+            new_total_time = sum(stats['total_time'] for stats in complexity_stats.values())
+            improvement_factor = new_total_time / old_total_time if old_total_time > 0 else 1.0
+            
+            print(f"📈 Learning capacity improvement: {improvement_factor:.1f}x total learning time")
+            print(f"   Previous system: {old_total_time:.1f} total robot-minutes")
+            print(f"   New system: {new_total_time:.1f} total robot-minutes")
+            print(f"🎯 Complex robots now get up to 30x more learning time!")
+            
+        except Exception as e:
+            print(f"❌ Error logging morphology-aware learning times: {e}")
+ 
     def _create_ground(self):
         """Creates a static ground body."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
@@ -3593,8 +3743,11 @@ class TrainingEnvironment:
                                     # Check for reset conditions but don't reset immediately
                                     if agent.body and agent.body.position.y < self.world_bounds_y:
                                         agents_to_reset.append(('world_bounds', agent))
-                                    elif agent.steps >= self.episode_length:
-                                        agents_to_reset.append(('episode_end', agent))
+                                    else:
+                                        # MORPHOLOGY-AWARE EPISODE LENGTH: Complex robots get more time
+                                        agent_episode_length = self.get_morphology_aware_episode_length(agent)
+                                        if agent.steps >= agent_episode_length:
+                                            agents_to_reset.append(('episode_end', agent))
                                 except Exception as e:
                                     print(f"⚠️  Error updating agent {agent.id}: {e}")
                                     import traceback
@@ -3609,10 +3762,27 @@ class TrainingEnvironment:
                                     
                                 try:
                                     if reset_type == 'world_bounds':
+                                        # Always just reset position for world bounds (agent fell)
                                         agent.reset_position()
                                     elif reset_type == 'episode_end':
-                                        agent.reset()  # preserves Q-table
-                                        agent.reset_position()
+                                        # LEARNING PRESERVATION: Use intelligent reset strategy
+                                        preserve_learning = self.should_preserve_learning_on_reset(agent)
+                                        
+                                        if preserve_learning:
+                                            # Preserve learning: only reset position and physical state
+                                            agent.reset_position()
+                                            # Reset step counter but keep learning progress
+                                            agent.steps = 0
+                                            # Log learning preservation for complex robots
+                                            if hasattr(agent, 'physical_params'):
+                                                joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+                                                if joints > 4:
+                                                    print(f"🧠 Preserved learning for {joints}-joint robot {agent.id[:8]} (reward: {agent.total_reward:.3f})")
+                                        else:
+                                            # Full reset: agent isn't learning effectively
+                                            agent.reset()  # This resets learning but preserves Q-table structure
+                                            agent.reset_position()
+                                            
                                 except Exception as e:
                                     print(f"⚠️  Error resetting agent {agent.id}: {e}")
                             
