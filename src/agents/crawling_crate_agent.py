@@ -49,8 +49,8 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
 
         # FORCE attention-based learning - no other options
         self.learning_approach = "attention_deep_q_learning"
+        # DON'T initialize learning during __init__ - will be assigned by Learning Manager later
         self._learning_system = None
-        self._initialize_attention_learning()
         
         # Action space definition
         self.actions = [
@@ -89,18 +89,37 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         self.food_distance_history = []
 
     def _initialize_attention_learning(self):
-        """Initialize attention-based deep Q-learning system."""
+        """Initialize attention-based deep Q-learning system via Learning Manager."""
         try:
-            from .attention_deep_q_learning import AttentionDeepQLearning
-            self._learning_system = AttentionDeepQLearning(
-                state_dim=self.state_size,
-                action_dim=self.action_size,
-                learning_rate=0.001
-            )
-            print(f"🧠 Agent {self.id}: Initialized with attention-based deep Q-learning")
+            # CRITICAL: Never create networks directly - ONLY get from Learning Manager
+            # This prevents the constant GPU network recreation that's killing performance
+            from .learning_manager import LearningManager
+            
+            # Try multiple ways to get learning manager instance
+            learning_manager = None
+            if hasattr(self, 'world') and hasattr(self.world, '_training_env'):
+                learning_manager = getattr(self.world._training_env, 'learning_manager', None)
+            
+            if learning_manager:
+                # Use Learning Manager's pooling system - this is the ONLY way to get networks
+                self._learning_system = learning_manager._acquire_attention_network(self.id)
+                if self._learning_system:
+                    print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
+                    return
+                else:
+                    print(f"❌ Agent {self.id}: Learning Manager failed to provide network")
+            else:
+                print(f"❌ Agent {self.id}: No Learning Manager available - agent will have no learning")
+            
+            # CRITICAL: NO FALLBACK NETWORK CREATION - this was the performance killer
+            # If Learning Manager can't provide a network, agent just won't learn
+            # This is better than constant GPU thrashing
+            self._learning_system = None
+            print(f"⚠️ Agent {self.id}: No learning system - will use random actions")
+            
         except Exception as e:
-            print(f"❌ Failed to initialize attention learning for agent {self.id}: {e}")
-            raise RuntimeError(f"Agent {self.id} requires attention learning system")
+            print(f"❌ Error getting learning system for agent {self.id}: {e}")
+            self._learning_system = None
 
     @property
     def q_table(self):

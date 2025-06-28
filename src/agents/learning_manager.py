@@ -55,6 +55,9 @@ class LearningManager:
         self._attention_network_pool_max_size = 10    # Max pooled networks
         self._attention_networks_in_use: Dict[str, Any] = {}  # agent_id -> network
         
+        # Missing attribute that was causing the error
+        self._attention_networks_created = 0
+        
         # NETWORK CREATION TRACKING
         self._network_stats = {
             'total_created': 0,
@@ -745,6 +748,34 @@ class LearningManager:
             if hasattr(agent, 'id'):
                 agent.training_environment = self.training_environment
         print(f"🌍 Training environment injected into {len(agents)} agents")
+        
+        # CRITICAL: Also assign attention networks to all agents
+        self.assign_attention_networks_to_agents(agents)
+    
+    def assign_attention_networks_to_agents(self, agents):
+        """Assign attention networks from the pool to all agents."""
+        assigned_count = 0
+        for agent in agents:
+            if hasattr(agent, 'id') and hasattr(agent, '_learning_system'):
+                # Only assign if agent doesn't already have a network
+                if agent._learning_system is None:
+                    # Get the correct action space size for this agent's morphology
+                    action_size = 6  # Default for basic 2-joint robots
+                    if hasattr(agent, 'action_size'):
+                        action_size = agent.action_size
+                    elif hasattr(agent, 'actions') and agent.actions:
+                        action_size = len(agent.actions)
+                    
+                    # Get attention network with correct action space for this agent
+                    network = self._acquire_attention_network(agent.id, action_size)
+                    if network:
+                        agent._learning_system = network
+                        assigned_count += 1
+                        print(f"🧠 Agent {agent.id[:8]}: {action_size} actions → attention network assigned")
+                    else:
+                        print(f"❌ Failed to assign attention network to agent {agent.id[:8]}")
+        
+        print(f"🔗 Assigned attention networks to {assigned_count}/{len(agents)} agents")
     
     def recommend_approach(self, agent, performance_history: Dict[str, float]) -> LearningApproach:
         """Recommend the best learning approach for an agent based on performance."""
@@ -1005,7 +1036,7 @@ class LearningManager:
             logger.warning(f"Error getting agent state: {e}")
             return (0, 0)
     
-    def _acquire_attention_network(self, agent_id: str):
+    def _acquire_attention_network(self, agent_id: str, action_size: int = 6):
         """Acquire an attention network from the pool or create a new one if pool is empty."""
         try:
             # CRITICAL: Check if agent already has a network (from transfer)
@@ -1014,51 +1045,41 @@ class LearningManager:
                 print(f"♻️ Agent {agent_id[:8]} already has attention network (transferred)")
                 return existing_network
             
-            # Try to reuse an existing network from the pool
+            # PRIORITY FIX: Try to reuse from pool FIRST before creating new networks
             if self._attention_network_pool:
                 network = self._attention_network_pool.pop()
                 self._attention_networks_in_use[agent_id] = network
-                
-                # Update tracking stats
-                self._network_stats['total_reused'] += 1
-                self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
-                self._network_stats['current_in_pool'] = len(self._attention_network_pool)
-                
-                # Update peak usage if needed
-                if self._network_stats['current_in_use'] > self._network_stats['peak_networks_in_use']:
-                    self._network_stats['peak_networks_in_use'] = self._network_stats['current_in_use']
-                
-                print(f"♻️ Reused Attention Network for agent {agent_id[:8]} (pool: {len(self._attention_network_pool)}, reused: {self._network_stats['total_reused']})")
+                print(f"♻️ REUSED Attention Network from pool for agent {agent_id[:8]} (pool: {len(self._attention_network_pool)} left)")
                 return network
             
-            # Pool is empty, create a new network
+            # Create NEW network only if pool is empty (this should be rare now)
+            if not self.attention_deep_q_available:
+                print(f"❌ Attention Deep Q-Learning not available for agent {agent_id}")
+                return None
+            
             from .attention_deep_q_learning import AttentionDeepQLearning
             
-            self._network_creation_count += 1
-            self._network_stats['total_created'] += 1
-            
-            network = AttentionDeepQLearning(
-                state_dim=5,  # Fixed: [arm_angle, elbow_angle, food_distance, food_direction, ground_contact]
-                action_dim=6,  # Fixed: Must match agent action count (not 9)
+            attention_dqn = AttentionDeepQLearning(
+                state_dim=5,  # Fixed state size for all agents
+                action_dim=action_size,  # Correct action size for this agent's morphology
                 learning_rate=0.001
             )
             
-            self._attention_networks_in_use[agent_id] = network
+            self._attention_networks_in_use[agent_id] = attention_dqn
+            self._attention_networks_created += 1
             
-            # Update tracking stats
-            self._network_stats['current_in_use'] = len(self._attention_networks_in_use)
-            self._network_stats['current_in_pool'] = len(self._attention_network_pool)
-            
-            # Update peak usage if needed
-            if self._network_stats['current_in_use'] > self._network_stats['peak_networks_in_use']:
-                self._network_stats['peak_networks_in_use'] = self._network_stats['current_in_use']
-            
-            # Update GPU stats after creating network
-            self._update_gpu_stats()
-            
-            print(f"🧠 NEW Attention Network #{self._network_creation_count} for agent {agent_id[:8]} (created: {self._network_stats['total_created']}, GPU: {self._gpu_stats['current_memory_mb']}MB)")
-            
-            return network
+            # Log with GPU memory info
+            gpu_mem = ""
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    gpu_mem = f" (GPU: {torch.cuda.memory_allocated() // 1024 // 1024}MB)"
+            except:
+                pass
+                
+            print(f"🧠 NEW Attention Network #{self._attention_networks_created} for agent {agent_id[:8]} (created: {self._attention_networks_created}{gpu_mem})")
+            print(f"⚠️ POOL WAS EMPTY - consider increasing pool size or reducing agent death rate")
+            return attention_dqn
             
         except Exception as e:
             print(f"❌ Error acquiring attention network for agent {agent_id}: {e}")

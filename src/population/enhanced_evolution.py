@@ -1069,12 +1069,48 @@ class EnhancedEvolutionEngine:
         self._clear_position_tracking()
         
         for i in range(self.config.population_size):
-            # Create random physical parameters for diversity
-            if i < 5:  # First few agents use default parameters
+            # Create diverse physical parameters with specific focus on limb variety
+            if i < 5:  
+                # First few agents use default parameters (1 arm for baseline)
                 physical_params = PhysicalParameters()
             else:
-                # Create diverse variants
+                # Create TRULY diverse variants with explicit limb diversity
                 physical_params = PhysicalParameters.random_parameters()
+                
+                # FORCE LIMB DIVERSITY: Ensure we get robots with different limb counts
+                limb_distribution = [
+                    1, 1, 1, 1, 1,  # 20% single-arm (baseline)
+                    2, 2, 2, 2,     # 16% two-arm 
+                    3, 3, 3,        # 12% three-arm
+                    4, 4,           # 8% four-arm
+                    5,              # 4% five-arm
+                    6               # 4% six-arm (spider-like)
+                ]
+                
+                # Assign limb count based on position for guaranteed diversity
+                limb_index = (i - 5) % len(limb_distribution)
+                target_limbs = limb_distribution[limb_index]
+                physical_params.num_arms = target_limbs
+                
+                # Also vary segments per limb for even more diversity
+                if target_limbs >= 3:
+                    # Multi-limb robots can have more complex segments
+                    physical_params.segments_per_limb = random.choice([2, 3, 4])
+                else:
+                    # Simple robots keep simpler segments
+                    physical_params.segments_per_limb = random.choice([2, 3])
+                
+                # Ensure arrays match the new segment count
+                segments = physical_params.segments_per_limb
+                physical_params.segment_length_ratios = [1.0 + random.uniform(-0.3, 0.3) for _ in range(segments)]
+                physical_params.segment_width_ratios = [0.8 + random.uniform(-0.2, 0.2) for _ in range(segments)]
+                physical_params.joint_torques = [random.uniform(100, 200) for _ in range(segments)]
+                physical_params.joint_speeds = [random.uniform(2, 5) for _ in range(segments)]
+                physical_params.joint_lower_limits = [-random.uniform(0.5, 1.5) for _ in range(segments)]
+                physical_params.joint_upper_limits = [random.uniform(0.5, 1.5) for _ in range(segments)]
+                physical_params.joint_priority_weights = [random.uniform(0.5, 1.5) for _ in range(segments)]
+                
+                print(f"🦕 Agent {i}: Creating {target_limbs}-limb robot with {segments} segments per limb")
             
             # Get safe spawn position to avoid overlaps
             position = self._get_safe_spawn_position(position_index=i)
@@ -1093,7 +1129,14 @@ class EnhancedEvolutionEngine:
         self.population = population
         self._update_evolution_stats()
         
+        # Log limb diversity stats
+        limb_counts = {}
+        for agent in population:
+            limbs = agent.physical_params.num_arms
+            limb_counts[limbs] = limb_counts.get(limbs, 0) + 1
+        
         print(f"✅ Initial population created with diversity score: {self.diversity_history[-1]:.3f}")
+        print(f"🦕 Limb diversity: {dict(sorted(limb_counts.items()))}")
         print(f"📍 Population spawned across {self.spawn_area_width:.0f} units with {self.min_spacing} unit spacing")
         return population
     

@@ -519,25 +519,13 @@ class RobotMemoryPool:
         
         # Restore learning state if requested
         if restore_learning:
-            snapshot_key = learning_snapshot_id or old_id
-            if snapshot_key in self.learning_snapshots:
-                snapshot = self.learning_snapshots[snapshot_key]
-                self._restore_learning_state(robot, snapshot)
-                print(f"🧠 Restored {snapshot.learning_approach} state from snapshot")
-            else:
-                # FORCE ATTENTION LEARNING: No more Q-table fallbacks
-                try:
-                    robot._initialize_attention_learning()
-                    print(f"🧠 Initialized fresh attention learning (no snapshot available)")
-                except Exception as e:
-                    print(f"⚠️ Error initializing attention learning: {e}")
+            # CRITICAL PERFORMANCE FIX: Disable ALL learning restoration
+            # The constant creation of new neural networks during robot restoration
+            # was causing severe UI slowdown due to GPU memory churn
+            # Robots will get networks from Learning Manager instead
+            print(f"🧠 Skipped learning restoration for performance - robot will get network from Learning Manager")
         else:
-            # FORCE ATTENTION LEARNING: No more Q-table resets
-            try:
-                robot._initialize_attention_learning()
-                print(f"🧠 Initialized fresh attention learning (reset requested)")
-            except Exception as e:
-                print(f"⚠️ Error initializing attention learning: {e}")
+            print(f"🧠 No learning restoration requested for {robot.id}")
         
         print(f"🔄 Reset robot {robot.id} at position ({position[0]:.1f}, {position[1]:.1f})")
     

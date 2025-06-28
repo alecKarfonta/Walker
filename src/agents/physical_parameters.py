@@ -44,7 +44,7 @@ class PhysicalParameters:
     arm_angle_offset: float = 0.0     # Base angle offset for arm positioning
     
     # NEW: Variable limb segments (like different joint configurations!)
-    segments_per_limb: int = 2        # Number of segments per limb (2-5, like different animals)
+    segments_per_limb: int = 2        # Number of segments per limb (2-3, like different animals)
     segment_length_ratios: List[float] = field(default_factory=lambda: [1.0, 1.0])  # Relative lengths of each segment
     segment_width_ratios: List[float] = field(default_factory=lambda: [1.0, 0.8])   # Relative widths of each segment
     joint_flexibility_per_segment: List[float] = field(default_factory=lambda: [1.0, 1.0])  # Flexibility of each joint
@@ -289,7 +289,7 @@ class PhysicalParameters:
         
         # NEW: Variable limb segment mutations (revolutionary limb evolution!)
         if random.random() < mutation_rate:
-            new_segments = max(2, min(5, self.segments_per_limb + random.choice([-1, 0, 1])))
+            new_segments = max(2, min(3, self.segments_per_limb + random.choice([-1, 0, 1])))
             mutated.segments_per_limb = new_segments
             
             # Resize segment parameter arrays to match new segment count
@@ -630,7 +630,7 @@ class PhysicalParameters:
         repaired.arm_angle_offset = np.clip(repaired.arm_angle_offset, -np.pi/3, np.pi/3)
         
         # Variable limb segments validation
-        repaired.segments_per_limb = max(2, min(5, int(repaired.segments_per_limb)))
+        repaired.segments_per_limb = max(2, min(3, int(repaired.segments_per_limb)))
         
         # Ensure segment arrays match the number of segments
         target_size = repaired.segments_per_limb
@@ -732,6 +732,16 @@ class PhysicalParameters:
         """
         if base_params is None:
             base_params = cls()  # Use defaults
+            
+            # FORCE INITIAL DIVERSITY in limb configuration
+            # Create agents with 1-6 limbs instead of starting with 1 and mutating slightly
+            base_params.num_arms = random.randint(1, 6)  # Uniform distribution across all limb counts
+            base_params.segments_per_limb = random.randint(2, 3)  # Variable segment counts
+            
+            # Also force diversity in other key parameters
+            base_params.overall_scale = random.uniform(0.6, 2.0)  # Size variety
+            base_params.body_aspect_ratio = random.uniform(1.2, 3.5)  # Shape variety
+            base_params.motor_torque = random.uniform(80.0, 250.0)  # Power variety
         
         # Create a heavily mutated version
         random_params = base_params.mutate(mutation_rate=0.8)

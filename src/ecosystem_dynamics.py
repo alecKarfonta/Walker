@@ -435,11 +435,11 @@ class EcosystemDynamics:
             prey_energy = agent_energy_levels.get(prey_id, 1.0)
             prey_health = agent_health.get(prey_id, {'health': 1.0})['health']
             
-            # Consumption efficiency by predator role
+            # Consumption efficiency by predator role - DRASTICALLY REDUCED for 10x longer survival
             consumption_rates = {
-                EcosystemRole.CARNIVORE: 0.15,   # Fast consumption
-                EcosystemRole.OMNIVORE: 0.08,    # Moderate consumption  
-                EcosystemRole.SCAVENGER: 0.12    # Good at scavenging
+                EcosystemRole.CARNIVORE: 0.015,   # Reduced from 0.15 to 0.015 (90% reduction)
+                EcosystemRole.OMNIVORE: 0.008,    # Reduced from 0.08 to 0.008 (90% reduction)  
+                EcosystemRole.SCAVENGER: 0.012    # Reduced from 0.12 to 0.012 (90% reduction)
             }
             consumption_rate = consumption_rates.get(predator_role, 0.05)
             

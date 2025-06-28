@@ -98,24 +98,43 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         if hasattr(self, 'temp_action_size'):
             delattr(self, 'temp_action_size')
         
-        # Initialize ONLY attention-based deep Q-learning
-        self._initialize_attention_learning()
+        # DON'T initialize learning during __init__ - will be assigned by Learning Manager later
+        self._learning_system = None
         
-        print(f"🧠 Created attention-learning agent {self.id} with {self.physical_params.num_arms} limbs, {self.physical_params.segments_per_limb} segments each")
+        print(f"🧠 Created agent {self.id} with {self.physical_params.num_arms} limbs, {self.physical_params.segments_per_limb} segments each (learning will be assigned later)")
 
     def _initialize_attention_learning(self):
-        """Initialize ONLY attention-based deep Q-learning."""
+        """Initialize ONLY attention-based deep Q-learning via Learning Manager."""
         try:
-            from .attention_deep_q_learning import AttentionDeepQLearning
-            self._learning_system = AttentionDeepQLearning(
-                state_dim=self.state_size,
-                action_dim=self.action_size,
-                learning_rate=0.001
-            )
-            print(f"🧠 Agent {self.id}: Initialized with attention-based deep Q-learning ({self.action_size} actions)")
+            # CRITICAL: Never create networks directly - ONLY get from Learning Manager
+            # This prevents the constant GPU network recreation that's killing performance
+            from .learning_manager import LearningManager
+            
+            # Try to get learning manager instance from training environment
+            learning_manager = None
+            if hasattr(self, 'world') and hasattr(self.world, '_training_env'):
+                learning_manager = getattr(self.world._training_env, 'learning_manager', None)
+            
+            if learning_manager:
+                # Use Learning Manager's pooling system - this is the ONLY way to get networks
+                self._learning_system = learning_manager._acquire_attention_network(self.id)
+                if self._learning_system:
+                    print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
+                    return
+                else:
+                    print(f"❌ Agent {self.id}: Learning Manager failed to provide network")
+            else:
+                print(f"❌ Agent {self.id}: No Learning Manager available - agent will have no learning")
+            
+            # CRITICAL: NO FALLBACK NETWORK CREATION - this was the performance killer
+            # If Learning Manager can't provide a network, agent just won't learn
+            # This is better than constant GPU thrashing
+            self._learning_system = None
+            print(f"⚠️ Agent {self.id}: No learning system - will use random actions")
+            
         except Exception as e:
-            print(f"❌ Failed to initialize attention learning for agent {self.id}: {e}")
-            raise RuntimeError(f"Agent {self.id} requires attention learning system")
+            print(f"❌ Error getting learning system for agent {self.id}: {e}")
+            self._learning_system = None
 
     @property 
     def q_table(self):
@@ -226,13 +245,32 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         """Apply action to evolved joint configuration."""
         try:
             if hasattr(self, 'limb_joints') and self.limb_joints:
-                self.apply_action_to_joints(action)
+                # CRITICAL FIX: Multi-limb robots need to use their dynamic action space
+                # Convert action index to proper joint action tuple for multi-limb robots
+                if isinstance(action, tuple) and len(action) == 2:
+                    # This is a basic 2-joint action from parent class - need to map to multi-limb
+                    if hasattr(self, 'current_action') and self.current_action is not None:
+                        # Use the current action index to get the proper multi-limb action
+                        if 0 <= self.current_action < len(self.actions):
+                            multi_limb_action = self.actions[self.current_action]
+                            self.apply_action_to_joints(multi_limb_action)
+                        else:
+                            # Fallback: apply action to first 2 joints only
+                            self.apply_action_to_joints(action)
+                    else:
+                        # Fallback: apply action to first 2 joints only
+                        self.apply_action_to_joints(action)
+                else:
+                    # Already a proper multi-joint action tuple
+                    self.apply_action_to_joints(action)
             else:
                 # Fallback to basic joint control
                 super().apply_action(action)
                 
         except Exception as e:
             print(f"⚠️ Error applying action for agent {self.id}: {e}")
+            # Fallback to parent class method
+            super().apply_action(action)
 
     def get_evolutionary_fitness(self) -> float:
         """Calculate comprehensive fitness including morphological efficiency."""
@@ -495,6 +533,13 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
                     joint_lower = -np.pi/4
                     joint_upper = np.pi/2
                 
+                # STABILITY FIX: Reduce torque for complex robots to prevent physics instability
+                total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+                if total_joints > 10:  # Complex robots (more than 10 joints)
+                    stability_factor = max(0.3, 10.0 / total_joints)  # Scale down torque
+                    joint_torque *= stability_factor
+                    joint_speed *= stability_factor
+                
                 joint = self.world.CreateRevoluteJoint(
                     bodyA=prev_body,
                     bodyB=segment,
@@ -627,6 +672,12 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
                         speed = self.physical_params.motor_speed
                     
                     if action_value != 0:
+                        # STABILITY FIX: Reduce action intensity for complex robots
+                        total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+                        if total_joints > 10:  # Complex robots need gentler movements
+                            action_intensity = max(0.3, 10.0 / total_joints)
+                            action_value *= action_intensity
+                        
                         joint.motorSpeed = action_value * speed
                         joint.maxMotorTorque = torque
                         joint.enableMotor = True

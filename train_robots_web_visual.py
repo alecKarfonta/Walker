@@ -1968,6 +1968,13 @@ class TrainingEnvironment:
         self._is_evolving = False  # Flag to prevent concurrent evolution
         self._agents_pending_destruction = []  # Safe destruction queue
         
+        # LIMB DISTRIBUTION TRACKING: Monitor multi-limb robot survival
+        self.limb_distribution_history = []
+        self.last_limb_distribution_log = 0
+        self.limb_distribution_interval = 10.0  # Log every 10 seconds
+        self.agent_creation_log = {}  # Track when agents are created
+        self.agent_death_log = {}    # Track when agents die
+        
         # Statistics update timing
         self.stats_update_interval = 2.0
         self.last_stats_update = 0
@@ -2720,13 +2727,13 @@ class TrainingEnvironment:
                 energy_gain, consumed_food_type, consumed_food_position = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
                 # Energy gain is now properly scaled in the consume_resource function
                 
-                # Apply consistent energy decay (not paused during eating) - REDUCED for better survival
-                base_decay = 0.00005  # Reduced from 0.0001 to 0.00005 (50% reduction)
+                # Apply consistent energy decay (not paused during eating) - DRASTICALLY REDUCED for much better survival
+                base_decay = 0.000005  # Reduced from 0.00005 to 0.000005 (90% reduction - 10x longer survival)
                 
                 # Minimal additional decay based on movement 
                 velocity = agent.body.linearVelocity
                 speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
-                movement_cost = speed * 0.0005  # Reduced movement cost to match base decay
+                movement_cost = speed * 0.00005  # Reduced movement cost by 90%
                 
                 # Role-based energy costs (minimal differences)
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -2754,8 +2761,8 @@ class TrainingEnvironment:
                             print(f"💚 {agent_id[:8]} is recovering health (energy: {current_energy:.2f})")
                     
                     elif current_energy < 0.1:
-                        # RESTORED: Normal health degradation since we're reusing networks
-                        health_degradation = 0.001  # Normal health loss when starving
+                        # DRASTICALLY REDUCED: Much slower health degradation for 10x longer survival
+                        health_degradation = 0.0001  # Reduced from 0.001 to 0.0001 (90% reduction)
                         self.agent_health[agent_id]['health'] = max(0.0, current_health - health_degradation)
                         if current_health - health_degradation <= 0.0:
                             print(f"💀 {agent_id[:8]} is starving to death (health: {current_health:.3f})")
@@ -3140,10 +3147,108 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"❌ Error initializing ecosystem data for agent {agent_id}: {e}")
 
+    def _track_limb_distribution(self):
+        """Track and log the distribution of limb counts among agents."""
+        try:
+            current_time = time.time()
+            if current_time - self.last_limb_distribution_log < self.limb_distribution_interval:
+                return
+            
+            # Count limbs for all active agents
+            limb_counts = {}
+            multi_limb_details = []
+            total_agents = 0
+            
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False) or not hasattr(agent, 'physical_params'):
+                    continue
+                    
+                total_agents += 1
+                num_limbs = getattr(agent.physical_params, 'num_arms', 1)
+                num_segments = getattr(agent.physical_params, 'segments_per_limb', 2)
+                
+                if num_limbs not in limb_counts:
+                    limb_counts[num_limbs] = 0
+                limb_counts[num_limbs] += 1
+                
+                # Track multi-limb robot details
+                if num_limbs > 1:
+                    multi_limb_details.append({
+                        'id': agent.id,
+                        'limbs': num_limbs,
+                        'segments': num_segments,
+                        'total_joints': num_limbs * num_segments,
+                        'position': (agent.body.position.x, agent.body.position.y) if agent.body else (0, 0),
+                        'reward': getattr(agent, 'total_reward', 0)
+                    })
+            
+            # Calculate percentages
+            limb_percentages = {}
+            for limbs, count in limb_counts.items():
+                limb_percentages[limbs] = (count / total_agents * 100) if total_agents > 0 else 0
+            
+            # Store history
+            distribution_entry = {
+                'timestamp': current_time,
+                'total_agents': total_agents,
+                'limb_counts': limb_counts.copy(),
+                'limb_percentages': limb_percentages.copy(),
+                'multi_limb_count': sum(count for limbs, count in limb_counts.items() if limbs > 1),
+                'multi_limb_details': multi_limb_details.copy()
+            }
+            self.limb_distribution_history.append(distribution_entry)
+            
+            # Keep only last 100 entries
+            if len(self.limb_distribution_history) > 100:
+                self.limb_distribution_history = self.limb_distribution_history[-100:]
+            
+            # Log current distribution
+            print(f"\n🦾 === LIMB DISTRIBUTION REPORT (Step {self.step_count}) ===")
+            print(f"👥 Total Active Agents: {total_agents}")
+            
+            for limbs in sorted(limb_counts.keys()):
+                count = limb_counts[limbs]
+                percentage = limb_percentages[limbs]
+                limb_emoji = "🦾" if limbs == 1 else "🕷️" if limbs <= 3 else "🐙" if limbs <= 5 else "👾"
+                print(f"   {limb_emoji} {limbs}-limb robots: {count:2d} ({percentage:5.1f}%)")
+            
+            # Detailed multi-limb robot info
+            if multi_limb_details:
+                print(f"\n🔍 Multi-Limb Robot Details ({len(multi_limb_details)} robots):")
+                for detail in sorted(multi_limb_details, key=lambda x: x['limbs'], reverse=True):
+                    print(f"   🤖 Agent {detail['id'][:8]}: {detail['limbs']} limbs × {detail['segments']} segments = {detail['total_joints']} joints")
+                    print(f"      📍 Position: ({detail['position'][0]:.1f}, {detail['position'][1]:.1f}), Reward: {detail['reward']:.2f}")
+            else:
+                print("❌ NO MULTI-LIMB ROBOTS FOUND!")
+                
+            # Show trend if we have history
+            if len(self.limb_distribution_history) >= 2:
+                prev_multi = self.limb_distribution_history[-2]['multi_limb_count']
+                curr_multi = distribution_entry['multi_limb_count']
+                change = curr_multi - prev_multi
+                
+                if change > 0:
+                    print(f"📈 Multi-limb robots INCREASED by {change} (+{change/max(1,prev_multi)*100:.1f}%)")
+                elif change < 0:
+                    print(f"📉 Multi-limb robots DECREASED by {abs(change)} ({change/max(1,prev_multi)*100:.1f}%)")
+                else:
+                    print(f"➡️ Multi-limb robot count STABLE")
+            
+            print(f"🦾 === END LIMB DISTRIBUTION REPORT ===\n")
+            self.last_limb_distribution_log = current_time
+            
+        except Exception as e:
+            print(f"❌ Error tracking limb distribution: {e}")
+            import traceback
+            traceback.print_exc()
+
     def _update_statistics(self):
         """Update population statistics with enhanced safety checks."""
         if not self.agents:
             return
+        
+        # Track limb distribution
+        self._track_limb_distribution()
         
         # Use agent ID as key instead of list index to avoid evolution issues
         for agent in self.agents:
@@ -3989,10 +4094,20 @@ class TrainingEnvironment:
                         body_parts = []
                         # Chassis, Arms, Wheels
                         body_list = [agent.body] + (agent.wheels or [])
-                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
-                            body_list.append(agent.upper_arm)
-                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
-                            body_list.append(agent.lower_arm)
+                        
+                        # MULTI-LIMB RENDERING FIX: Render ALL limbs, not just first 2
+                        if hasattr(agent, 'limbs') and agent.limbs:
+                            # Multi-limb robot: render all limb segments
+                            for limb_segments in agent.limbs:
+                                for segment in limb_segments:
+                                    if segment:
+                                        body_list.append(segment)
+                        else:
+                            # Legacy single-limb robot: render upper_arm and lower_arm
+                            if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                                body_list.append(agent.upper_arm)
+                            if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                                body_list.append(agent.lower_arm)
                             
                         for part in body_list:
                             if not part:  # Skip None bodies
@@ -4104,6 +4219,7 @@ class TrainingEnvironment:
                         is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
                         
                         # Basic data for all agents (needed for rendering)
+                        # Basic data for all agents (needed for rendering)
                         basic_agent_data = {
                             'id': agent.id,
                             'body': {
@@ -4114,15 +4230,41 @@ class TrainingEnvironment:
                                     'y': float(agent.body.linearVelocity.y)
                                 }
                             },
-                            'upper_arm': {
+                            'total_reward': float(agent.total_reward),
+                        }
+                        
+                        # MULTI-LIMB DATA FIX: Include all limbs for rendering
+                        if hasattr(agent, 'limbs') and agent.limbs:
+                            # Multi-limb robot: include all limb segment positions
+                            limbs_data = []
+                            for limb_idx, limb_segments in enumerate(agent.limbs):
+                                segments_data = []
+                                for segment_idx, segment in enumerate(limb_segments):
+                                    if segment:
+                                        segments_data.append({
+                                            'x': float(segment.position.x),
+                                            'y': float(segment.position.y),
+                                            'angle': float(segment.angle)
+                                        })
+                                    else:
+                                        segments_data.append({'x': 0, 'y': 0, 'angle': 0})
+                                limbs_data.append(segments_data)
+                            basic_agent_data['limbs'] = limbs_data
+                            basic_agent_data['num_limbs'] = len(agent.limbs)
+                            basic_agent_data['segments_per_limb'] = len(agent.limbs[0]) if agent.limbs else 0
+                        else:
+                            # Legacy single-limb robot: use upper_arm and lower_arm
+                            basic_agent_data['upper_arm'] = {
                                 'x': float(agent.upper_arm.position.x) if agent.upper_arm else 0,
                                 'y': float(agent.upper_arm.position.y) if agent.upper_arm else 0
-                            },
-                            'lower_arm': {
+                            }
+                            basic_agent_data['lower_arm'] = {
                                 'x': float(agent.lower_arm.position.x) if agent.lower_arm else 0,
                                 'y': float(agent.lower_arm.position.y) if agent.lower_arm else 0
-                            },
-                            'total_reward': float(agent.total_reward),
+                            }
+                        
+                        # Add ecosystem data
+                        basic_agent_data.update({
                             # Basic ecosystem data for rendering
                             'ecosystem': {
                                 'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
@@ -4131,7 +4273,7 @@ class TrainingEnvironment:
                                 'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
                                 'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
                             }
-                        }
+                        })
                         agents_data.append(basic_agent_data)
                         
                         # Add detailed data for focused agent
