@@ -1,4 +1,4 @@
 # Agents package
 from .base_agent import BaseAgent
-from .basic_agent import BasicAgent
-from .crawling_crate import CrawlingCrate 
+from .crawling_agent import CrawlingAgent
+from .physical_parameters import PhysicalParameters 

@@ -36,7 +36,7 @@ from src.ecosystem_dynamics import EcosystemDynamics, EcosystemRole
 from src.environment_challenges import EnvironmentalSystem
 
 # Import survival Q-learning integration
-from src.agents.ecosystem_interface import EcosystemInterface
+# EcosystemInterface removed - was part of learning manager system
 # Learning manager removed - agents handle their own learning
 
 # Import elite robot management
