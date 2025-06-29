@@ -2110,11 +2110,11 @@ class TrainingEnvironment:
         
         # Performance optimization tracking with AGGRESSIVE cleanup
         self.last_performance_cleanup = time.time()
-        self.performance_cleanup_interval = 60.0  # INCREASED from 120.0 to 60.0 - clean up every minute
+        self.performance_cleanup_interval = 10.0  # MUCH more frequent - every 10 seconds
         
         # Attention network specific cleanup
         self.last_attention_cleanup = time.time()
-        self.attention_cleanup_interval = 30.0  # Clean attention data every 30 seconds
+        self.attention_cleanup_interval = 5.0  # MUCH more frequent - every 5 seconds
         
         # Web interface throttling
         self.last_web_interface_update = time.time()
@@ -3836,7 +3836,7 @@ class TrainingEnvironment:
             # Update agent energy levels through resource consumption
             self._update_resource_consumption()
             
-            # Health check logging every 30 seconds
+            # Health check logging every 30 seconds with DETAILED MEMORY TRACKING
             if current_time - last_health_check > 30.0:
                 try:
                     import psutil
@@ -3845,7 +3845,30 @@ class TrainingEnvironment:
                     memory_mb = process.memory_info().rss / 1024 / 1024
                     cpu_percent = process.cpu_percent()
                     active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
+                    
+                    # DETAILED MEMORY TRACKING in health check
+                    total_buffers = 0
+                    max_buffer_size = 0
+                    agents_with_learning = 0
+                    for agent in self.agents:
+                        if getattr(agent, '_destroyed', False):
+                            continue
+                        if hasattr(agent, '_learning_system') and agent._learning_system:
+                            agents_with_learning += 1
+                            if hasattr(agent._learning_system, 'memory') and hasattr(agent._learning_system.memory, 'buffer'):
+                                buffer_size = len(agent._learning_system.memory.buffer)
+                                total_buffers += buffer_size
+                                max_buffer_size = max(max_buffer_size, buffer_size)
+                    
                     print(f"💚 HEALTH CHECK: Memory={memory_mb:.1f}MB, CPU={cpu_percent:.1f}%, Agents={active_agents}, Step={self.step_count}")
+                    print(f"   🧠 Learning agents: {agents_with_learning}, Total buffer entries: {total_buffers}, Max buffer: {max_buffer_size}")
+                    
+                    # Alert if memory is too high
+                    if memory_mb > 800:
+                        print(f"⚠️ HIGH MEMORY USAGE: {memory_mb:.1f}MB - triggering aggressive cleanup")
+                        self._cleanup_performance_data()
+                        self._cleanup_attention_networks()
+                        
                 except Exception as e:
                     print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
                 last_health_check = current_time
@@ -5544,26 +5567,53 @@ class TrainingEnvironment:
     def _cleanup_performance_data(self):
         """Clean up accumulated performance data to prevent memory growth."""
         try:
+            # DETAILED LOGGING: Track what's accumulating
+            total_action_history = 0
+            total_replay_buffer = 0
+            total_attention_history = 0
+            agents_with_large_buffers = 0
+            
             # Clean up Q-learning history data
             for agent in self.agents:
                 if getattr(agent, '_destroyed', False):
                     continue
                     
-                # Limit action history
-                if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
-                    agent.action_history = agent.action_history[-50:]
+                # Track action history sizes
+                if hasattr(agent, 'action_history'):
+                    action_size = len(agent.action_history)
+                    total_action_history += action_size
+                    if action_size > 50:
+                        agent.action_history = agent.action_history[-50:]
+                
+                # Track replay buffer sizes
+                if (hasattr(agent, '_learning_system') and agent._learning_system and 
+                    hasattr(agent._learning_system, 'memory') and 
+                    hasattr(agent._learning_system.memory, 'buffer')):
+                    buffer_size = len(agent._learning_system.memory.buffer)
+                    total_replay_buffer += buffer_size
+                    if buffer_size > 1000:
+                        agents_with_large_buffers += 1
+                
+                # Track attention history sizes
+                if (hasattr(agent, '_learning_system') and agent._learning_system and
+                    hasattr(agent._learning_system, 'attention_history')):
+                    attention_size = len(agent._learning_system.attention_history)
+                    total_attention_history += attention_size
                 
                 
-                # Clean up replay buffer if too large
-                if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
-                    buffer_capacity = getattr(agent.replay_buffer, 'capacity', 3000)
-                    if len(agent.replay_buffer.buffer) > buffer_capacity * 0.9:
-                        # Remove oldest 25% of experiences
-                        old_size = len(agent.replay_buffer.buffer)
-                        remove_count = old_size // 4
+                # Clean up replay buffer if too large (FIXED: correct path)
+                if (hasattr(agent, '_learning_system') and agent._learning_system and 
+                    hasattr(agent._learning_system, 'memory') and 
+                    hasattr(agent._learning_system.memory, 'buffer')):
+                    buffer = agent._learning_system.memory.buffer
+                    buffer_capacity = getattr(agent._learning_system.memory, 'maxlen', 3000)
+                    if len(buffer) > buffer_capacity * 0.5:  # More aggressive - clean at 50%
+                        # Remove oldest 50% of experiences more aggressively
+                        old_size = len(buffer)
+                        remove_count = old_size // 2
                         for _ in range(remove_count):
-                            if agent.replay_buffer.buffer:
-                                agent.replay_buffer.buffer.popleft()
+                            if buffer:
+                                buffer.popleft()
             
             # Clean up old robot stats for destroyed agents
             active_agent_ids = {agent.id for agent in self.agents if not getattr(agent, '_destroyed', False)}
@@ -5579,7 +5629,17 @@ class TrainingEnvironment:
                 ]
             
             # Memory pool handles its own cleanup automatically
-            print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
+            
+            # DETAILED MEMORY TRACKING LOGS
+            print(f"🧹 MEMORY TRACKING - Performance cleanup completed:")
+            print(f"   📊 Active agents: {len(self.agents)}")
+            print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
+            print(f"   📊 Total action history entries: {total_action_history}")
+            print(f"   📊 Total replay buffer entries: {total_replay_buffer}")
+            print(f"   📊 Total attention history entries: {total_attention_history}")
+            print(f"   📊 Agents with large buffers (>1k): {agents_with_large_buffers}")
+            print(f"   📊 Avg replay buffer per agent: {total_replay_buffer / max(1, len(self.agents)):.1f}")
+            print(f"   📊 Avg attention per agent: {total_attention_history / max(1, len(self.agents)):.1f}")
             
             # AGGRESSIVE: Clean up attention network specific data
             attention_networks_cleaned = 0
@@ -5587,26 +5647,28 @@ class TrainingEnvironment:
                 if getattr(agent, '_destroyed', False):
                     continue
                 
-                # Clean up attention networks
-                if hasattr(agent, '_attention_dqn') and agent._attention_dqn:
-                    # Clean attention history
-                    if hasattr(agent._attention_dqn, 'attention_history'):
-                        old_size = len(agent._attention_dqn.attention_history)
-                        if old_size > 25:  # Keep only 25 most recent
-                            agent._attention_dqn.attention_history = deque(
-                                list(agent._attention_dqn.attention_history)[-25:], 
-                                maxlen=50
+                # Clean up attention networks (FIXED: correct path)
+                if hasattr(agent, '_learning_system') and agent._learning_system:
+                    learning_system = agent._learning_system
+                    
+                    # Clean attention history aggressively
+                    if hasattr(learning_system, 'attention_history'):
+                        old_size = len(learning_system.attention_history)
+                        if old_size > 10:  # Keep only 10 most recent (was 25)
+                            learning_system.attention_history = deque(
+                                list(learning_system.attention_history)[-10:], 
+                                maxlen=25  # Reduced from 50
                             )
                             attention_networks_cleaned += 1
                     
                     # Aggressively clean experience replay buffer
-                    if hasattr(agent._attention_dqn, 'memory') and hasattr(agent._attention_dqn.memory, 'buffer'):
-                        buffer_size = len(agent._attention_dqn.memory.buffer)
-                        if buffer_size > 10000:  # Keep only 10k experiences max
-                            # Keep only most recent 10k experiences
-                            agent._attention_dqn.memory.buffer = deque(
-                                list(agent._attention_dqn.memory.buffer)[-10000:],
-                                maxlen=25000
+                    if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
+                        buffer_size = len(learning_system.memory.buffer)
+                        if buffer_size > 1000:  # Much more aggressive - clean at 1k (was 10k)
+                            # Keep only most recent 1k experiences
+                            learning_system.memory.buffer = deque(
+                                list(learning_system.memory.buffer)[-1000:],
+                                maxlen=3000  # Reduced from 25000
                             )
             
             if attention_networks_cleaned > 0:

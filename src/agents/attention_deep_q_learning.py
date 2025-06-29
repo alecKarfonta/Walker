@@ -188,8 +188,8 @@ class AttentionDeepQLearning:
         self.target_update_freq = 1000
         self.steps_done = 0
         
-        # Experience replay memory
-        self.memory = deque(maxlen=10000)
+        # Experience replay memory (FIXED: Reduced from 10000 to 1000 to prevent memory leak)
+        self.memory = deque(maxlen=1000)
         self.use_prioritized_replay = False
         
         # Replace with arm control attention-based network
@@ -202,7 +202,7 @@ class AttentionDeepQLearning:
         # Copy weights to target network
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        self.attention_history = deque(maxlen=5000)  # Increased from 1000 to 5000
+        self.attention_history = deque(maxlen=50)  # FIXED: Reduced from 5000 to 50 to prevent memory leak
         
         # Performance optimization tracking - MUCH less aggressive
         self._last_cleanup_time = time.time()
@@ -399,12 +399,12 @@ class AttentionDeepQLearning:
                 # Remove entries older than 30 minutes (was 5 minutes)
                 cutoff_time = current_time - 1800.0  # 30 minutes instead of 5 minutes
                 
-                # Keep more records - minimum 500, maximum 5000
+                # Keep minimal records - maximum 25 (FIXED: much smaller)
                 old_size = len(self.attention_history)
                 self.attention_history = deque([
                     entry for entry in self.attention_history 
                     if entry.get('timestamp', current_time) > cutoff_time
-                ], maxlen=5000)  # Increased from 50 to 5000
+                ], maxlen=25)  # FIXED: Reduced from 5000 to 25
                 
                 # Only log if significant cleanup happened
                 if old_size - len(self.attention_history) > 100:
