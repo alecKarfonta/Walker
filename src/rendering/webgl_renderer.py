@@ -481,6 +481,103 @@ WEBGL_HTML_TEMPLATE = """
                 this.renderTriangles(positions, colors, indices);
             }
             
+            drawRectangle(x, y, width, height, color) {
+                // Draw a rectangle using two triangles
+                const positions = [
+                    x, y,                    // Bottom-left
+                    x + width, y,            // Bottom-right
+                    x + width, y + height,   // Top-right
+                    x, y + height            // Top-left
+                ];
+                
+                const colors = [];
+                for (let i = 0; i < 4; i++) {
+                    colors.push(color[0], color[1], color[2], color[3]);
+                }
+                
+                const indices = [0, 1, 2, 0, 2, 3];
+                
+                this.renderTriangles(positions, colors, indices);
+            }
+            
+            drawHealthEnergyBars(x, y, health, energy) {
+                // Health and energy bars positioned above the robot (matching Canvas 2D version)
+                const barWidth = 2.0;
+                const barHeight = 0.3;
+                const barSpacing = 0.4;
+                const baseY = y + 3.0; // Position above robot
+                
+                // Health bar background
+                this.drawRectangle(x - barWidth/2, baseY, barWidth, barHeight, [0.2, 0.2, 0.2, 0.8]);
+                
+                // Health bar foreground
+                const healthColor = health > 0.5 ? [0.29, 0.69, 0.31, 1.0] : // Green
+                                   health > 0.25 ? [1.0, 0.6, 0.0, 1.0] :     // Orange  
+                                   [0.96, 0.26, 0.21, 1.0];                   // Red
+                this.drawRectangle(x - barWidth/2, baseY, barWidth * health, barHeight, healthColor);
+                
+                // Energy bar background
+                this.drawRectangle(x - barWidth/2, baseY + barSpacing, barWidth, barHeight, [0.2, 0.2, 0.2, 0.8]);
+                
+                // Energy bar foreground
+                const energyColor = energy > 0.5 ? [0.13, 0.59, 0.95, 1.0] : // Blue
+                                   energy > 0.25 ? [1.0, 0.6, 0.0, 1.0] :     // Orange
+                                   [0.96, 0.26, 0.21, 1.0];                   // Red
+                this.drawRectangle(x - barWidth/2, baseY + barSpacing, barWidth * energy, barHeight, energyColor);
+            }
+            
+            drawEnhancedFoodSource(x, y, radius, amount, maxCapacity, foodType) {
+                // Enhanced food source rendering with visual improvements
+                const ratio = amount / maxCapacity;
+                
+                // Base colors for different food types
+                let baseColor, glowColor;
+                switch (foodType) {
+                    case 'plants':
+                        baseColor = [0.27, 0.76, 0.31, 0.9];    // Green
+                        glowColor = [0.4, 0.9, 0.4, 0.4];      // Light green glow
+                        break;
+                    case 'insects':
+                        baseColor = [0.47, 0.33, 0.28, 0.9];   // Brown
+                        glowColor = [0.6, 0.45, 0.35, 0.4];    // Light brown glow
+                        break;
+                    case 'seeds':
+                        baseColor = [1.0, 0.6, 0.0, 0.9];      // Orange
+                        glowColor = [1.0, 0.8, 0.2, 0.4];      // Light orange glow
+                        break;
+                    default:
+                        baseColor = [0.5, 0.5, 0.5, 0.9];      // Gray
+                        glowColor = [0.7, 0.7, 0.7, 0.4];      // Light gray glow
+                }
+                
+                // Outer glow (larger, transparent)
+                const glowRadius = radius * 1.4;
+                this.drawCircle(x, y, glowRadius, glowColor);
+                
+                // Main food circle (size based on amount)
+                const mainRadius = 0.6 + (ratio * 1.4); // Varying size based on food amount
+                this.drawCircle(x, y, mainRadius, baseColor);
+                
+                // Inner highlight (smaller, brighter) - only if there's substantial food
+                if (ratio > 0.3) {
+                    const highlightColor = [
+                        Math.min(1.0, baseColor[0] + 0.3),
+                        Math.min(1.0, baseColor[1] + 0.3), 
+                        Math.min(1.0, baseColor[2] + 0.3),
+                        0.6
+                    ];
+                    const highlightRadius = mainRadius * 0.4;
+                    this.drawCircle(x + highlightRadius * 0.3, y + highlightRadius * 0.3, highlightRadius, highlightColor);
+                }
+                
+                // Depletion indicator (darker overlay when low)
+                if (ratio < 0.3) {
+                    const depletionAlpha = (0.3 - ratio) * 2.0; // 0 to 0.6 alpha
+                    const depletionColor = [0.1, 0.1, 0.1, depletionAlpha];
+                    this.drawCircle(x, y, mainRadius, depletionColor);
+                }
+            }
+            
             renderTriangles(positions, colors, indices) {
                 this.gl.useProgram(this.shapeProgram);
                 
@@ -629,27 +726,20 @@ WEBGL_HTML_TEMPLATE = """
                 });
             }
             
-            // Draw ecosystem elements (food sources)
+            // Draw ecosystem elements (food sources) with enhanced rendering
             if (data.ecosystem && data.ecosystem.food_sources) {
                 data.ecosystem.food_sources.forEach(food => {
                     const [x, y] = food.position;
                     const amount = food.amount;
                     const maxCapacity = food.max_capacity;
-                    const ratio = amount / maxCapacity;
+                    const baseRadius = 0.8;
                     
-                    let foodColor = [0.27, 0.76, 0.31, 0.8]; // Green for plants
-                    switch (food.type) {
-                        case 'plants': foodColor = [0.27, 0.76, 0.31, 0.8]; break;
-                        case 'insects': foodColor = [0.47, 0.33, 0.28, 0.8]; break;
-                        case 'seeds': foodColor = [1.0, 0.6, 0.0, 0.8]; break;
-                    }
-                    
-                    const radius = 0.8 + (ratio * 1.2);
-                    renderer.drawCircle(x, y, radius, foodColor);
+                    // Use enhanced food source rendering
+                    renderer.drawEnhancedFoodSource(x, y, baseRadius, amount, maxCapacity, food.type);
                 });
             }
             
-            // Draw robots
+            // Draw robots with health and energy bars
             if (data.shapes && data.shapes.robots && data.agents) {
                 data.shapes.robots.forEach(robot => {
                     const agent = data.agents.find(a => a.id === robot.id);
@@ -658,6 +748,8 @@ WEBGL_HTML_TEMPLATE = """
                     const isFocused = (robot.id === focusedAgentId);
                     const ecosystem = agent.ecosystem || {};
                     const role = ecosystem.role || 'omnivore';
+                    const health = ecosystem.health || 1.0;
+                    const energy = ecosystem.energy || 1.0;
                     
                     let robotColor = ECOSYSTEM_COLORS_WEBGL[role] || [0.53, 0.53, 0.53, 0.8];
                     
@@ -674,6 +766,13 @@ WEBGL_HTML_TEMPLATE = """
                             renderer.drawCircle(part.center[0], part.center[1], part.radius, robotColor);
                         }
                     });
+                    
+                    // Draw health and energy bars above the robot
+                    if (agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
+                        const robotX = agent.body.x;
+                        const robotY = agent.body.y;
+                        renderer.drawHealthEnergyBars(robotX, robotY, health, energy);
+                    }
                 });
             }
             
@@ -722,7 +821,7 @@ WEBGL_HTML_TEMPLATE = """
                 });
             }
             
-            // Draw robots (simplified)
+            // Draw robots (simplified) with health and energy bars
             if (data.shapes && data.shapes.robots) {
                 data.shapes.robots.forEach(robot => {
                     const agent = data.agents?.find(a => a.id === robot.id);
@@ -731,6 +830,8 @@ WEBGL_HTML_TEMPLATE = """
                     const isFocused = (robot.id === focusedAgentId);
                     const ecosystem = agent.ecosystem || {};
                     const role = ecosystem.role || 'omnivore';
+                    const health = ecosystem.health || 1.0;
+                    const energy = ecosystem.energy || 1.0;
                     
                     let color = '#888888';
                     switch (role) {
@@ -761,6 +862,32 @@ WEBGL_HTML_TEMPLATE = """
                         ctx.fill();
                         ctx.stroke();
                     });
+                    
+                    // Draw health and energy bars (Canvas 2D fallback version)
+                    if (agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
+                        const robotX = agent.body.x;
+                        const robotY = agent.body.y;
+                        const barWidth = 2.0;
+                        const barHeight = 0.3;
+                        const barSpacing = 0.4;
+                        const baseY = robotY + 3.0;
+                        
+                        // Health bar background
+                        ctx.fillStyle = '#333333';
+                        ctx.fillRect(robotX - barWidth/2, baseY, barWidth, barHeight);
+                        
+                        // Health bar foreground
+                        ctx.fillStyle = health > 0.5 ? '#4CAF50' : health > 0.25 ? '#FF9800' : '#F44336';
+                        ctx.fillRect(robotX - barWidth/2, baseY, barWidth * health, barHeight);
+                        
+                        // Energy bar background
+                        ctx.fillStyle = '#333333';
+                        ctx.fillRect(robotX - barWidth/2, baseY + barSpacing, barWidth, barHeight);
+                        
+                        // Energy bar foreground
+                        ctx.fillStyle = energy > 0.5 ? '#2196F3' : energy > 0.25 ? '#FF9800' : '#F44336';
+                        ctx.fillRect(robotX - barWidth/2, baseY + barSpacing, barWidth * energy, barHeight);
+                    }
                 });
             }
             
