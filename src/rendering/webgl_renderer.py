@@ -740,16 +740,21 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             // Draw robots with health and energy bars
-            if (data.shapes && data.shapes.robots && data.agents) {
+            if (data.shapes && data.shapes.robots && (data.all_agents || data.agents)) {
                 data.shapes.robots.forEach(robot => {
-                    const agent = data.agents.find(a => a.id === robot.id);
-                    if (!agent) return;
+                    // Use all_agents first (contains complete ecosystem data), fallback to agents
+                    const agentList = data.all_agents || data.agents;
+                    const agent = agentList.find(a => a.id === robot.id);
+                    if (!agent) {
+                        console.warn(`⚠️ Agent not found for robot ${robot.id}`);
+                        return;
+                    }
                     
                     const isFocused = (robot.id === focusedAgentId);
                     const ecosystem = agent.ecosystem || {};
                     const role = ecosystem.role || 'omnivore';
-                    const health = ecosystem.health || 1.0;
-                    const energy = ecosystem.energy || 1.0;
+                    const health = ecosystem.health || 0.0;
+                    const energy = ecosystem.energy || 0.0;
                     
                     let robotColor = ECOSYSTEM_COLORS_WEBGL[role] || [0.53, 0.53, 0.53, 0.8];
                     
@@ -824,14 +829,19 @@ WEBGL_HTML_TEMPLATE = """
             // Draw robots (simplified) with health and energy bars
             if (data.shapes && data.shapes.robots) {
                 data.shapes.robots.forEach(robot => {
-                    const agent = data.agents?.find(a => a.id === robot.id);
-                    if (!agent) return;
+                    // Use all_agents first (contains complete ecosystem data), fallback to agents
+                    const agentList = data.all_agents || data.agents;
+                    const agent = agentList?.find(a => a.id === robot.id);
+                    if (!agent) {
+                        console.warn(`⚠️ Canvas2D: Agent not found for robot ${robot.id}`);
+                        return;
+                    }
                     
                     const isFocused = (robot.id === focusedAgentId);
                     const ecosystem = agent.ecosystem || {};
                     const role = ecosystem.role || 'omnivore';
-                    const health = ecosystem.health || 1.0;
-                    const energy = ecosystem.energy || 1.0;
+                    const health = ecosystem.health || 0.0;
+                    const energy = ecosystem.energy || 0.0;
                     
                     let color = '#888888';
                     switch (role) {
