@@ -191,10 +191,16 @@ WEBGL_HTML_TEMPLATE = """
                     ⚡ Speed: <span id="speed-display" style="color: #3498db; font-weight: bold;">1.0x</span>
                 </div>
                 <div style="display: flex; gap: 4px;">
-                    <button onclick="setSimulationSpeed(0.5)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">0.5x</button>
-                    <button onclick="setSimulationSpeed(1.0)" style="min-width: 28px; background: #3498db; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">1x</button>
-                    <button onclick="setSimulationSpeed(2.0)" style="min-width: 28px; background: #e67e22; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">2x</button>
-                    <button onclick="setSimulationSpeed(5.0)" style="min-width: 28px; background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">5x</button>
+                        <button onclick="setSimulationSpeed(0.5)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">0.5x</button>
+    <button onclick="setSimulationSpeed(1.0)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">1x</button>
+    <button onclick="setSimulationSpeed(2.0)" style="min-width: 28px; background: #3498db; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">2x</button>
+    <button onclick="setSimulationSpeed(5.0)" style="min-width: 28px; background: #e67e22; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">5x</button>
+    <button onclick="setSimulationSpeed(10.0)" style="min-width: 28px; background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; font-weight: bold;">10x</button>
+    <button onclick="setSimulationSpeed(50.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">50x</button>
+    <button onclick="setSimulationSpeed(100.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">100x</button>
+    <button onclick="setSimulationSpeed(200.0)" style="min-width: 28px; background: #c0392b; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">200x</button>
+    <button onclick="setSimulationSpeed(300.0)" style="min-width: 28px; background: #c0392b; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer;">300x</button>
+    <button onclick="setSimulationSpeed(500.0)" style="min-width: 28px; background: #922b21; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; font-weight: bold;">500x</button>
                 </div>
             </div>
             
@@ -251,9 +257,8 @@ WEBGL_HTML_TEMPLATE = """
                 this.gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
                 
                 if (!this.gl) {
-                    console.error('❌ WebGL not supported, falling back to Canvas 2D');
-                    this.fallbackToCanvas2D();
-                    this.updateRendererStatus('Canvas 2D Fallback', '#FF9800');
+                                console.error('❌ WebGL not supported, cannot render');
+            this.updateRendererStatus('WebGL Required', '#FF0000');
                     return;
                 }
                 
@@ -644,13 +649,7 @@ WEBGL_HTML_TEMPLATE = """
                 }
             }
             
-            fallbackToCanvas2D() {
-                // If WebGL fails, create a 2D context fallback
-                this.ctx = this.canvas.getContext('2d');
-                this.isWebGL = false;
-                webglSupported = false;
-                console.warn('⚠️ Using Canvas 2D fallback');
-            }
+            // Canvas 2D fallback removed - WebGL is required
         }
 
         // Initialize WebGL renderer (default mode)
@@ -733,11 +732,11 @@ WEBGL_HTML_TEMPLATE = """
                 uiFpsStartTime = now;
             }
             
-            // Use WebGL if available, otherwise fall back to Canvas 2D
+            // WebGL only - no fallback
             if (webglSupported && renderer.gl) {
                 drawWorldWebGL(data);
             } else {
-                drawWorldCanvas2D(data);
+                console.error('❌ WebGL required but not available');
             }
         }
         

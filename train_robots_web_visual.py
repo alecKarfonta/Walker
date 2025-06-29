@@ -48,8 +48,7 @@ from src.terrain_generation import generate_robot_scale_terrain
 # Import WebGL renderer
 from src.rendering.webgl_renderer import get_webgl_template
 
-# WebGL is now the default rendering mode for better performance
-USE_WEBGL_RENDERING = True  # Default to WebGL, fallback to Canvas 2D if not supported
+# WebGL is the only rendering mode - high performance rendering always enabled
 
 # Configure logging - set debug level for Deep Q-Learning GPU training logs
 logging.basicConfig(
@@ -356,13 +355,16 @@ HTML_TEMPLATE = """
                     ⚡ Speed: <span id="speed-display" style="color: #3498db; font-weight: bold;">1.0x</span>
                 </div>
                 <div style="display: flex; gap: 4px;">
-                    <button onclick="setSimulationSpeed(0.5)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">0.5x</button>
-                    <button onclick="setSimulationSpeed(1.0)" style="min-width: 28px; background: #3498db; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">1x</button>
-                    <button onclick="setSimulationSpeed(2.0)" style="min-width: 28px; background: #e67e22; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">2x</button>
-                    <button onclick="setSimulationSpeed(5.0)" style="min-width: 28px; background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">5x</button>
-                    <button onclick="setSimulationSpeed(10.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">10x</button>
-                    <button onclick="setSimulationSpeed(50.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">50x</button>
-                    <button onclick="setSimulationSpeed(100.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">100x</button>
+                                <button onclick="setSimulationSpeed(0.5)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">0.5x</button>
+            <button onclick="setSimulationSpeed(1.0)" style="min-width: 28px; background: #95a5a6; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">1x</button>
+            <button onclick="setSimulationSpeed(2.0)" style="min-width: 28px; background: #3498db; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">2x</button>
+            <button onclick="setSimulationSpeed(5.0)" style="min-width: 28px; background: #e67e22; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">5x</button>
+            <button onclick="setSimulationSpeed(10.0)" style="min-width: 28px; background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease; font-weight: bold;">10x</button>
+            <button onclick="setSimulationSpeed(50.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">50x</button>
+            <button onclick="setSimulationSpeed(100.0)" style="min-width: 28px; background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">100x</button>
+            <button onclick="setSimulationSpeed(200.0)" style="min-width: 28px; background: #c0392b; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">200x</button>
+            <button onclick="setSimulationSpeed(300.0)" style="min-width: 28px; background: #c0392b; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease;">300x</button>
+            <button onclick="setSimulationSpeed(500.0)" style="min-width: 28px; background: #922b21; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 9px; cursor: pointer; transition: all 0.2s ease; font-weight: bold;">500x</button>
                 </div>
             </div>
             
@@ -2121,8 +2123,8 @@ class TrainingEnvironment:
         self.web_cache_valid = False
         
         # Simulation speed control
-        self.simulation_speed_multiplier = 1.0  # 1x normal speed by default
-        self.max_speed_multiplier = 100.0  # Maximum 100x speed
+        self.simulation_speed_multiplier = 10.0  # 10x speed by default for faster training
+        self.max_speed_multiplier = 500.0  # Maximum 500x speed for high-speed training
         
         # AI Processing optimization settings
         self.ai_optimization_enabled = True  # Enable AI processing optimizations
@@ -5664,12 +5666,8 @@ env = TrainingEnvironment()
 # Add missing main web interface route
 @app.route('/')
 def index():
-    """Serve the main web interface."""
-    global USE_WEBGL_RENDERING
-    if USE_WEBGL_RENDERING:
-        return render_template_string(get_webgl_template())
-    else:
-        return render_template_string(HTML_TEMPLATE)
+    """Serve the main web interface with WebGL rendering."""
+    return render_template_string(get_webgl_template())
 
 @app.route('/status')
 def status():
@@ -5948,38 +5946,7 @@ def ai_optimization_settings():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/toggle_webgl', methods=['POST'])
-def toggle_webgl():
-    """Toggle between WebGL and Canvas 2D rendering."""
-    global USE_WEBGL_RENDERING
-    try:
-        data = request.get_json()
-        if 'use_webgl' in data:
-            USE_WEBGL_RENDERING = data['use_webgl']
-        else:
-            USE_WEBGL_RENDERING = not USE_WEBGL_RENDERING
-        
-        status_msg = "WebGL" if USE_WEBGL_RENDERING else "Canvas 2D"
-        print(f"🎨 Rendering mode switched to {status_msg}")
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Switched to {status_msg} rendering',
-            'use_webgl': USE_WEBGL_RENDERING,
-            'reload_required': True  # Frontend should reload to apply new renderer
-        })
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/webgl_status')
-def webgl_status():
-    """Get current WebGL rendering status."""
-    global USE_WEBGL_RENDERING
-    return jsonify({
-        'status': 'success',
-        'use_webgl': USE_WEBGL_RENDERING,
-        'renderer': 'WebGL' if USE_WEBGL_RENDERING else 'Canvas 2D'
-    })
+# WebGL routes removed - WebGL is now the only rendering mode
 
 @app.route('/elite_robots', methods=['GET', 'POST'])
 def elite_robots():
