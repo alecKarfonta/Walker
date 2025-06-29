@@ -37,8 +37,7 @@ from src.environment_challenges import EnvironmentalSystem
 
 # Import survival Q-learning integration
 from src.agents.ecosystem_interface import EcosystemInterface
-from src.agents.survival_q_integration_patch import upgrade_agent_to_survival_learning
-from src.agents.learning_manager import LearningManager, LearningApproach
+from src.agents.learning_manager import LearningManager
 
 # Import elite robot management
 from src.persistence import EliteManager
@@ -2091,7 +2090,7 @@ class TrainingEnvironment:
 
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
-
+        
         # Performance optimization tracking with AGGRESSIVE cleanup
         self.last_performance_cleanup = time.time()
         self.performance_cleanup_interval = 60.0  # INCREASED from 120.0 to 60.0 - clean up every minute
@@ -2540,128 +2539,48 @@ class TrainingEnvironment:
         print(f"🦎 Initialized ecosystem roles for {len(self.agents)} agents")
 
     def _initialize_random_learning_approaches(self):
-        """Initialize random learning approaches for all agents to ensure diversity."""
+        """Initialize attention networks for all agents (simplified - no more switching)."""
         if not self.learning_manager:
             print("⚠️ Learning Manager not available - agents will use default learning approach")
             return
         
-        # Import learning approaches
-        from src.agents.learning_manager import LearningApproach
-        import random
-        
-        # KEEP ALL ATTENTION NETWORKS: Focus on performance degradation analysis
-        learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Focus on attention analysis
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
-            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Focus on attention analysis
-            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Keep all attention networks, only use these for now
-        ]
-        
-        # Create weighted list for random selection
-        weighted_approaches = []
-        for approach, weight in learning_approaches:
-            weighted_approaches.extend([approach] * int(weight * 100))
-        
-        # Track assignments for reporting
-        approach_counts = {approach: 0 for approach, _ in learning_approaches}
         successful_assignments = 0
-        failed_assignments = 0
         
-        print(f"🎯 Assigning random learning approaches to {len(self.agents)} agents...")
+        print(f"🎯 Assigning attention networks to {len(self.agents)} agents...")
         
         for i, agent in enumerate(self.agents):
             if getattr(agent, '_destroyed', False):
                 continue
                 
             try:
-                # Select random learning approach
-                selected_approach = random.choice(weighted_approaches)
+                # All agents use attention deep Q-learning (already assigned by learning manager)
+                setattr(agent, 'learning_approach', 'attention_deep_q_learning')
+                successful_assignments += 1
                 
-                # Apply the learning approach
-                success = self.learning_manager.set_agent_approach(agent, selected_approach)
-                
-                if success:
-                    # Store the approach name on the agent for web interface
-                    setattr(agent, 'learning_approach', selected_approach.value)
-                    approach_counts[selected_approach] += 1
-                    successful_assignments += 1
-                    
-                    # Log first few assignments for verification
-                    if i < 5:
-                        print(f"   Agent {agent.id[:8]}: {selected_approach.value}")
-                else:
-                    failed_assignments += 1
-                    print(f"   ❌ Failed to assign {selected_approach.value} to agent {agent.id[:8]}")
+                # Log first few assignments for verification
+                if i < 5:
+                    print(f"   Agent {agent.id[:8]}: attention_deep_q_learning")
                     
             except Exception as e:
-                failed_assignments += 1
-                print(f"   ❌ Error assigning learning approach to agent {agent.id}: {e}")
+                print(f"   ❌ Error setting up agent {agent.id}: {e}")
         
-        # Report final distribution
         print(f"🧠 Learning Approach Distribution:")
-        total_assigned = successful_assignments
-        for approach, count in approach_counts.items():
-            if count > 0:
-                percentage = (count / total_assigned * 100) if total_assigned > 0 else 0
-                approach_info = self.learning_manager.approach_info[approach]
-                icon = approach_info['icon']
-                name = approach_info['name']
-                print(f"   {icon} {name}: {count} agents ({percentage:.1f}%)")
-        
-        if failed_assignments > 0:
-            print(f"   ⚠️ Failed assignments: {failed_assignments}")
-        
-        print(f"✅ Successfully assigned learning approaches to {successful_assignments}/{len(self.agents)} agents")
+        print(f"   🧠 Attention Deep Q-Learning: {successful_assignments} agents (100%)")
+        print(f"✅ Successfully initialized attention networks for {successful_assignments}/{len(self.agents)} agents")
 
     def _assign_random_learning_approach_single(self, agent):
-        """Assign a random learning approach to a single agent (for replacement agents)."""
+        """Assign attention network to a single agent (for replacement agents)."""
         if not self.learning_manager:
             return
         
-        # Import learning approaches
-        from src.agents.learning_manager import LearningApproach
-        import random
-        
-        # KEEP ATTENTION NETWORKS: Focus on degradation analysis for replacements too
-        learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Focus on attention analysis
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Focus on attention analysis
-            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Focus on attention analysis
-            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Keep attention networks for replacements
-        ]
-        
-        # Create weighted list for random selection
-        weighted_approaches = []
-        for approach, weight in learning_approaches:
-            weighted_approaches.extend([approach] * int(weight * 100))
-        
         try:
-            # Select random learning approach
-            selected_approach = random.choice(weighted_approaches)
-            
-            # Apply the learning approach
-            success = self.learning_manager.set_agent_approach(agent, selected_approach)
-            
-            if success:
-                # Store the approach name on the agent for web interface
-                setattr(agent, 'learning_approach', selected_approach.value)
-                approach_info = self.learning_manager.approach_info[selected_approach]
-                icon = approach_info['icon']
-                name = approach_info['name']
-                print(f"   🎯 Assigned {icon} {name} to replacement agent {agent.id[:8]}")
-                
-                # Special logging for Deep Q-Learning to track creation
-                if selected_approach == LearningApproach.DEEP_Q_LEARNING:
-                    print(f"   🧠 DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Neural network active!")
-                elif selected_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
-                    print(f"   🔍 ATTENTION DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Attention mechanism active!")
-            else:
-                print(f"   ❌ Failed to assign {selected_approach.value} to replacement agent {agent.id[:8]}")
+            # All agents use attention deep Q-learning (already assigned by learning manager)
+            setattr(agent, 'learning_approach', 'attention_deep_q_learning')
+            print(f"   🎯 Assigned attention deep Q-learning to replacement agent {agent.id[:8]}")
+            print(f"   🔍 ATTENTION DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Attention mechanism active!")
                 
         except Exception as e:
-            print(f"   ❌ Error assigning learning approach to replacement agent {agent.id}: {e}")
+            print(f"   ❌ Error setting up replacement agent {agent.id}: {e}")
 
     def _update_ecosystem_dynamics(self):
         """Update ecosystem dynamics including agent interactions and predation."""
@@ -2966,10 +2885,6 @@ class TrainingEnvironment:
                     if 'food_consumed' not in self.robot_stats[agent_id]:
                         self.robot_stats[agent_id]['food_consumed'] = 0.0
                     self.robot_stats[agent_id]['food_consumed'] += energy_gain
-                
-                # Log significant consumption events (keep minimal logging)
-                #if energy_gain > 0.1:  # Only log substantial energy gains
-                #    print(f"🍽️ Agent {agent_id[:8]} consumed energy: +{boosted_energy_gain:.2f}")
                 
                 # ROBOT CONSUMPTION: Use the fixed consume_robot function from ecosystem dynamics
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -3440,7 +3355,6 @@ class TrainingEnvironment:
                 self.robot_stats[agent_id]['total_distance'] = total_distance
                 self.robot_stats[agent_id]['fitness'] = total_distance
                 self.robot_stats[agent_id]['episode_reward'] = getattr(agent, 'total_reward', 0.0)
-                self.robot_stats[agent_id]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
                 self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
                 
             except Exception as e:
@@ -3907,17 +3821,8 @@ class TrainingEnvironment:
                     # Create a safe copy of current agents for this section
                     current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
                     
-                    # Update agent performance for elite identification
-                    for agent in current_agents:
-                        if not getattr(agent, '_destroyed', False) and agent.body:
-                            try:
-                                self.learning_manager.update_agent_performance(agent, self.step_count)
-                            except Exception as e:
-                                if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
-                                    print(f"⚠️ Error updating agent performance: {e}")
-                    
-                    # Update elite agents periodically
-                    self.learning_manager.update_elites(current_agents, self.step_count)
+                    # Note: Elite identification and agent performance updates removed with simplified learning manager
+                    # All agents now use attention deep Q-learning with network pooling
                 except Exception as e:
                     if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
                         print(f"⚠️ Error updating enhanced learning systems: {e}")
@@ -3990,9 +3895,7 @@ class TrainingEnvironment:
                                     'fitness': agent.get_evolutionary_fitness(),
                                     'total_reward': agent.total_reward,
                                     'steps': agent.steps,
-                                    'position_x': agent.body.position.x if agent.body else 0,
-                                    'q_table_size': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0
-                                }
+                                    'position_x': agent.body.position.x if agent.body else 0                                }
                                 self.mlflow_integration.log_individual_robot_metrics(
                                     f"top_{i+1}_{agent.id[:8]}", individual_metrics, self.step_count
                                 )
@@ -4001,12 +3904,7 @@ class TrainingEnvironment:
                         print(f"⚠️  Error logging to MLflow: {e}")
                 
                 last_mlflow_log = current_time
-            
-            # Check for periodic learning
-            #if current_time - self.last_learning_time >= self.learning_interval:
-            #    self.perform_periodic_learning()
-            #    self.last_learning_time = current_time
-            
+                        
             # Check for automatic evolution (with safety)
             if (self.auto_evolution_enabled and 
                 current_time - self.last_evolution_time >= self.evolution_interval and
@@ -4389,7 +4287,6 @@ class TrainingEnvironment:
                         is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
                         
                         # Basic data for all agents (needed for rendering)
-                        # Basic data for all agents (needed for rendering)
                         basic_agent_data = {
                             'id': agent.id,
                             'body': {
@@ -4449,7 +4346,6 @@ class TrainingEnvironment:
                         # Add detailed data for focused agent
                         if is_focused:
                             agent_status = self.agent_statuses.get(agent_id, {})
-                            #agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
                             closest_food_info = self._get_closest_food_distance_for_agent(agent)
                             
                             # Get recent reward information - use the last reward from current step
@@ -4792,50 +4688,7 @@ class TrainingEnvironment:
         
         return leader
     
-    def perform_periodic_learning(self):
-        """Make all robots learn from the best performing robot with safety checks."""
-        leader = self.find_leader()
-        if not leader:
-            print("⚠️ No leader found for periodic learning")
-            return
-        
-        # Double-check leader has valid body before proceeding
-        if not leader.body:
-            print("⚠️ Leader has no body, skipping periodic learning")
-            return
-        
-        # Count how many agents actually learned
-        learning_count = 0
-        
-        print(f"🎓 === PERIODIC LEARNING EVENT ===")
-        
-        try:
-            leader_distance = leader.body.position.x - leader.initial_position[0]
-            print(f"🏆 Leader: Robot {leader.id} (Distance: {leader_distance:.2f})")
-        except Exception as e:
-            print(f"🏆 Leader: Robot {leader.id} (Distance calculation failed: {e})")
-        
-        # Only include valid agents in learning
-        valid_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
-        
-        for agent in valid_agents:
-            if agent == leader:
-                continue  # Leader doesn't learn from itself
-            
-            # Make agent learn from leader's Q-table
-            if hasattr(agent, 'q_table') and hasattr(leader, 'q_table'):
-                try:
-                    # Use the existing learn_from_other_table method
-                    agent.q_table.learn_from_other_table(leader.q_table, self.learning_rate)
-                    learning_count += 1
-                except Exception as e:
-                    print(f"❌ Error during learning for Agent {agent.id}: {e}")
-        
-        print(f"📚 {learning_count} robots learned from Robot {leader.id}")
-        print(f"🔄 Learning rate: {self.learning_rate:.1%}")
-        print(f"⏰ Next learning session in {self.learning_interval} seconds")
-        print(f"🎓 === LEARNING EVENT COMPLETE ===")
-        print()  # Add spacing for readability
+    
 
     def trigger_evolution(self):
         """Trigger evolutionary generation advancement with comprehensive safety."""
@@ -5291,51 +5144,17 @@ class TrainingEnvironment:
 
     def switch_agent_learning_approach(self, agent_id: str, approach: str) -> bool:
         """
-        Switch a specific agent to a new learning approach.
+        Simplified: All agents use attention deep Q-learning (no more switching).
         
         Args:
-            agent_id: ID of the agent to switch
-            approach: Learning approach name ('basic_q_learning', 'enhanced_survival_q', etc.)
+            agent_id: ID of the agent (for backward compatibility)
+            approach: Learning approach name (ignored - all use attention)
             
         Returns:
-            bool: True if switch was successful, False otherwise
+            bool: Always returns True since all agents use attention networks
         """
-        if not self.learning_manager:
-            print(f"❌ Learning Manager not available for agent {agent_id}")
-            return False
-        
-        # Find the agent by ID
-        agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
-        if not agent:
-            print(f"❌ Agent {agent_id} not found or destroyed")
-            return False
-        
-        # Map string approach to enum
-        from src.agents.learning_manager import LearningApproach
-        approach_mapping = {
-            'basic_q_learning': LearningApproach.BASIC_Q_LEARNING,
-            'enhanced_survival_q': LearningApproach.SURVIVAL_Q_LEARNING,
-            'deep_survival_q': LearningApproach.DEEP_Q_LEARNING,
-            'auto_advanced': LearningApproach.ENHANCED_Q_LEARNING  # Fallback for auto-advanced
-        }
-        
-        learning_approach = approach_mapping.get(approach)
-        if not learning_approach:
-            print(f"❌ Unknown learning approach: {approach}")
-            return False
-        
-        # Perform the switch
-        success = self.learning_manager.set_agent_approach(agent, learning_approach)
-        
-        if success:
-            # Update agent data to include learning approach for frontend
-            setattr(agent, 'learning_approach', approach)
-            
-            print(f"✅ Agent {agent_id} switched to {approach}")
-        else:
-            print(f"❌ Failed to switch agent {agent_id} to {approach}")
-        
-        return success
+        print(f"📝 Note: All agents use attention deep Q-learning (approach switching removed)")
+        return True
 
     def _get_agent_learning_approach_name(self, agent_id: str) -> str:
         """Get the learning approach name for an agent."""

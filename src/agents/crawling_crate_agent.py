@@ -9,7 +9,6 @@ from collections import deque
 import random
 import time
 import Box2D as b2
-
 from .crawling_crate import CrawlingCrate
 from .base_agent import BaseAgent
 
@@ -91,36 +90,32 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
 
     def _initialize_attention_learning(self):
         """Initialize attention-based deep Q-learning system via Learning Manager."""
-        try:
-            # CRITICAL: Never create networks directly - ONLY get from Learning Manager
-            # This prevents the constant GPU network recreation that's killing performance
-            from .learning_manager import LearningManager
-            
-            # Try multiple ways to get learning manager instance
-            learning_manager = None
-            if hasattr(self, 'world') and hasattr(self.world, '_training_env'):
-                learning_manager = getattr(self.world._training_env, 'learning_manager', None)
-            
-            if learning_manager:
-                # Use Learning Manager's pooling system - this is the ONLY way to get networks
-                self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
-                if self._learning_system:
-                    print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
-                    return
-                else:
-                    print(f"❌ Agent {self.id}: Learning Manager failed to provide network")
+        # CRITICAL: Never create networks directly - ONLY get from Learning Manager
+        # This prevents the constant GPU network recreation that's killing performance
+        from .learning_manager import LearningManager
+        
+        # Try multiple ways to get learning manager instance
+        learning_manager = None
+        if hasattr(self, 'world') and hasattr(self.world, '_training_env'):
+            learning_manager = getattr(self.world._training_env, 'learning_manager', None)
+        
+        if learning_manager:
+            # Use Learning Manager's pooling system - this is the ONLY way to get networks
+            self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
+            if self._learning_system:
+                print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
+                return
             else:
-                print(f"❌ Agent {self.id}: No Learning Manager available - agent will have no learning")
-            
-            # CRITICAL: NO FALLBACK NETWORK CREATION - this was the performance killer
-            # If Learning Manager can't provide a network, agent just won't learn
-            # This is better than constant GPU thrashing
-            self._learning_system = None
-            print(f"⚠️ Agent {self.id}: No learning system - will use random actions")
-            
-        except Exception as e:
-            print(f"❌ Error getting learning system for agent {self.id}: {e}")
-            self._learning_system = None
+                print(f"❌ Agent {self.id}: Learning Manager failed to provide network")
+        else:
+            print(f"❌ Agent {self.id}: No Learning Manager available - agent will have no learning")
+        
+        # CRITICAL: NO FALLBACK NETWORK CREATION - this was the performance killer
+        # If Learning Manager can't provide a network, agent just won't learn
+        # This is better than constant GPU thrashing
+        self._learning_system = None
+        print(f"⚠️ Agent {self.id}: No learning system - will use random actions")
+
 
     @property
     def q_table(self):
@@ -177,17 +172,10 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
 
     def choose_action(self) -> int:
         """Choose action using attention-based learning system."""
-        try:
-            state = self.get_state_representation()
-            if self._learning_system:
-                action = self._learning_system.choose_action(state)
-                return max(0, min(action, self.action_size - 1))
-            else:
-                return random.randint(0, self.action_size - 1)
-            
-        except Exception as e:
-            print(f"❌ Error choosing action for agent {self.id}: {e}")
-            return random.randint(0, self.action_size - 1)
+        state = self.get_state_representation()
+        action = self._learning_system.choose_action(state)
+        return max(0, min(action, self.action_size - 1))
+        
 
     def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
         """Learn from experience using attention-based learning system."""
