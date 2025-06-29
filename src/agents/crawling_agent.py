@@ -366,45 +366,45 @@ class CrawlingAgent(BaseAgent):
             print(f"⚠️ Error applying action for agent {self.id}: {e}")
     
     def get_crawling_reward(self, prev_x: float) -> float:
-        """Calculate reward for crawling behavior."""
+        """Calculate reward for crawling behavior with proper scaling."""
         if not self.body:
             return 0.0
             
         current_x = self.body.position.x
         total_reward = 0.0
         
-        # Forward progress reward
+        # Forward progress reward (FIXED: Much lower scaling)
         displacement = current_x - prev_x
-        if displacement > 0.003:
-            progress_reward = displacement * 8.0
+        if displacement > 0.001:  # Lower threshold
+            progress_reward = displacement * 0.5  # Much lower multiplier (was 8.0)
             
-            # Sustained movement bonus
+            # Reduced sustained movement bonus (FIXED: Lower bonus)
             if hasattr(self, 'recent_displacements'):
                 self.recent_displacements.append(displacement)
                 if len(self.recent_displacements) > 10:
                     self.recent_displacements.pop(0)
                 if len(self.recent_displacements) >= 5:
                     avg_displacement = sum(self.recent_displacements) / len(self.recent_displacements)
-                    if avg_displacement > 0.005:
-                        progress_reward *= 1.5
+                    if avg_displacement > 0.003:  # Higher threshold
+                        progress_reward *= 1.1  # Much smaller bonus (was 1.5)
             else:
                 self.recent_displacements = [displacement]
         elif displacement < -0.0005:
-            progress_reward = displacement * 1.0
+            progress_reward = displacement * 0.5  # Lower penalty multiplier
         else:
             progress_reward = 0.0
         
-        total_reward += progress_reward * 0.4
+        total_reward += progress_reward
         
-        # Stability reward
+        # Stability reward (FIXED: Much smaller values)
         body_angle = abs(self.body.angle)
         if body_angle < 0.2:
-            total_reward += 0.08
+            total_reward += 0.01  # Was 0.08
         elif body_angle > 1.5:
-            total_reward -= 0.04
+            total_reward -= 0.005  # Was 0.04
         
-        # Clip final reward
-        total_reward = np.clip(total_reward, -0.75, 0.75)
+        # Much tighter reward clipping (FIXED: Smaller range)
+        total_reward = np.clip(total_reward, -0.1, 0.1)
         
         return total_reward
     
