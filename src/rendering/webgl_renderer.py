@@ -482,6 +482,12 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             drawRectangle(x, y, width, height, color) {
+                // Safety check for invalid dimensions
+                if (width <= 0 || height <= 0 || isNaN(width) || isNaN(height)) {
+                    console.error(`❌ Invalid rectangle dimensions: width=${width}, height=${height}`);
+                    return;
+                }
+                
                 // Draw a rectangle using two triangles
                 const positions = [
                     x, y,                    // Bottom-left
@@ -501,29 +507,49 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             drawHealthEnergyBars(x, y, health, energy) {
-                // Health and energy bars positioned above the robot (matching Canvas 2D version)
-                const barWidth = 2.0;
-                const barHeight = 0.3;
-                const barSpacing = 0.4;
-                const baseY = y + 3.0; // Position above robot
+                // Health and energy bars positioned above the robot
+                const barWidth = 8.0;  
+                const barHeight = 1.2; 
+                const barSpacing = 1.5; 
+                const baseY = y + 4.0; 
                 
-                // Health bar background
-                this.drawRectangle(x - barWidth/2, baseY, barWidth, barHeight, [0.2, 0.2, 0.2, 0.8]);
+                // Calculate bar widths
+                const healthWidth = barWidth * health;
+                const energyWidth = barWidth * energy;
                 
-                // Health bar foreground
-                const healthColor = health > 0.5 ? [0.29, 0.69, 0.31, 1.0] : // Green
-                                   health > 0.25 ? [1.0, 0.6, 0.0, 1.0] :     // Orange  
-                                   [0.96, 0.26, 0.21, 1.0];                   // Red
-                this.drawRectangle(x - barWidth/2, baseY, barWidth * health, barHeight, healthColor);
+                // Disable depth writing for bars to prevent depth conflicts
+                this.gl.depthMask(false);
                 
-                // Energy bar background
-                this.drawRectangle(x - barWidth/2, baseY + barSpacing, barWidth, barHeight, [0.2, 0.2, 0.2, 0.8]);
+                // Draw backgrounds first
+                this.drawRectangle(x - barWidth/2, baseY, barWidth, barHeight, [0.2, 0.2, 0.2, 0.8]); // Health background (dark gray)
+                this.drawRectangle(x - barWidth/2, baseY + barSpacing, barWidth, barHeight, [0.2, 0.2, 0.2, 0.8]); // Energy background (dark gray)
                 
-                // Energy bar foreground
-                const energyColor = energy > 0.5 ? [0.13, 0.59, 0.95, 1.0] : // Blue
-                                   energy > 0.25 ? [1.0, 0.6, 0.0, 1.0] :     // Orange
-                                   [0.96, 0.26, 0.21, 1.0];                   // Red
-                this.drawRectangle(x - barWidth/2, baseY + barSpacing, barWidth * energy, barHeight, energyColor);
+                // Draw foregrounds with proper health/energy colors
+                let healthColor, energyColor;
+                
+                // Health bar color based on health level
+                if (health > 0.5) {
+                    healthColor = [0.3, 0.8, 0.3, 1.0]; // Green (healthy)
+                } else if (health > 0.25) {
+                    healthColor = [1.0, 0.6, 0.0, 1.0]; // Orange (warning)
+                } else {
+                    healthColor = [0.9, 0.3, 0.3, 1.0]; // Red (critical)
+                }
+                
+                // Energy bar color based on energy level  
+                if (energy > 0.5) {
+                    energyColor = [0.2, 0.6, 1.0, 1.0]; // Blue (high energy)
+                } else if (energy > 0.25) {
+                    energyColor = [1.0, 0.6, 0.0, 1.0]; // Orange (low energy)
+                } else {
+                    energyColor = [0.9, 0.3, 0.3, 1.0]; // Red (very low energy)
+                }
+                
+                this.drawRectangle(x - barWidth/2, baseY, healthWidth, barHeight, healthColor); // Health foreground
+                this.drawRectangle(x - barWidth/2, baseY + barSpacing, energyWidth, barHeight, energyColor); // Energy foreground
+                
+                // Re-enable depth writing for other objects
+                this.gl.depthMask(true);
             }
             
             drawEnhancedFoodSource(x, y, radius, amount, maxCapacity, foodType) {
@@ -776,6 +802,7 @@ WEBGL_HTML_TEMPLATE = """
                     if (agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
                         const robotX = agent.body.x;
                         const robotY = agent.body.y;
+                        
                         renderer.drawHealthEnergyBars(robotX, robotY, health, energy);
                     }
                 });
@@ -794,6 +821,8 @@ WEBGL_HTML_TEMPLATE = """
                     renderer.drawLine(robotPos[0], robotPos[1], foodPos[0], foodPos[1], lineColor, 0.3);
                 }
             }
+            
+
         }
         
         function drawWorldCanvas2D(data) {
