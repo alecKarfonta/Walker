@@ -174,31 +174,19 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
 
     def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
         """Learn from experience using attention-based learning system."""
-        try:
-            if self._learning_system:
-                # Ensure states are numpy arrays
-                if not isinstance(prev_state, np.ndarray):
-                    prev_state = self.get_state_representation()
-                if not isinstance(new_state, np.ndarray):
-                    new_state = self.get_state_representation()
-                
-                self._learning_system.store_experience(prev_state, action, reward, new_state, done)
-                
-                # Train frequently for neural networks (every 2 steps for rapid learning)
-                if self.steps % 10 == 0:
-                    # Log first training session
-                    if not hasattr(self, '_training_started'):
-                        print(f"🚀 Agent {self.id}: Neural network training STARTED at step {self.steps}")
-                        self._training_started = True
+        self._learning_system.store_experience(prev_state, action, reward, new_state, done)
+        
+        # Log training start for this session
+        if self.steps % 10 == 0:  # Log every 10 steps for more frequent updates
+            print(f"🚀 Agent {self.id}: Neural network training STARTED at step {self.steps}")
+        
+        
+        training_stats = self._learning_system.learn()
+        
+        # Log training activity periodically
+        if self.steps % 100 == 0 and training_stats:
+            print(f"🧠 Agent {self.id}: Training step {self.steps}, Loss: {training_stats.get('loss', 0.0):.4f}, Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
                     
-                    training_stats = self._learning_system.learn()
-                    
-                    # Log training activity periodically
-                    if self.steps % 100 == 0 and training_stats:
-                        print(f"🧠 Agent {self.id}: Training step {self.steps}, Loss: {training_stats.get('loss', 0.0):.4f}, Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
-                    
-        except Exception as e:
-            print(f"❌ Error in learning for agent {self.id}: {e}")
 
     def get_crawling_reward(self, prev_x: float) -> float:
         """Calculate enhanced reward for crawling behavior with multi-limb robot support."""
@@ -314,7 +302,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         # Initialize action if needed
         if self.current_action is None:
             self.current_state = self.get_state_representation()
-            action_idx = self.choose_action()
+            action_idx = self.choose_action(self.current_state)
             self.current_action = action_idx
             self.current_action_tuple = self.actions[action_idx]
         
@@ -343,7 +331,7 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 self.learn_from_experience(prev_state, prev_action, reward, self.current_state)
             
             # Choose new action
-            action_idx = self.choose_action()
+            action_idx = self.choose_action(self.current_state)
             self.current_action = action_idx
             self.current_action_tuple = self.actions[action_idx]
             

@@ -21,7 +21,7 @@ from copy import deepcopy
 import Box2D as b2
 
 from src.agents.physical_parameters import PhysicalParameters
-from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.crawling_agent import CrawlingAgent
 
 
 @dataclass
@@ -56,7 +56,7 @@ class PerformanceHistory:
     mutation_count: int = 0
     crossover_count: int = 0
     
-    def update_from_agent(self, agent: EvolutionaryCrawlingAgent):
+    def update_from_agent(self, agent: CrawlingAgent):
         """Update performance history from current agent state."""
         self.last_updated = time.time()
         
@@ -172,7 +172,7 @@ class RobotStorage:
         
         print(f"🗄️  Robot storage initialized at: {self.storage_dir}")
     
-    def save_robot(self, agent: EvolutionaryCrawlingAgent, notes: str = "", save_method: str = "manual") -> str:
+    def save_robot(self, agent: CrawlingAgent, notes: str = "", save_method: str = "manual") -> str:
         """Save complete robot state to persistent storage."""
         from .storage_helpers import (
             extract_neural_network_data, extract_learning_parameters, 
@@ -217,7 +217,7 @@ class RobotStorage:
             raise
     
     def load_robot(self, robot_id_or_filename: str, world: b2.b2World, 
-                   position: Optional[Tuple[float, float]] = None) -> EvolutionaryCrawlingAgent:
+                                        position: Optional[Tuple[float, float]] = None) -> CrawlingAgent:
         """Load robot from persistent storage and recreate exact state."""
         from .storage_helpers import (
             restore_neural_network_data, restore_learning_parameters, restore_performance_metrics
@@ -234,7 +234,7 @@ class RobotStorage:
             physical_params = PhysicalParameters.from_dict(state.physical_parameters)
             
             # Create new robot with saved parameters (use None for agent_id to let it generate UUID)
-            robot = EvolutionaryCrawlingAgent(
+            robot = CrawlingAgent(
                 world=world,
                 agent_id=None,  # Let it generate new UUID, then override
                 position=spawn_position,
@@ -313,7 +313,7 @@ class RobotStorage:
             print(f"❌ Error deleting robot {robot_id_or_filename}: {e}")
             return False
     
-    def create_snapshot(self, agents: List[EvolutionaryCrawlingAgent], snapshot_name: Optional[str] = None) -> str:
+    def create_snapshot(self, agents: List[CrawlingAgent], snapshot_name: Optional[str] = None) -> str:
         """Save a snapshot of multiple robots."""
         from .storage_helpers import save_state_to_file
         
@@ -389,7 +389,7 @@ class RobotStorage:
         
         return load_state_from_file(robot_file)
     
-    def _create_robot_state(self, agent: EvolutionaryCrawlingAgent, save_method: str = "manual") -> RobotState:
+    def _create_robot_state(self, agent: CrawlingAgent, save_method: str = "manual") -> RobotState:
         """Create robot state from agent."""
         from .storage_helpers import (
             extract_neural_network_data, extract_learning_parameters, 

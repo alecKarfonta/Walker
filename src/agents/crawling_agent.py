@@ -42,7 +42,7 @@ class CrawlingAgent(BaseAgent):
             self.segments_per_limb = 2
         else:
             self.physical_params = physical_params
-            self.num_limbs = physical_params.num_limbs
+            self.num_limbs = physical_params.num_arms
             self.segments_per_limb = physical_params.segments_per_limb
         
         # Learning system (will be properly initialized later)
@@ -66,9 +66,10 @@ class CrawlingAgent(BaseAgent):
         self.worst_reward_received = 0.0
         self.time_since_good_value = 0.0
         
-        # Action system
+        # Action system - MUST be set before calling _calculate_state_size()
         self.action_size = 9  # 3x3 grid for shoulder/elbow control
         self.actions = self._generate_action_combinations()
+        self.state_size = self._calculate_state_size()  # For learning manager compatibility
         self.current_action = None
         self.current_action_tuple = (1, 0)  # Default: slight forward
         self.current_state = None
@@ -156,6 +157,9 @@ class CrawlingAgent(BaseAgent):
             filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
         )
         
+        # Create wheels for compatibility with rendering system
+        self._create_wheels()
+        
         # Create simple 2-segment arm for now (for compatibility)
         self._create_simple_arm()
     
@@ -227,6 +231,42 @@ class CrawlingAgent(BaseAgent):
         )
         
         self.joints = [self.upper_arm_joint, self.lower_arm_joint]
+    
+    def _create_wheels(self):
+        """Create wheels for the robot (for rendering compatibility)."""
+        self.wheels = []
+        wheel_anchor_positions = [(-1.0, -0.75), (1.0, -0.75)]
+        
+        for anchor_pos in wheel_anchor_positions:
+            wheel_world_pos = self.body.GetWorldPoint(anchor_pos) if self.body else (0, 0)
+            wheel_def = b2.b2BodyDef(
+                type=b2.b2_dynamicBody,
+                position=wheel_world_pos,
+                linearDamping=0.05,
+                angularDamping=0.05
+            )
+            wheel = self.world.CreateBody(wheel_def)
+            
+            wheel_fixture = wheel.CreateFixture(
+                shape=b2.b2CircleShape(radius=0.5),
+                density=8.0,
+                friction=0.9,
+                filter=b2.b2Filter(categoryBits=self.category_bits, maskBits=self.mask_bits)
+            )
+            
+            # Create wheel joint
+            wheel_joint = self.world.CreateRevoluteJoint(
+                bodyA=self.body,
+                bodyB=wheel,
+                localAnchorA=anchor_pos,
+                localAnchorB=(0, 0),
+                enableMotor=False
+            )
+            
+            self.wheels.append(wheel)
+        
+        # Initialize wheel joints list for compatibility
+        self.wheel_joints = []
     
     def get_state_representation(self) -> np.ndarray:
         """Get current state as numpy array for neural network."""
@@ -454,6 +494,16 @@ class CrawlingAgent(BaseAgent):
                 self.lower_arm.angularVelocity = 0
                 self.lower_arm.awake = True
             
+            # Reset wheels
+            if hasattr(self, 'wheels') and self.wheels:
+                wheel_offsets = [(-1.0, -0.75), (1.0, -0.75)]
+                for wheel, offset in zip(self.wheels, wheel_offsets):
+                    if wheel:
+                        wheel.position = self.body.GetWorldPoint(offset)
+                        wheel.linearVelocity = (0, 0)
+                        wheel.angularVelocity = 0
+                        wheel.awake = True
+            
             self.total_reward = 0
             self.steps = 0
             
@@ -463,6 +513,13 @@ class CrawlingAgent(BaseAgent):
     def destroy(self):
         """Clean up physics bodies."""
         try:
+            # Destroy wheels first
+            if hasattr(self, 'wheels') and self.wheels:
+                for wheel in self.wheels:
+                    if wheel and wheel in self.world.bodies:
+                        self.world.DestroyBody(wheel)
+                self.wheels = []
+            
             # Destroy bodies in correct order
             if self.lower_arm and self.lower_arm in self.world.bodies:
                 self.world.DestroyBody(self.lower_arm)

@@ -7,7 +7,7 @@ import pymunk
 import pymunk.pygame_util
 import numpy as np
 from typing import List, Dict, Any, Tuple
-from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.crawling_agent import CrawlingAgent
 from src.population.population_controller import PopulationController
 from src.population.evolution import EvolutionEngine
 from src.agents.basic_agent import BasicAgent

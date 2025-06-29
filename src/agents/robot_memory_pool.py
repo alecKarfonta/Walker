@@ -22,7 +22,7 @@ from typing import List, Dict, Any, Optional, Tuple, Union
 from collections import deque
 import Box2D as b2
 
-from .evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from .crawling_agent import CrawlingAgent
 from .physical_parameters import PhysicalParameters
 
 

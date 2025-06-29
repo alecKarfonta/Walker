@@ -29,7 +29,6 @@ class EcosystemDynamics:
     def __init__(self):
         self.food_sources: List[FoodSource] = []
         self.agent_roles: Dict[str, EcosystemRole] = {}
-        self.rivalries: Dict[str, Set[str]] = {}  # agent_id -> set of rival ids
         
         # Ecosystem parameters
         self.carrying_capacity = 100
@@ -92,25 +91,10 @@ class EcosystemDynamics:
         role = max(role_weights.keys(), key=lambda r: role_weights[r] + random.uniform(-0.15, 0.15))
         self.agent_roles[agent_id] = role
         
-        print(f"🦎 Agent {agent_id[:8]} assigned role: {role.value}")
+        print(f"🦎 Agent {str(agent_id)[:8]} assigned role: {role.value}")
         return role
     
-    def create_rivalry(self, agent1_id: str, agent2_id: str, competition_intensity: float):
-        """Create a rivalry between competing agents"""
-        
-        if competition_intensity > 0.7 and random.random() < 0.3:
-            
-            if agent1_id not in self.rivalries:
-                self.rivalries[agent1_id] = set()
-            if agent2_id not in self.rivalries:
-                self.rivalries[agent2_id] = set()
-            
-            self.rivalries[agent1_id].add(agent2_id)
-            self.rivalries[agent2_id].add(agent1_id)
-            
-            print(f"⚔️ Rivalry formed between {agent1_id[:8]} and {agent2_id[:8]}")
-            return True
-        return False
+
     
     def get_ecosystem_effects(self, agent_id: str, position: Tuple[float, float]) -> Dict[str, float]:
         """Get ecosystem effects for an agent at a specific position"""
@@ -375,7 +359,7 @@ class EcosystemDynamics:
             # Log consumption
             if energy_gained > 0.01:
                 efficiency_str = f"{consumption_efficiency*100:.0f}%"
-                print(f"🍽️ {agent_id[:8]} consumed {consumed:.1f} {best_food.food_type} "
+                print(f"🍽️ {str(agent_id)[:8]} consumed {consumed:.1f} {best_food.food_type} "
                       f"(efficiency: {efficiency_str}, energy: +{energy_gained:.2f})")
         
         return energy_gained, consumed_food_type, consumed_food_position
@@ -463,7 +447,7 @@ class EcosystemDynamics:
                 EcosystemRole.SCAVENGER: "scavenging"
             }.get(predator_role, "consuming")
             
-            print(f"🍖 {predator_id[:8]} is {predation_type} {prey_id[:8]} "
+            print(f"🍖 {str(predator_id)[:8]} is {predation_type} {str(prey_id)[:8]} "
                   f"(energy: +{energy_gained:.2f}, prey health: {agent_health[prey_id]['health']:.2f})")
             
             return energy_gained, prey_id, prey_position
@@ -483,20 +467,10 @@ class EcosystemDynamics:
             print(f"🏴 Food source abandoned due to resource pressure")
     
     def _trigger_migration_event(self):
-        """Trigger a migration event that affects rivalries"""
+        """Trigger a migration event"""
         
         self.migration_pressure = random.uniform(0.5, 1.5)
         print(f"🦅 Migration event! Pressure: {self.migration_pressure:.2f}")
-        
-        # Some rivalries may break due to migration
-        if self.rivalries and random.random() < 0.4:
-            agent_id = random.choice(list(self.rivalries.keys()))
-            if self.rivalries[agent_id]:
-                former_rival = random.choice(list(self.rivalries[agent_id]))
-                self.rivalries[agent_id].discard(former_rival)
-                if former_rival in self.rivalries:
-                    self.rivalries[former_rival].discard(agent_id)
-                print(f"💔 Rivalry broken due to migration")
         
         # Reset migration pressure gradually
         self.migration_pressure *= 0.9
@@ -512,7 +486,6 @@ class EcosystemDynamics:
             'population_pressure': self.population_pressure,
             'resource_scarcity': self.resource_scarcity,
             'food_sources': len(self.food_sources),
-            'rivalries': len(self.rivalries),
             'role_distribution': role_counts,
             'migration_pressure': self.migration_pressure
         } 

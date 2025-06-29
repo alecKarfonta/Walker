@@ -16,21 +16,21 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+    from src.agents.crawling_agent import CrawlingAgent
     from .robot_storage import RobotState, PerformanceHistory
 else:
     # Import at runtime to avoid circular dependency issues
     try:
-        from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+        from src.agents.crawling_agent import CrawlingAgent
         from .robot_storage import RobotState, PerformanceHistory
     except ImportError:
         # Fallback for linting/analysis
-        EvolutionaryCrawlingAgent = None
+        CrawlingAgent = None
         RobotState = None 
         PerformanceHistory = None
 
 
-def extract_neural_network_data(agent: EvolutionaryCrawlingAgent) -> Dict[str, Any]:
+def extract_neural_network_data(agent: CrawlingAgent) -> Dict[str, Any]:
     """Extract neural network data from agent."""
     if not hasattr(agent, '_learning_system') or agent._learning_system is None:
         return {}
@@ -65,7 +65,7 @@ def extract_neural_network_data(agent: EvolutionaryCrawlingAgent) -> Dict[str, A
     return neural_data
 
 
-def extract_learning_parameters(agent: EvolutionaryCrawlingAgent) -> Dict[str, Any]:
+def extract_learning_parameters(agent: CrawlingAgent) -> Dict[str, Any]:
     """Extract learning parameters from agent."""
     return {
         'learning_rate': getattr(agent, 'learning_rate', 0.005),
@@ -81,7 +81,7 @@ def extract_learning_parameters(agent: EvolutionaryCrawlingAgent) -> Dict[str, A
     }
 
 
-def extract_performance_metrics(agent: EvolutionaryCrawlingAgent) -> Dict[str, Any]:
+def extract_performance_metrics(agent: CrawlingAgent) -> Dict[str, Any]:
     """Extract current performance metrics from agent."""
     return {
         'total_reward': getattr(agent, 'total_reward', 0.0),
@@ -97,7 +97,7 @@ def extract_performance_metrics(agent: EvolutionaryCrawlingAgent) -> Dict[str, A
     }
 
 
-def create_performance_history(agent: EvolutionaryCrawlingAgent, existing_history: Optional[PerformanceHistory] = None) -> PerformanceHistory:
+def create_performance_history(agent: CrawlingAgent, existing_history: Optional[PerformanceHistory] = None) -> PerformanceHistory:
     """Create or update performance history for agent."""
     robot_id = str(agent.id)
     
@@ -116,7 +116,7 @@ def create_performance_history(agent: EvolutionaryCrawlingAgent, existing_histor
         return history
 
 
-def restore_neural_network_data(agent: EvolutionaryCrawlingAgent, neural_data: Dict[str, Any]):
+def restore_neural_network_data(agent: CrawlingAgent, neural_data: Dict[str, Any]):
     """Restore neural network data to agent."""
     if not neural_data or not hasattr(agent, '_learning_system') or agent._learning_system is None:
         return
@@ -155,14 +155,14 @@ def restore_neural_network_data(agent: EvolutionaryCrawlingAgent, neural_data: D
         print(f"⚠️ Error restoring neural network data: {e}")
 
 
-def restore_learning_parameters(agent: EvolutionaryCrawlingAgent, learning_params: Dict[str, Any]):
+def restore_learning_parameters(agent: CrawlingAgent, learning_params: Dict[str, Any]):
     """Restore learning parameters to agent."""
     for param, value in learning_params.items():
         if hasattr(agent, param):
             setattr(agent, param, value)
 
 
-def restore_performance_metrics(agent: EvolutionaryCrawlingAgent, perf_metrics: Dict[str, Any]):
+def restore_performance_metrics(agent: CrawlingAgent, perf_metrics: Dict[str, Any]):
     """Restore performance metrics to agent."""
     for metric, value in perf_metrics.items():
         if hasattr(agent, metric):

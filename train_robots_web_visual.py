@@ -37,7 +37,7 @@ from src.environment_challenges import EnvironmentalSystem
 
 # Import survival Q-learning integration
 from src.agents.ecosystem_interface import EcosystemInterface
-from src.agents.learning_manager import LearningManager
+# Learning manager removed - agents handle their own learning
 
 # Import elite robot management
 from src.persistence import EliteManager, StorageManager
@@ -2100,21 +2100,8 @@ class TrainingEnvironment:
         self.storage_manager = StorageManager("robot_storage")
         self.storage_manager.enable_auto_save(interval_seconds=600)  # Auto-save every 10 minutes
 
-        # Initialize Learning Manager for advanced learning approaches
-        try:
-            self.learning_manager = LearningManager(
-                ecosystem_interface=EcosystemInterface(self)
-            )
-            # Set the training environment reference for food data access
-            self.learning_manager.set_training_environment(self)
-            # Inject training environment into all agents for state data extraction
-            self.learning_manager.inject_training_environment_into_agents(self.agents)
-            # Log initial resource usage
-            self.learning_manager.log_resource_usage(force=True)
-            print("🧠 Learning Manager initialized successfully with training environment")
-        except Exception as e:
-            print(f"⚠️ Learning Manager initialization failed: {e}")
-            self.learning_manager = None
+        # All agents now handle their own learning - no learning manager needed
+        print("🧠 All agents using standalone attention deep Q-learning - no learning manager required")
 
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
@@ -2165,9 +2152,7 @@ class TrainingEnvironment:
                 mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
             )
             
-            # Connect learning manager to memory pool for knowledge transfer
-            if self.learning_manager:
-                self.robot_memory_pool.set_learning_manager(self.learning_manager)
+            # Agents handle their own learning - no learning manager needed
             
             print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
         except Exception as e:
@@ -2646,45 +2631,37 @@ class TrainingEnvironment:
         print(f"🦎 Initialized ecosystem roles for {len(self.agents)} agents")
 
     def _initialize_random_learning_approaches(self):
-        """Initialize attention networks for all agents (simplified - no more switching)."""
-        if not self.learning_manager:
-            print("⚠️ Learning Manager not available - agents will use default learning approach")
-            return
-        
+        """Initialize learning approaches for all agents (simplified - no learning manager needed)."""
         successful_assignments = 0
         
-        print(f"🎯 Assigning attention networks to {len(self.agents)} agents...")
+        print(f"🎯 All agents use standalone attention deep Q-learning...")
         
         for i, agent in enumerate(self.agents):
             if getattr(agent, '_destroyed', False):
                 continue
                 
             try:
-                # All agents use attention deep Q-learning (already assigned by learning manager)
+                # All agents use attention deep Q-learning (handled in their own __init__)
                 setattr(agent, 'learning_approach', 'attention_deep_q_learning')
                 successful_assignments += 1
                 
                 # Log first few assignments for verification
                 if i < 5:
-                    print(f"   Agent {agent.id[:8]}: attention_deep_q_learning")
+                    print(f"   Agent {str(agent.id)[:8]}: standalone attention_deep_q_learning")
                     
             except Exception as e:
                 print(f"   ❌ Error setting up agent {agent.id}: {e}")
         
         print(f"🧠 Learning Approach Distribution:")
-        print(f"   🧠 Attention Deep Q-Learning: {successful_assignments} agents (100%)")
-        print(f"✅ Successfully initialized attention networks for {successful_assignments}/{len(self.agents)} agents")
+        print(f"   🧠 Standalone Attention Deep Q-Learning: {successful_assignments} agents (100%)")
+        print(f"✅ All agents handle their own learning - no external dependencies")
 
     def _assign_random_learning_approach_single(self, agent):
-        """Assign attention network to a single agent (for replacement agents)."""
-        if not self.learning_manager:
-            return
-        
+        """Assign learning approach to a single agent (for replacement agents)."""
         try:
-            # All agents use attention deep Q-learning (already assigned by learning manager)
+            # All agents use standalone attention deep Q-learning
             setattr(agent, 'learning_approach', 'attention_deep_q_learning')
-            print(f"   🎯 Assigned attention deep Q-learning to replacement agent {agent.id[:8]}")
-            print(f"   🔍 ATTENTION DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Attention mechanism active!")
+            print(f"   🎯 Replacement agent {str(agent.id)[:8]} using standalone attention deep Q-learning")
                 
         except Exception as e:
             print(f"   ❌ Error setting up replacement agent {agent.id}: {e}")
@@ -2941,7 +2918,7 @@ class TrainingEnvironment:
                         health_degradation = 0.0001  # Reduced from 0.001 to 0.0001 (90% reduction)
                         self.agent_health[agent_id]['health'] = max(0.0, current_health - health_degradation)
                         if current_health - health_degradation <= 0.0:
-                            print(f"💀 {agent_id[:8]} is starving to death (health: {current_health:.3f})")
+                            print(f"💀 {str(agent_id)[:8]} is starving to death (health: {current_health:.3f})")
                 
                 # Apply energy gain from eating
                 current_energy = min(1.0, current_energy + energy_gain)
@@ -2972,7 +2949,7 @@ class TrainingEnvironment:
                     role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
                     food_description = role_food_descriptions.get(role, {}).get(consumed_food_type, f'eating {consumed_food_type}')
                     
-                    print(f"🍴 {agent_id[:8]} is {food_description} (energy: +{energy_gain:.2f}) [decay paused]")
+                    print(f"🍴 {str(agent_id)[:8]} is {food_description} (energy: +{energy_gain:.2f}) [decay paused]")
                     
                     # FOOD ANIMATION: Create consumption event for visual line animation
                     if consumed_food_position:
@@ -3137,13 +3114,7 @@ class TrainingEnvironment:
         with self._physics_lock:
             try:
                 for dead_agent in dead_agents:
-                    # CRITICAL: Extract the attention network BEFORE destroying the agent
-                    attention_network = None
-                    if hasattr(dead_agent, '_attention_dqn') and dead_agent._attention_dqn:
-                        attention_network = dead_agent._attention_dqn
-                        # Clear the reference from dead agent to prevent destruction
-                        dead_agent._attention_dqn = None
-                        print(f"♻️ Extracted attention network from dead agent {dead_agent.id}")
+                                    # Agents handle their own networks - no extraction needed
                     
                     # CRITICAL: Return dead agent to memory pool IMMEDIATELY so it can be reused
                     if self.robot_memory_pool:
@@ -3170,27 +3141,8 @@ class TrainingEnvironment:
                         # Initialize new agent's ecosystem data
                         self._initialize_single_agent_ecosystem(replacement_agent)
                         
-                        # CRITICAL: Transfer the attention network instead of creating new one
-                        if attention_network:
-                            replacement_agent._attention_dqn = attention_network
-                            replacement_agent.learning_approach = 'attention_deep_q_learning'
-                            
-                            # CRITICAL: Reset target network synchronization after transfer
-                            if hasattr(attention_network, 'reset_target_network_sync'):
-                                attention_network.reset_target_network_sync()
-                                print(f"🎯 Target network resynced for transferred network")
-                            
-                            # Update learning manager's network tracking
-                            if hasattr(self, 'learning_manager') and self.learning_manager:
-                                # Register the transferred network
-                                self.learning_manager._attention_networks_in_use[replacement_agent.id] = attention_network
-                                if dead_agent.id in self.learning_manager._attention_networks_in_use:
-                                    del self.learning_manager._attention_networks_in_use[dead_agent.id]
-                            
-                            print(f"🧠 Transferred attention network to replacement agent {replacement_agent.id}")
-                        else:
-                            # Fallback: assign random approach if no network to transfer
-                            self._assign_random_learning_approach_single(replacement_agent)
+                        # Agents create their own networks - no transfer needed
+                        self._assign_random_learning_approach_single(replacement_agent)
                         
                         print(f"🐣 Spawned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
                 
@@ -3260,13 +3212,7 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
             
-            # CRITICAL: Inject training environment through learning manager for state data access
-            if hasattr(self, 'learning_manager') and self.learning_manager:
-                try:
-                    self.learning_manager.inject_training_environment_into_agents([new_agent])
-                    print(f"🌍 Training environment injected into replacement agent {new_agent.id}")
-                except Exception as e:
-                    print(f"⚠️ Failed to inject training environment into replacement agent {new_agent.id}: {e}")
+            # Agents are standalone - no training environment injection needed
             
             return new_agent
             
@@ -3387,7 +3333,7 @@ class TrainingEnvironment:
             if multi_limb_details:
                 print(f"\n🔍 Multi-Limb Robot Details ({len(multi_limb_details)} robots):")
                 for detail in sorted(multi_limb_details, key=lambda x: x['limbs'], reverse=True):
-                    print(f"   🤖 Agent {detail['id'][:8]}: {detail['limbs']} limbs × {detail['segments']} segments = {detail['total_joints']} joints")
+                    print(f"   🤖 Agent {str(detail['id'])[:8]}: {detail['limbs']} limbs × {detail['segments']} segments = {detail['total_joints']} joints")
                     print(f"      📍 Position: ({detail['position'][0]:.1f}, {detail['position'][1]:.1f}), Reward: {detail['reward']:.2f}")
             else:
                 print("❌ NO MULTI-LIMB ROBOTS FOUND!")
@@ -3797,7 +3743,7 @@ class TrainingEnvironment:
                                             if hasattr(agent, 'physical_params'):
                                                 joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
                                                 if joints > 4:
-                                                    print(f"🧠 Preserved learning for {joints}-joint robot {agent.id[:8]} (reward: {agent.total_reward:.3f})")
+                                                    print(f"🧠 Preserved learning for {joints}-joint robot {str(agent.id)[:8]} (reward: {agent.total_reward:.3f})")
                                         else:
                                             # Full reset: agent isn't learning effectively
                                             agent.reset()  # This resets learning but preserves Q-table structure
@@ -3904,13 +3850,6 @@ class TrainingEnvironment:
                     print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
                 last_health_check = current_time
             
-            # Log attention network pool and GPU usage every 60 seconds  
-            if hasattr(self, 'learning_manager') and self.learning_manager:
-                try:
-                    self.learning_manager.log_resource_usage()
-                except Exception as e:
-                    print(f"⚠️ Error logging resource usage: {e}")
-            
             # Performance cleanup every minute (increased frequency)
             if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
                 self._cleanup_performance_data()
@@ -3920,18 +3859,6 @@ class TrainingEnvironment:
             if current_time - self.last_attention_cleanup > self.attention_cleanup_interval:
                 self._cleanup_attention_networks()
                 self.last_attention_cleanup = current_time
-            
-            # Update enhanced learning systems (after current_agents is defined)
-            if hasattr(self, 'learning_manager') and self.learning_manager:
-                try:
-                    # Create a safe copy of current agents for this section
-                    current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
-                    
-                    # Note: Elite identification and agent performance updates removed with simplified learning manager
-                    # All agents now use attention deep Q-learning with network pooling
-                except Exception as e:
-                    if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
-                        print(f"⚠️ Error updating enhanced learning systems: {e}")
                 
             # Invalidate web cache periodically
             if current_time - self.last_web_interface_update > 0.1:  # Invalidate after 100ms
@@ -4003,7 +3930,7 @@ class TrainingEnvironment:
                                     'steps': agent.steps,
                                     'position_x': agent.body.position.x if agent.body else 0                                }
                                 self.mlflow_integration.log_individual_robot_metrics(
-                                    f"top_{i+1}_{agent.id[:8]}", individual_metrics, self.step_count
+                                    f"top_{i+1}_{str(agent.id)[:8]}", individual_metrics, self.step_count
                                 )
                         
                     except Exception as e:
@@ -5083,7 +5010,7 @@ class TrainingEnvironment:
         """Move an agent to the specified world coordinates with enhanced safety."""
         with self._physics_lock:
             try:
-                agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+                agent = next((a for a in self.agents if str(a.id) == str(agent_id) and not getattr(a, '_destroyed', False)), None)
                 if not agent or not agent.body:
                     print(f"❌ Agent {agent_id} not found or destroyed for moving")
                     return False
@@ -5106,11 +5033,14 @@ class TrainingEnvironment:
         """Handles a click event from the frontend."""
         data = request.get_json()
         agent_id = data.get('agent_id')
-        print(f"🖱️ SERVER: Received click for agent_id: {agent_id}")
+        print(f"🖱️ SERVER: Received click for agent_id: {agent_id} (type: {type(agent_id)})")
 
         if agent_id is not None:
-            # Find the agent by ID
-            agent_to_focus = next((agent for agent in self.agents if agent.id == agent_id), None)
+            # DEBUG: Log actual agent IDs to see the type mismatch
+            print(f"🔍 Available agent IDs: {[(agent.id, type(agent.id)) for agent in self.agents[:3]]}")
+            
+            # Find the agent by ID - convert both to strings for comparison
+            agent_to_focus = next((agent for agent in self.agents if str(agent.id) == str(agent_id)), None)
             if agent_to_focus:
                 self.focus_on_agent(agent_to_focus)
                 return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
@@ -5256,7 +5186,7 @@ class TrainingEnvironment:
 
     def _get_agent_learning_approach_name(self, agent_id: str) -> str:
         """Get the learning approach name for an agent."""
-        agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+        agent = next((a for a in self.agents if str(a.id) == str(agent_id) and not getattr(a, '_destroyed', False)), None)
         if agent:
             return getattr(agent, 'learning_approach', 'basic_q_learning')
         return 'basic_q_learning'
@@ -5363,7 +5293,7 @@ class TrainingEnvironment:
             if best_target.get('source') == 'prey':
                 prey_id = best_target.get('prey_id', 'unknown')
                 prey_energy = best_target.get('prey_energy', 0.0)
-                food_type_desc = f"robot prey {prey_id[:8]} (energy: {prey_energy:.2f})"
+                food_type_desc = f"robot prey {str(prey_id)[:8]} (energy: {prey_energy:.2f})"
             else:
                 food_type_desc = best_target.get('type', 'unknown')
             
@@ -5846,8 +5776,8 @@ def click():
         agent_id = data.get('agent_id')
         
         if agent_id:
-            # Find the agent by ID
-            agent_to_focus = next((agent for agent in env.agents if agent.id == agent_id), None)
+            # Find the agent by ID - convert both to strings for comparison
+            agent_to_focus = next((agent for agent in env.agents if str(agent.id) == str(agent_id)), None)
             if agent_to_focus:
                 env.focus_on_agent(agent_to_focus)
                 return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})

@@ -104,11 +104,9 @@ class LearningManager:
         agent._attention_dqn = attention_dqn
         agent._original_choose_action = getattr(agent, 'choose_action', None)
         
-        def attention_choose_action():
-            if not hasattr(agent, '_attention_dqn') or agent._attention_dqn is None:
-                if agent._original_choose_action:
-                    return agent._original_choose_action()
-                return 0
+        def attention_choose_action(state=None):
+            return agent._original_choose_action(state) if state is not None else agent._original_choose_action()
+
             
             training_env = getattr(agent, 'training_environment', None)
             state_data = self._get_agent_state_data(agent, training_env)
@@ -223,7 +221,7 @@ class LearningManager:
             # Check if agent already has a network
             if agent_id in self._attention_networks_in_use:
                 existing_network = self._attention_networks_in_use[agent_id]
-                print(f"♻️ Agent {agent_id[:8]} already has attention network")
+                print(f"♻️ Agent {str(agent_id)[:8]} already has attention network")
                 return existing_network
             
             # Try to reuse from pool first
@@ -232,7 +230,7 @@ class LearningManager:
                 network = self._attention_network_pools[pool_key].pop()
                 self._attention_networks_in_use[agent_id] = network
                 self._network_stats['total_reused'] += 1
-                print(f"♻️ REUSED Attention Network from pool for agent {agent_id[:8]} (pool: {len(self._attention_network_pools[pool_key])} left)")
+                print(f"♻️ REUSED Attention Network from pool for agent {str(agent_id)[:8]} (pool: {len(self._attention_network_pools[pool_key])} left)")
                 return network
             
             # Create new network only if pool is empty
@@ -256,7 +254,7 @@ class LearningManager:
             except:
                 pass
                 
-            print(f"🧠 NEW Attention Network #{self._network_stats['total_created']} for agent {agent_id[:8]} (created: {self._network_stats['total_created']}{gpu_mem})")
+            print(f"🧠 NEW Attention Network #{self._network_stats['total_created']} for agent {str(agent_id)[:8]} (created: {self._network_stats['total_created']}{gpu_mem})")
             
             return attention_dqn
             
@@ -281,7 +279,7 @@ class LearningManager:
             
             if network_state_dim is None or network_action_dim is None:
                 # Can't determine dimensions, destroy the network
-                print(f"🧹 Destroying network with unknown dimensions from agent {agent_id[:8]}")
+                print(f"🧹 Destroying network with unknown dimensions from agent {str(agent_id)[:8]}")
                 try:
                     del network
                     self._network_stats['networks_destroyed'] += 1
@@ -309,7 +307,7 @@ class LearningManager:
                 self._network_stats['current_in_pool'] = sum(len(networks) for networks in self._attention_network_pools.values())
                 self._network_stats['pool_architectures'] = len(self._attention_network_pools)
                 
-                print(f"♻️ Returned Attention Network to pool from agent {agent_id[:8]} (pool[{network_state_dim},{network_action_dim}]: {len(self._attention_network_pools[pool_key])}, in_use: {self._network_stats['current_in_use']})")
+                print(f"♻️ Returned Attention Network to pool from agent {str(agent_id)[:8]} (pool[{network_state_dim},{network_action_dim}]: {len(self._attention_network_pools[pool_key])}, in_use: {self._network_stats['current_in_use']})")
             else:
                 # Pool is full, destroy the network
                 try:
@@ -322,7 +320,7 @@ class LearningManager:
                     self._network_stats['networks_destroyed'] += 1
                     self._update_gpu_stats()
                     
-                    print(f"🧹 Destroyed excess Attention Network from agent {agent_id[:8]} (destroyed: {self._network_stats['networks_destroyed']}, GPU: {self._gpu_stats['current_memory_mb']}MB)")
+                    print(f"🧹 Destroyed excess Attention Network from agent {str(agent_id)[:8]} (destroyed: {self._network_stats['networks_destroyed']}, GPU: {self._gpu_stats['current_memory_mb']}MB)")
                 except Exception as e:
                     print(f"⚠️ Error destroying attention network: {e}")
                     

@@ -545,8 +545,13 @@ WEBGL_HTML_TEMPLATE = """
                     energyColor = [0.9, 0.3, 0.3, 1.0]; // Red (very low energy)
                 }
                 
-                this.drawRectangle(x - barWidth/2, baseY, healthWidth, barHeight, healthColor); // Health foreground
-                this.drawRectangle(x - barWidth/2, baseY + barSpacing, energyWidth, barHeight, energyColor); // Energy foreground
+                // Only draw foreground bars if they have width > 0
+                if (healthWidth > 0) {
+                    this.drawRectangle(x - barWidth/2, baseY, healthWidth, barHeight, healthColor); // Health foreground
+                }
+                if (energyWidth > 0) {
+                    this.drawRectangle(x - barWidth/2, baseY + barSpacing, energyWidth, barHeight, energyColor); // Energy foreground
+                }
                 
                 // Re-enable depth writing for other objects
                 this.gl.depthMask(true);

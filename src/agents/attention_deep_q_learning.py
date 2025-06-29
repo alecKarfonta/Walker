@@ -6,7 +6,6 @@ from collections import deque
 import random
 import time
 from typing import Tuple, List, Dict, Any
-from .deep_survival_q_learning import DeepSurvivalQLearning
 
 class SimpleAttention(nn.Module):
     """Simplified attention mechanism for arm-based food-seeking behavior."""
@@ -170,12 +169,28 @@ class ArmControlAttentionDQN(nn.Module):
             'features': features
         }
 
-class AttentionDeepQLearning(DeepSurvivalQLearning):
+class AttentionDeepQLearning:
     """Deep Q-Learning with attention for arm-based food-seeking behavior."""
     
     def __init__(self, state_dim: int = 5, action_dim: int = 9, learning_rate: float = 0.001):
-        # Initialize parent class with arm control dimensions
-        super().__init__(state_dim, action_dim, learning_rate)
+        # Initialize base Deep Q-Learning attributes
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.learning_rate = learning_rate
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Q-Learning hyperparameters
+        self.gamma = 0.99
+        self.epsilon = 1.0
+        self.epsilon_min = 0.01
+        self.epsilon_decay = 0.995
+        self.batch_size = 32
+        self.target_update_freq = 1000
+        self.steps_done = 0
+        
+        # Experience replay memory
+        self.memory = deque(maxlen=10000)
+        self.use_prioritized_replay = False
         
         # Replace with arm control attention-based network
         self.q_network = ArmControlAttentionDQN(state_dim, action_dim).to(self.device)
@@ -197,18 +212,20 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
         print(f"   📊 Network parameters: {sum(p.numel() for p in self.q_network.parameters()):,}")
         print(f"   🧹 Attention history: {self.attention_history.maxlen} records (optimized)")
     
+    def store_experience(self, state, action, reward, next_state, done):
+        """Store experience in replay memory."""
+        self.memory.append((state, action, reward, next_state, done))
+    
     def choose_action(self, state_vector: np.ndarray, agent_data: Dict[str, Any] = None) -> int:
-        """Choose action with arm control attention-based analysis."""
+        """Choose action with epsilon-greedy policy."""
         # PERFORMANCE: Periodic cleanup of attention history
         current_time = time.time()
         if current_time - self._last_cleanup_time > self._cleanup_interval:
             self._cleanup_attention_data()
             self._last_cleanup_time = current_time
         
-        # Calculate epsilon
-        epsilon = self._calculate_survival_epsilon(agent_data)
-        
-        if np.random.random() > epsilon:
+        # Simple epsilon-greedy exploration
+        if np.random.random() > self.epsilon:
             self.q_network.eval()
             with torch.no_grad():
                 state_tensor = torch.FloatTensor(state_vector).unsqueeze(0).to(self.device)
@@ -225,22 +242,16 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
             self.q_network.train()
             return action
         else:
-            return self._survival_biased_exploration(agent_data)
+            return np.random.randint(0, self.action_dim)
     
     def learn(self) -> Dict[str, float]:
         """Enhanced learning with arm control attention."""
-        if self.use_prioritized_replay:
-            if len(self.memory) < self.batch_size:
-                return {}
-            
-            experiences, indices, weights = self.memory.sample(self.batch_size)
-            weights = torch.FloatTensor(weights).to(self.device)
-        else:
-            if len(self.memory) < self.batch_size:
-                return {}
-            
-            experiences = random.sample(self.memory, self.batch_size)
-            weights = torch.ones(self.batch_size).to(self.device)
+        if len(self.memory) < self.batch_size:
+            return {}
+        
+        # Simple random sampling from memory
+        experiences = random.sample(self.memory, self.batch_size)
+        weights = torch.ones(self.batch_size).to(self.device)
         
         # Log training initialization (first time only)
         if not hasattr(self, '_first_training_logged'):
@@ -278,11 +289,9 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
         torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=1.0)
         self.optimizer.step()
         
-        # Update priorities if using prioritized replay
-        if self.use_prioritized_replay:
-            priorities = abs(td_errors.detach().cpu().numpy()) + 1e-6
-            self.memory.update_priorities(indices, priorities.flatten())
-            self.memory.frame += 1
+        # Update epsilon for exploration decay
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
         
         # Update target network
         if self.steps_done % self.target_update_freq == 0:
