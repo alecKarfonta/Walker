@@ -3846,22 +3846,64 @@ class TrainingEnvironment:
                     cpu_percent = process.cpu_percent()
                     active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
                     
-                    # DETAILED MEMORY TRACKING in health check
+                    # DETAILED OBJECT COUNTING in health check
                     total_buffers = 0
                     max_buffer_size = 0
                     agents_with_learning = 0
+                    total_neural_networks = 0
+                    total_attention_records = 0
+                    total_physics_bodies = 0
+                    total_joints = 0
+                    total_food_sources = 0
+                    total_obstacles = 0
+                    
                     for agent in self.agents:
                         if getattr(agent, '_destroyed', False):
                             continue
+                        
+                        # Count physics bodies per agent
+                        if hasattr(agent, 'body') and agent.body:
+                            total_physics_bodies += 1
+                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                            total_physics_bodies += 1
+                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                            total_physics_bodies += 1
+                        if hasattr(agent, 'wheels') and agent.wheels:
+                            total_physics_bodies += len(agent.wheels)
+                        if hasattr(agent, 'joints') and agent.joints:
+                            total_joints += len(agent.joints)
+                            
                         if hasattr(agent, '_learning_system') and agent._learning_system:
                             agents_with_learning += 1
+                            total_neural_networks += 1
+                            
+                            # Count memory buffer
                             if hasattr(agent._learning_system, 'memory') and hasattr(agent._learning_system.memory, 'buffer'):
                                 buffer_size = len(agent._learning_system.memory.buffer)
                                 total_buffers += buffer_size
                                 max_buffer_size = max(max_buffer_size, buffer_size)
+                            
+                            # Count attention records  
+                            if hasattr(agent._learning_system, 'attention_history'):
+                                attention_size = len(agent._learning_system.attention_history)
+                                total_attention_records += attention_size
+                    
+                    # Count ecosystem objects
+                    if hasattr(self, 'ecosystem_dynamics') and hasattr(self.ecosystem_dynamics, 'food_sources'):
+                        total_food_sources = len(self.ecosystem_dynamics.food_sources)
+                    
+                    # Count environmental objects
+                    if hasattr(self, 'environmental_system') and hasattr(self.environmental_system, 'obstacles'):
+                        total_obstacles = len(self.environmental_system.obstacles)
                     
                     print(f"💚 HEALTH CHECK: Memory={memory_mb:.1f}MB, CPU={cpu_percent:.1f}%, Agents={active_agents}, Step={self.step_count}")
-                    print(f"   🧠 Learning agents: {agents_with_learning}, Total buffer entries: {total_buffers}, Max buffer: {max_buffer_size}")
+                    print(f"   🧠 Learning agents: {agents_with_learning}, Neural networks: {total_neural_networks}")
+                    print(f"   💾 Total buffer entries: {total_buffers}, Max buffer: {max_buffer_size}")
+                    print(f"   🎯 Total attention records: {total_attention_records}")
+                    print(f"   🌍 Physics bodies: {total_physics_bodies}, Joints: {total_joints}")
+                    print(f"   🍽️ Food sources: {total_food_sources}, Obstacles: {total_obstacles}")
+                    print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
+                    print(f"   🌿 Ecosystem events: {len(getattr(self, 'consumption_events', []))}, Death events: {len(getattr(self, 'death_events', []))}")
                     
                     # Alert if memory is too high
                     if memory_mb > 800:

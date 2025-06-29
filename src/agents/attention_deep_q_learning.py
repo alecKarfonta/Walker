@@ -204,9 +204,7 @@ class AttentionDeepQLearning:
         
         self.attention_history = deque(maxlen=50)  # FIXED: Reduced from 5000 to 50 to prevent memory leak
         
-        # Performance optimization tracking - MUCH less aggressive
-        self._last_cleanup_time = time.time()
-        self._cleanup_interval = 300.0  # Clean up every 5 minutes instead of 30 seconds
+        # Deque maxlen=50 handles size automatically - no manual cleanup needed
         
         print(f"🦾 Arm Control Attention-based Deep Q-Learning initialized with {self.device}")
         print(f"   📊 Network parameters: {sum(p.numel() for p in self.q_network.parameters()):,}")
@@ -218,11 +216,8 @@ class AttentionDeepQLearning:
     
     def choose_action(self, state_vector: np.ndarray, agent_data: Dict[str, Any] = None) -> int:
         """Choose action with epsilon-greedy policy."""
-        # PERFORMANCE: Periodic cleanup of attention history
+        # PERFORMANCE: Rely on deque maxlen=50 for automatic cleanup - NO manual cleanup needed
         current_time = time.time()
-        if current_time - self._last_cleanup_time > self._cleanup_interval:
-            self._cleanup_attention_data()
-            self._last_cleanup_time = current_time
         
         # Simple epsilon-greedy exploration
         if np.random.random() > self.epsilon:
@@ -232,13 +227,12 @@ class AttentionDeepQLearning:
                 q_values, attention_info = self.q_network(state_tensor)
                 action = q_values.argmax().item()
                 
-                # Store attention information for analysis - ONLY store essential data
-                if len(self.attention_history) < self.attention_history.maxlen:
-                    self.attention_history.append({
-                        'attention_weights': attention_info['attention_weights'].cpu().numpy(),
-                        'selected_action': action,
-                        'timestamp': current_time  # Add timestamp for cleanup
-                    })
+                # Store attention information for analysis - FIXED: Always append, let deque handle maxlen
+                self.attention_history.append({
+                    'attention_weights': attention_info['attention_weights'].cpu().numpy(),
+                    'selected_action': action,
+                    'timestamp': current_time  # Add timestamp for cleanup
+                })
             self.q_network.train()
             return action
         else:
@@ -391,26 +385,29 @@ class AttentionDeepQLearning:
         }
     
     def _cleanup_attention_data(self):
-        """Clean up accumulated attention data to prevent memory growth - LESS AGGRESSIVE."""
+        """Clean up accumulated attention data to prevent memory growth - MINIMAL CLEANUP."""
         try:
-            # Much more conservative cleanup to preserve learning data
+            # FIXED: Don't recreate the deque! Let maxlen=50 handle size automatically
+            # Just clear old entries without changing the deque structure
             current_time = time.time()
-            if hasattr(self, 'attention_history'):
-                # Remove entries older than 30 minutes (was 5 minutes)
-                cutoff_time = current_time - 1800.0  # 30 minutes instead of 5 minutes
+            if hasattr(self, 'attention_history') and len(self.attention_history) > 40:
+                cutoff_time = current_time - 1800.0  # 30 minutes old
                 
-                # Keep minimal records - maximum 25 (FIXED: much smaller)
+                # Simple cleanup: remove old entries manually without recreating deque
                 old_size = len(self.attention_history)
-                self.attention_history = deque([
-                    entry for entry in self.attention_history 
+                filtered_entries = [
+                    entry for entry in list(self.attention_history)
                     if entry.get('timestamp', current_time) > cutoff_time
-                ], maxlen=25)  # FIXED: Reduced from 5000 to 25
+                ]
+                
+                # Clear and refill instead of recreating
+                self.attention_history.clear()
+                for entry in filtered_entries[-40:]:  # Keep only last 40 entries
+                    self.attention_history.append(entry)
                 
                 # Only log if significant cleanup happened
-                if old_size - len(self.attention_history) > 100:
+                if old_size - len(self.attention_history) > 10:
                     print(f"🧹 Cleaned attention data: {len(self.attention_history)} records remaining (removed {old_size - len(self.attention_history)} old entries)")
-            
-            # REMOVED: GPU cache clearing - this was too aggressive and frequent
             
         except Exception as e:
             print(f"⚠️ Error cleaning attention data: {e}")
