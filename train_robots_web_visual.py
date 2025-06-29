@@ -2911,7 +2911,7 @@ class TrainingEnvironment:
                         health_recovery = 0.001  # Slow health recovery when well-fed
                         self.agent_health[agent_id]['health'] = min(1.0, current_health + health_recovery)
                         if current_health < 0.9 and current_health + health_recovery >= 0.9:
-                            print(f"💚 {agent_id[:8]} is recovering health (energy: {current_energy:.2f})")
+                            print(f"💚 {str(agent_id)[:8]} is recovering health (energy: {current_energy:.2f})")
                     
                     elif current_energy < 0.1:
                         # DRASTICALLY REDUCED: Much slower health degradation for 10x longer survival
@@ -3119,7 +3119,7 @@ class TrainingEnvironment:
                     # CRITICAL: Return dead agent to memory pool IMMEDIATELY so it can be reused
                     if self.robot_memory_pool:
                         try:
-                            self.robot_memory_pool.return_robot(dead_agent, preserve_learning=True)
+                            self.robot_memory_pool.return_robot(dead_agent)
                             print(f"♻️ Returned dead agent {dead_agent.id} to memory pool immediately")
                         except Exception as e:
                             print(f"⚠️ Failed to return dead agent {dead_agent.id} to memory pool: {e}")
@@ -3172,13 +3172,11 @@ class TrainingEnvironment:
             from src.agents.physical_parameters import PhysicalParameters
             random_params = PhysicalParameters.random_parameters()
             
-            # Use memory pool if available for efficient reuse with learning preservation
+            # Use memory pool if available for efficient reuse
             if self.robot_memory_pool:
                 new_agent = self.robot_memory_pool.acquire_robot(
                     position=spawn_position,
-                    physical_params=random_params,
-                    parent_lineage=[],  # Fresh agent, no lineage
-                    restore_learning=True  # Try to restore previous learning if available
+                    physical_params=random_params
                 )
                 logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool")
             else:
@@ -3503,8 +3501,8 @@ class TrainingEnvironment:
             # Return agent to memory pool if available (preserves learning)
             if self.robot_memory_pool:
                 try:
-                    self.robot_memory_pool.return_robot(agent, preserve_learning=True)
-                    print(f"♻️ Returned agent {agent.id} to memory pool with learning preserved")
+                    self.robot_memory_pool.return_robot(agent)
+                    print(f"♻️ Returned agent {agent.id} to memory pool")
                     return
                 except Exception as e:
                     print(f"⚠️ Failed to return agent {agent.id} to memory pool: {e}")
