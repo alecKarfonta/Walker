@@ -45,6 +45,12 @@ from src.persistence import EliteManager
 # Import realistic terrain generation
 from src.terrain_generation import generate_robot_scale_terrain
 
+# Import WebGL renderer
+from src.rendering.webgl_renderer import get_webgl_template
+
+# WebGL is now the default rendering mode for better performance
+USE_WEBGL_RENDERING = True  # Default to WebGL, fallback to Canvas 2D if not supported
+
 # Configure logging - set debug level for Deep Q-Learning GPU training logs
 logging.basicConfig(
     level=logging.DEBUG,
@@ -5142,20 +5148,6 @@ class TrainingEnvironment:
         if hasattr(self, '_zoom_override'):
             delattr(self, '_zoom_override')
 
-    def switch_agent_learning_approach(self, agent_id: str, approach: str) -> bool:
-        """
-        Simplified: All agents use attention deep Q-learning (no more switching).
-        
-        Args:
-            agent_id: ID of the agent (for backward compatibility)
-            approach: Learning approach name (ignored - all use attention)
-            
-        Returns:
-            bool: Always returns True since all agents use attention networks
-        """
-        print(f"📝 Note: All agents use attention deep Q-learning (approach switching removed)")
-        return True
-
     def _get_agent_learning_approach_name(self, agent_id: str) -> str:
         """Get the learning approach name for an agent."""
         agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
@@ -5652,7 +5644,11 @@ env = TrainingEnvironment()
 @app.route('/')
 def index():
     """Serve the main web interface."""
-    return render_template_string(HTML_TEMPLATE)
+    global USE_WEBGL_RENDERING
+    if USE_WEBGL_RENDERING:
+        return render_template_string(get_webgl_template())
+    else:
+        return render_template_string(HTML_TEMPLATE)
 
 @app.route('/status')
 def status():
@@ -5853,25 +5849,6 @@ def update_agent_params():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/switch_learning_approach', methods=['POST'])
-def switch_learning_approach():
-    """Switch an agent's learning approach."""
-    try:
-        data = request.get_json()
-        agent_id = data.get('agent_id')
-        approach = data.get('approach')
-        
-        if not agent_id or not approach:
-            return jsonify({'status': 'error', 'message': 'agent_id and approach are required'}), 400
-        
-        success = env.switch_agent_learning_approach(agent_id, approach)
-        if success:
-            return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
-        else:
-            return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
 @app.route('/set_simulation_speed', methods=['POST'])
 def set_simulation_speed():
     """Set the simulation speed multiplier."""
@@ -5949,6 +5926,39 @@ def ai_optimization_settings():
             
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/toggle_webgl', methods=['POST'])
+def toggle_webgl():
+    """Toggle between WebGL and Canvas 2D rendering."""
+    global USE_WEBGL_RENDERING
+    try:
+        data = request.get_json()
+        if 'use_webgl' in data:
+            USE_WEBGL_RENDERING = data['use_webgl']
+        else:
+            USE_WEBGL_RENDERING = not USE_WEBGL_RENDERING
+        
+        status_msg = "WebGL" if USE_WEBGL_RENDERING else "Canvas 2D"
+        print(f"🎨 Rendering mode switched to {status_msg}")
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Switched to {status_msg} rendering',
+            'use_webgl': USE_WEBGL_RENDERING,
+            'reload_required': True  # Frontend should reload to apply new renderer
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/webgl_status')
+def webgl_status():
+    """Get current WebGL rendering status."""
+    global USE_WEBGL_RENDERING
+    return jsonify({
+        'status': 'success',
+        'use_webgl': USE_WEBGL_RENDERING,
+        'renderer': 'WebGL' if USE_WEBGL_RENDERING else 'Canvas 2D'
+    })
 
 def main():
     # Set a different port for the web server to avoid conflicts
