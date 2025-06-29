@@ -20,7 +20,7 @@ from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
-from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.crawling_agent import CrawlingAgent
 from src.agents.physical_parameters import PhysicalParameters
 from src.population.enhanced_evolution import EnhancedEvolutionEngine, EvolutionConfig, TournamentSelection
 from src.population.population_controller import PopulationController
@@ -40,7 +40,7 @@ from src.agents.ecosystem_interface import EcosystemInterface
 from src.agents.learning_manager import LearningManager
 
 # Import elite robot management
-from src.persistence import EliteManager
+from src.persistence import EliteManager, StorageManager
 
 # Import realistic terrain generation
 from src.terrain_generation import generate_robot_scale_terrain
@@ -539,9 +539,10 @@ HTML_TEMPLATE = """
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
             
-            // Convert screen coordinates to world coordinates using the new camera system
-            const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
-            const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
+            // Convert screen coordinates to world coordinates using scale factor and camera system
+            const totalZoom = cameraZoom * scale;
+            const worldX = (x - canvas.width / 2) / totalZoom + cameraPosition.x;
+            const worldY = (canvas.height / 2 - y) / totalZoom + cameraPosition.y;
             
             console.log(`🎯 Mouse down at screen (${x}, ${y}) -> world (${worldX.toFixed(2)}, ${worldY.toFixed(2)})`);
             console.log(`🎯 Canvas rect: ${rect.left}, ${rect.top}, ${rect.width}, ${rect.height}`);
@@ -591,8 +592,9 @@ HTML_TEMPLATE = """
                         const rect = canvas.getBoundingClientRect();
                         const x = e.clientX - rect.left;
                         const y = e.clientY - rect.top;
-                        const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
-                        const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
+                        const totalZoom = cameraZoom * scale;
+                        const worldX = (x - canvas.width / 2) / totalZoom + cameraPosition.x;
+                        const worldY = (canvas.height / 2 - y) / totalZoom + cameraPosition.y;
                         
                         fetch('./move_agent', {
                             method: 'POST',
@@ -612,8 +614,9 @@ HTML_TEMPLATE = """
                         // Dragging camera
                         isDragging = true;
                         userHasManuallyPanned = true; // flag manual pan
-                        cameraPosition.x -= (e.clientX - lastMouseX) / cameraZoom;
-                        cameraPosition.y += (e.clientY - lastMouseY) / cameraZoom;
+                        const totalZoom = cameraZoom * scale;
+                        cameraPosition.x -= (e.clientX - lastMouseX) / totalZoom;
+                        cameraPosition.y += (e.clientY - lastMouseY) / totalZoom;
                         lastMouseX = e.clientX;
                         lastMouseY = e.clientY;
                     }
@@ -813,6 +816,9 @@ HTML_TEMPLATE = """
                     `;
                 });
                 
+                 // Get physics FPS from server data
+                 const currentPhysicsFps = data.physics_fps || 0;
+                 
                  populationSummaryContent.innerHTML = `
                     <div class="stat-row">
                         <span class="stat-label">Generation:</span>
@@ -821,6 +827,14 @@ HTML_TEMPLATE = """
                     <div class="stat-row">
                         <span class="stat-label">Population:</span>
                         <span class="stat-value">${totalAgents} agents</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">UI FPS:</span>
+                        <span class="stat-value" style="color: ${currentUiFps >= 30 ? '#4CAF50' : currentUiFps >= 20 ? '#FF9800' : '#FF5722'}">${currentUiFps}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Physics FPS:</span>
+                        <span class="stat-value" style="color: ${currentPhysicsFps >= 50 ? '#4CAF50' : currentPhysicsFps >= 30 ? '#FF9800' : '#FF5722'}">${currentPhysicsFps}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Avg Distance:</span>
@@ -2077,6 +2091,14 @@ class TrainingEnvironment:
         
         # Flag to track if we should restore elites on startup
         self.restore_elites_on_start = True
+        
+        # Auto-save elite robots every generation
+        self.auto_save_elites = True
+        self.last_elite_save_generation = 0
+        
+        # Storage manager for periodic elite saves
+        self.storage_manager = StorageManager("robot_storage")
+        self.storage_manager.enable_auto_save(interval_seconds=600)  # Auto-save every 10 minutes
 
         # Initialize Learning Manager for advanced learning approaches
         try:
@@ -2173,8 +2195,87 @@ class TrainingEnvironment:
         print(f"🏆 Elite preservation: {self.elite_manager.elite_per_generation} per generation, max {self.elite_manager.max_elite_storage} stored")
         print(f"🏞️ Realistic terrain generated: {len(self.terrain_collision_bodies)} terrain bodies using '{self.terrain_style}' style")
         
+        # Load elite robots on startup if requested
+        if self.restore_elites_on_start:
+            self._load_elite_robots_on_startup()
+        
         # Log the morphology-aware learning time improvements
         self.log_morphology_aware_learning_times()
+
+    def _load_elite_robots_on_startup(self):
+        """Load elite robots from storage and integrate them into the population on startup."""
+        try:
+            print("🔄 Loading elite robots from storage...")
+            
+            # Get elite statistics
+            elite_stats = self.elite_manager.get_elite_statistics()
+            total_elites = elite_stats.get('total_elites_stored', 0)
+            
+            if total_elites == 0:
+                print("📂 No elite robots found in storage")
+                return
+            
+            # Load top 10 elite robots
+            elite_robots = self.elite_manager.restore_elite_robots(
+                world=self.world,
+                count=min(10, total_elites),
+                min_generation=max(0, self.evolution_engine.generation - 5)  # Only recent elites
+            )
+            
+            if not elite_robots:
+                print("📂 No elite robots could be loaded")
+                return
+            
+            # Replace some random agents with elite robots to maintain population size
+            agents_to_replace = min(len(elite_robots), len(self.agents) // 3)  # Replace up to 1/3 
+            
+            if agents_to_replace > 0:
+                # Remove random agents
+                for _ in range(agents_to_replace):
+                    if self.agents:
+                        removed_agent = self.agents.pop(random.randint(0, len(self.agents) - 1))
+                        self._safe_destroy_agent(removed_agent)
+                
+                # Add elite robots
+                for i, elite_robot in enumerate(elite_robots[:agents_to_replace]):
+                    self.agents.append(elite_robot)
+                    # Initialize ecosystem data for elite robot
+                    self._initialize_single_agent_ecosystem(elite_robot)
+                
+                print(f"🏆 Loaded {agents_to_replace} elite robots into population")
+                print(f"   💫 Elite fitness range: {min(getattr(r, 'total_reward', 0) for r in elite_robots[:agents_to_replace]):.2f} - {max(getattr(r, 'total_reward', 0) for r in elite_robots[:agents_to_replace]):.2f}")
+            
+        except Exception as e:
+            print(f"⚠️ Error loading elite robots on startup: {e}")
+
+    def _save_elite_robots_periodically(self):
+        """Save elite robots periodically (called from training loop)."""
+        try:
+            current_generation = self.evolution_engine.generation
+            
+            # Save elites every generation (but not the same generation twice)
+            if (self.auto_save_elites and 
+                current_generation > self.last_elite_save_generation):
+                
+                # Get top performing agents
+                top_agents = sorted(
+                    [a for a in self.agents if not getattr(a, '_destroyed', False)],
+                    key=lambda a: getattr(a, 'total_reward', 0.0),
+                    reverse=True
+                )[:5]  # Top 5 agents
+                
+                if top_agents and max(getattr(a, 'total_reward', 0.0) for a in top_agents) > 1.0:
+                    # Save using storage manager for periodic backup
+                    self.storage_manager.save_elite_robots(top_agents, top_n=3)
+                    self.last_elite_save_generation = current_generation
+                    
+                    print(f"💾 Auto-saved top 3 elite robots from generation {current_generation}")
+            
+            # Check for auto-save checkpoint
+            self.storage_manager.check_auto_save(self.agents)
+            
+        except Exception as e:
+            print(f"⚠️ Error in periodic elite saving: {e}")
 
     def get_morphology_aware_episode_length(self, agent) -> int:
         """Calculate episode length based on robot morphology complexity."""
@@ -3130,8 +3231,7 @@ class TrainingEnvironment:
                 logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool")
             else:
                 # Fallback: Create new agent directly
-                from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
-                new_agent = EvolutionaryCrawlingAgent(
+                new_agent = CrawlingAgent(
                     world=self.world,
                     agent_id=None,  # Generate new UUID automatically
                     position=spawn_position,
@@ -3908,6 +4008,12 @@ class TrainingEnvironment:
                         
                     except Exception as e:
                         print(f"⚠️  Error logging to MLflow: {e}")
+                
+                # Periodic elite robot saving
+                try:
+                    self._save_elite_robots_periodically()
+                except Exception as e:
+                    print(f"⚠️  Error in periodic elite saving: {e}")
                 
                 last_mlflow_log = current_time
                         
@@ -4747,7 +4853,7 @@ class TrainingEnvironment:
                     new_population, agents_to_destroy = self.evolution_engine.evolve_generation()
                     
                     # Update agents list FIRST, before any cleanup
-                    self.agents:List[EvolutionaryCrawlingAgent] = new_population
+                    self.agents = new_population
                     
                     # Add agents to destruction queue instead of immediate destruction
                     self._agents_pending_destruction.extend(agents_to_destroy)
@@ -4831,7 +4937,7 @@ class TrainingEnvironment:
         # Create random physical parameters for diversity
         random_params = PhysicalParameters.random_parameters()
         
-        new_agent = EvolutionaryCrawlingAgent(
+        new_agent = CrawlingAgent(
             world=self.world,
             agent_id=None,  # Generate new UUID automatically
             position=position,
@@ -4874,7 +4980,7 @@ class TrainingEnvironment:
         
         # Update position for the clone (ID is already generated)
         cloned_agent.initial_position = position
-        cloned_agent.reset_with_new_position(position)
+        cloned_agent.reset_position()
         
         self.agents.append(cloned_agent)
         print(f"👯 Cloned best agent {best_agent.id} to new agent {cloned_agent.id} (fitness: {best_agent.get_evolutionary_fitness():.3f}). Total agents: {len(self.agents)}")
@@ -5517,19 +5623,6 @@ class TrainingEnvironment:
                 if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
                     agent.action_history = agent.action_history[-50:]
                 
-                # Clean up Q-table data if it exists and has history
-                if hasattr(agent, 'q_table'):
-                    if hasattr(agent.q_table, 'q_value_history') and len(agent.q_table.q_value_history) > 100:
-                        agent.q_table.q_value_history = agent.q_table.q_value_history[-100:]
-                    
-                    # Clean up visit counts for very large Q-tables
-                    if hasattr(agent.q_table, 'visit_counts') and hasattr(agent.q_table.visit_counts, '__len__'):
-                        try:
-                            if len(agent.q_table.visit_counts) > 5000:
-                                # Reset visit counts for least visited state-actions
-                                pass  # Skip complex cleanup for now
-                        except:
-                            pass
                 
                 # Clean up replay buffer if too large
                 if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
@@ -5959,6 +6052,67 @@ def webgl_status():
         'use_webgl': USE_WEBGL_RENDERING,
         'renderer': 'WebGL' if USE_WEBGL_RENDERING else 'Canvas 2D'
     })
+
+@app.route('/elite_robots', methods=['GET', 'POST'])
+def elite_robots():
+    """Manage elite robots - get stats or load elites into population."""
+    try:
+        if request.method == 'GET':
+            # Get elite robot statistics
+            stats = env.elite_manager.get_elite_statistics()
+            top_elites = env.elite_manager.get_top_elites(10)
+            
+            return jsonify({
+                'elite_statistics': stats,
+                'top_elites': top_elites,
+                'auto_save_enabled': env.auto_save_elites,
+                'current_generation': env.evolution_engine.generation
+            })
+        
+        elif request.method == 'POST':
+            # Load elite robots into current population
+            data = request.get_json() or {}
+            count = data.get('count', 5)
+            min_generation = data.get('min_generation', max(0, env.evolution_engine.generation - 5))
+            
+            # Load elite robots
+            elite_robots = env.elite_manager.restore_elite_robots(
+                world=env.world,
+                count=count,
+                min_generation=min_generation
+            )
+            
+            if elite_robots:
+                # Replace random agents with elite robots
+                agents_replaced = min(len(elite_robots), len(env.agents) // 4)  # Replace up to 25%
+                
+                # Remove random agents
+                for _ in range(agents_replaced):
+                    if env.agents:
+                        removed_agent = env.agents.pop(random.randint(0, len(env.agents) - 1))
+                        env._safe_destroy_agent(removed_agent)
+                
+                # Add elite robots
+                for elite_robot in elite_robots[:agents_replaced]:
+                    env.agents.append(elite_robot)
+                    env._initialize_single_agent_ecosystem(elite_robot)
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Loaded {agents_replaced} elite robots into population',
+                    'agents_replaced': agents_replaced,
+                    'elite_count': len(elite_robots),
+                    'population_size': len(env.agents)
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'No elite robots found to load',
+                    'agents_replaced': 0
+                })
+                
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 def main():
     # Set a different port for the web server to avoid conflicts

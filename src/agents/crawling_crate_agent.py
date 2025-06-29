@@ -138,43 +138,38 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
         Uses dynamic size based on robot morphology (2 joints + 3 metadata for basic robots).
         Always returns numpy array for neural network input.
         """
-        try:
-            # DYNAMIC STATE SIZE: 2 joints + 3 metadata = 5 elements for basic robots
-            joint_count = 2  # Basic robots have 2 joints (shoulder, elbow)
-            state_size = joint_count + 3
-            
-            # Initialize state array with exact size needed
-            state_array = np.zeros(state_size, dtype=np.float32)
-            
-            # Get basic robot joint angles
-            state = self.get_state()
-            shoulder_angle = np.tanh(state[5])  # Normalize to [-1, 1]
-            elbow_angle = np.tanh(state[6])     # Normalize to [-1, 1]
-            
-            # Fill joint positions
-            state_array[0] = shoulder_angle  # First joint
-            state_array[1] = elbow_angle     # Second joint
-            
-            # Physical state information (last 3 elements)
-            velocity = np.tanh(self.body.linearVelocity.x / 5.0)
-            stability = np.tanh(self.body.angle * 2.0)
-            progress = np.tanh((self.body.position.x - self.prev_x) * 10.0)
-            
-            state_array[joint_count] = velocity      # velocity
-            state_array[joint_count + 1] = stability  # stability  
-            state_array[joint_count + 2] = progress   # progress
-            
-            return state_array
-                
-        except Exception as e:
-            print(f"⚠️ Error getting state for agent {self.id}: {e}")
-            return np.zeros(5, dtype=np.float32)  # Basic robot: 2 joints + 3 metadata
+        # DYNAMIC STATE SIZE: 2 joints + 3 metadata = 5 elements for basic robots
+        joint_count = 2  # Basic robots have 2 joints (shoulder, elbow)
+        state_size = joint_count + 3
+        
+        # Initialize state array with exact size needed
+        state_array = np.zeros(state_size, dtype=np.float32)
+        
+        # Get basic robot joint angles
+        state = self.get_state()
+        shoulder_angle = np.tanh(state[5])  # Normalize to [-1, 1]
+        elbow_angle = np.tanh(state[6])     # Normalize to [-1, 1]
+        
+        # Fill joint positions
+        state_array[0] = shoulder_angle  # First joint
+        state_array[1] = elbow_angle     # Second joint
+        
+        # Physical state information (last 3 elements)
+        velocity = np.tanh(self.body.linearVelocity.x / 5.0)
+        stability = np.tanh(self.body.angle * 2.0)
+        progress = np.tanh((self.body.position.x - self.prev_x) * 10.0)
+        
+        state_array[joint_count] = velocity      # velocity
+        state_array[joint_count + 1] = stability  # stability  
+        state_array[joint_count + 2] = progress   # progress
+        
+        return state_array
 
-    def choose_action(self) -> int:
+    def choose_action(self, state) -> int:
         """Choose action using attention-based learning system."""
-        state = self.get_state_representation()
+        #state = self.get_state_representation()
         action = self._learning_system.choose_action(state)
-        return max(0, min(action, self.action_size - 1))
+        return action
         
 
     def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
@@ -189,9 +184,18 @@ class CrawlingCrateAgent(CrawlingCrate, BaseAgent):
                 
                 self._learning_system.store_experience(prev_state, action, reward, new_state, done)
                 
-                # Train periodically
+                # Train frequently for neural networks (every 2 steps for rapid learning)
                 if self.steps % 10 == 0:
-                    self._learning_system.learn()
+                    # Log first training session
+                    if not hasattr(self, '_training_started'):
+                        print(f"🚀 Agent {self.id}: Neural network training STARTED at step {self.steps}")
+                        self._training_started = True
+                    
+                    training_stats = self._learning_system.learn()
+                    
+                    # Log training activity periodically
+                    if self.steps % 100 == 0 and training_stats:
+                        print(f"🧠 Agent {self.id}: Training step {self.steps}, Loss: {training_stats.get('loss', 0.0):.4f}, Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
                     
         except Exception as e:
             print(f"❌ Error in learning for agent {self.id}: {e}")

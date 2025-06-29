@@ -753,23 +753,44 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             // Draw ecosystem elements (food sources) with enhanced rendering
-            if (data.ecosystem && data.ecosystem.food_sources) {
-                data.ecosystem.food_sources.forEach(food => {
-                    const [x, y] = food.position;
-                    const amount = food.amount;
-                    const maxCapacity = food.max_capacity;
-                    const baseRadius = 0.8;
-                    
-                    // Use enhanced food source rendering
-                    renderer.drawEnhancedFoodSource(x, y, baseRadius, amount, maxCapacity, food.type);
-                });
+            // Use viewport culling if enabled for better performance
+            let foodSources = [];
+            if (data.viewport_culling && data.viewport_culling.enabled && data.ecosystem?.visible_food_sources) {
+                // Use only visible food sources when viewport culling is enabled
+                foodSources = data.ecosystem.visible_food_sources;
+            } else if (data.ecosystem?.food_sources) {
+                // Use all food sources when viewport culling is disabled
+                foodSources = data.ecosystem.food_sources;
             }
             
+            foodSources.forEach(food => {
+                const [x, y] = food.position;
+                const amount = food.amount;
+                const maxCapacity = food.max_capacity;
+                const baseRadius = 0.8;
+                
+                // Use enhanced food source rendering
+                renderer.drawEnhancedFoodSource(x, y, baseRadius, amount, maxCapacity, food.type);
+            });
+            
             // Draw robots with health and energy bars
-            if (data.shapes && data.shapes.robots && (data.all_agents || data.agents)) {
-                data.shapes.robots.forEach(robot => {
+            // Use viewport culling if enabled for better performance
+            let robotShapes = [];
+            let agentList = [];
+            
+            if (data.viewport_culling && data.viewport_culling.enabled && data.shapes?.visible_robots) {
+                // Use only visible robots when viewport culling is enabled
+                robotShapes = data.shapes.visible_robots;
+                agentList = data.visible_agents || data.all_agents || data.agents;
+            } else if (data.shapes?.robots) {
+                // Use all robots when viewport culling is disabled
+                robotShapes = data.shapes.robots;
+                agentList = data.all_agents || data.agents;
+            }
+            
+            if (robotShapes.length > 0 && agentList.length > 0) {
+                robotShapes.forEach(robot => {
                     // Use all_agents first (contains complete ecosystem data), fallback to agents
-                    const agentList = data.all_agents || data.agents;
                     const agent = agentList.find(a => a.id === robot.id);
                     if (!agent) {
                         console.warn(`⚠️ Agent not found for robot ${robot.id}`);
@@ -855,11 +876,24 @@ WEBGL_HTML_TEMPLATE = """
                 });
             }
             
-            // Draw robots (simplified) with health and energy bars
-            if (data.shapes && data.shapes.robots) {
-                data.shapes.robots.forEach(robot => {
+            // Draw robots (simplified) with health and energy bars  
+            // Use viewport culling if enabled for better performance (Canvas2D fallback)
+            let robotShapes = [];
+            let agentList = [];
+            
+            if (data.viewport_culling && data.viewport_culling.enabled && data.shapes?.visible_robots) {
+                // Use only visible robots when viewport culling is enabled
+                robotShapes = data.shapes.visible_robots;
+                agentList = data.visible_agents || data.all_agents || data.agents;
+            } else if (data.shapes?.robots) {
+                // Use all robots when viewport culling is disabled
+                robotShapes = data.shapes.robots;
+                agentList = data.all_agents || data.agents;
+            }
+            
+            if (robotShapes.length > 0 && agentList.length > 0) {
+                robotShapes.forEach(robot => {
                     // Use all_agents first (contains complete ecosystem data), fallback to agents
-                    const agentList = data.all_agents || data.agents;
                     const agent = agentList?.find(a => a.id === robot.id);
                     if (!agent) {
                         console.warn(`⚠️ Canvas2D: Agent not found for robot ${robot.id}`);
@@ -1268,6 +1302,9 @@ WEBGL_HTML_TEMPLATE = """
                     `;
                 });
                 
+                // Get physics FPS from server data
+                const currentPhysicsFps = data.physics_fps || 0;
+                
                 populationSummaryContent.innerHTML = `
                     <div class="stat-row">
                         <span class="stat-label">Generation:</span>
@@ -1278,8 +1315,12 @@ WEBGL_HTML_TEMPLATE = """
                         <span class="stat-value">${totalAgents} agents</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">WebGL FPS:</span>
-                        <span class="stat-value" style="color: ${currentUiFps >= 30 ? '#4CAF50' : '#FF5722'}">${currentUiFps}</span>
+                        <span class="stat-label">UI FPS:</span>
+                        <span class="stat-value" style="color: ${currentUiFps >= 30 ? '#4CAF50' : currentUiFps >= 20 ? '#FF9800' : '#FF5722'}">${currentUiFps}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Physics FPS:</span>
+                        <span class="stat-value" style="color: ${currentPhysicsFps >= 50 ? '#4CAF50' : currentPhysicsFps >= 30 ? '#FF9800' : '#FF5722'}">${currentPhysicsFps}</span>
                     </div>
                     <div class="stat-row">
                         <span class="stat-label">Avg Distance:</span>

@@ -242,6 +242,11 @@ class AttentionDeepQLearning(DeepSurvivalQLearning):
             experiences = random.sample(self.memory, self.batch_size)
             weights = torch.ones(self.batch_size).to(self.device)
         
+        # Log training initialization (first time only)
+        if not hasattr(self, '_first_training_logged'):
+            print(f"🧠 Neural Network: First training session - Memory: {len(self.memory)}, Batch: {self.batch_size}")
+            self._first_training_logged = True
+        
         # Prepare batch
         from collections import namedtuple
         Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done'])

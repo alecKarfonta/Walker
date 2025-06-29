@@ -72,9 +72,9 @@ class PerformanceHistory:
         self.stability_history.append(current_stability)
         
         # Learning metrics
-        convergence = agent.q_table.get_convergence_estimate() if hasattr(agent, 'q_table') else 0.0
-        epsilon = getattr(agent, 'epsilon', 0.0)
-        q_size = len(agent.q_table.q_values) if hasattr(agent, 'q_table') and hasattr(agent.q_table, 'q_values') else 0
+        convergence = getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1))  # Use reward/step as convergence metric
+        epsilon = getattr(agent._learning_system, 'epsilon', 0.0) if hasattr(agent, '_learning_system') and agent._learning_system else 0.0
+        q_size = len(agent._learning_system.memory.buffer) if (hasattr(agent, '_learning_system') and agent._learning_system and hasattr(agent._learning_system, 'memory') and agent._learning_system.memory and hasattr(agent._learning_system.memory, 'buffer')) else 0
         
         self.convergence_history.append(convergence)
         self.epsilon_history.append(epsilon)
@@ -105,8 +105,8 @@ class RobotState:
     # Physical parameters
     physical_parameters: Dict[str, Any] = field(default_factory=dict)
     
-    # Q-learning state  
-    q_table_data: Dict[str, Any] = field(default_factory=dict)
+    # Neural network state  
+    neural_network_data: Dict[str, Any] = field(default_factory=dict)
     learning_parameters: Dict[str, Any] = field(default_factory=dict)
     
     # Performance metrics
@@ -175,7 +175,7 @@ class RobotStorage:
     def save_robot(self, agent: EvolutionaryCrawlingAgent, notes: str = "", save_method: str = "manual") -> str:
         """Save complete robot state to persistent storage."""
         from .storage_helpers import (
-            extract_q_table_data, extract_learning_parameters, 
+            extract_neural_network_data, extract_learning_parameters, 
             extract_performance_metrics, create_performance_history
         )
         
@@ -198,7 +198,7 @@ class RobotStorage:
             if hasattr(agent, 'physical_params'):
                 state.physical_parameters = agent.physical_params.to_dict()
             
-            state.q_table_data = extract_q_table_data(agent)
+            state.neural_network_data = extract_neural_network_data(agent)
             state.learning_parameters = extract_learning_parameters(agent)
             state.performance_metrics = extract_performance_metrics(agent)
             
@@ -220,7 +220,7 @@ class RobotStorage:
                    position: Optional[Tuple[float, float]] = None) -> EvolutionaryCrawlingAgent:
         """Load robot from persistent storage and recreate exact state."""
         from .storage_helpers import (
-            restore_q_table_data, restore_learning_parameters, restore_performance_metrics
+            restore_neural_network_data, restore_learning_parameters, restore_performance_metrics
         )
         
         try:
@@ -248,7 +248,7 @@ class RobotStorage:
             robot.id = state.robot_id
             
             # Restore all state using helper functions
-            restore_q_table_data(robot, state.q_table_data)
+            restore_neural_network_data(robot, state.neural_network_data)
             restore_learning_parameters(robot, state.learning_parameters)
             restore_performance_metrics(robot, state.performance_metrics)
             
@@ -392,7 +392,7 @@ class RobotStorage:
     def _create_robot_state(self, agent: EvolutionaryCrawlingAgent, save_method: str = "manual") -> RobotState:
         """Create robot state from agent."""
         from .storage_helpers import (
-            extract_q_table_data, extract_learning_parameters, 
+            extract_neural_network_data, extract_learning_parameters, 
             extract_performance_metrics, create_performance_history
         )
         
@@ -411,7 +411,7 @@ class RobotStorage:
         if hasattr(agent, 'physical_params'):
             state.physical_parameters = agent.physical_params.to_dict()
         
-        state.q_table_data = extract_q_table_data(agent)
+        state.neural_network_data = extract_neural_network_data(agent)
         state.learning_parameters = extract_learning_parameters(agent)
         state.performance_metrics = extract_performance_metrics(agent)
         state.performance_history = create_performance_history(agent)

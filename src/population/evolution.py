@@ -2,7 +2,7 @@
 Evolution Engine for implementing genetic algorithms.
 
 This module provides the core evolutionary algorithm functionality including
-genetic operators (mutation, crossover), fitness evaluation, and generation management.
+genetic operators (mutation, crossover), and generation management for neural network-based agents.
 """
 
 from typing import List, Dict, Any, Optional, Callable, Tuple
@@ -11,8 +11,7 @@ import random
 from abc import ABC, abstractmethod
 
 from src.agents.base_agent import BaseAgent
-from src.agents.basic_agent import BasicAgent
-from src.agents.q_table import QTable
+from src.agents.crawling_agent import CrawlingAgent
 from src.population.population_controller import PopulationController, AgentRecord
 
 
@@ -26,25 +25,22 @@ class GeneticOperator(ABC):
 
 
 class MutationOperator(GeneticOperator):
-    """Mutation operator for evolving agents."""
+    """Mutation operator for evolving neural network-based agents."""
     
     def __init__(self, 
-                 learning_rate_mutation: float = 0.1,
-                 epsilon_mutation: float = 0.1,
-                 q_value_mutation: float = 0.05,
+                 physical_mutation_rate: float = 0.1,
+                 learning_mutation_rate: float = 0.1,
                  mutation_strength: float = 0.1):
         """
-        Initialize mutation operator.
+        Initialize mutation operator for neural network agents.
         
         Args:
-            learning_rate_mutation: Probability of mutating learning rate
-            epsilon_mutation: Probability of mutating epsilon
-            q_value_mutation: Probability of mutating individual Q-values
+            physical_mutation_rate: Probability of mutating physical parameters
+            learning_mutation_rate: Probability of mutating learning parameters  
             mutation_strength: Strength of mutations (0-1)
         """
-        self.learning_rate_mutation = learning_rate_mutation
-        self.epsilon_mutation = epsilon_mutation
-        self.q_value_mutation = q_value_mutation
+        self.physical_mutation_rate = physical_mutation_rate
+        self.learning_mutation_rate = learning_mutation_rate
         self.mutation_strength = mutation_strength
     
     def apply(self, parent: BaseAgent) -> BaseAgent:
@@ -57,59 +53,19 @@ class MutationOperator(GeneticOperator):
         Returns:
             A new agent with mutations applied
         """
-        if isinstance(parent, BasicAgent):
-            return self._mutate_basic_agent(parent)
+        if isinstance(parent, CrawlingAgent):
+            return self._mutate_crawling_agent(parent)
         else:
-            # For other agent types (like CrawlingCrate), use their own mutate method
-            if hasattr(parent, 'mutate') and hasattr(parent, 'copy'):
-                child = parent.copy()
-                child.mutate(self.mutation_strength)
-                return child
+            # For other agent types, use their own mutate method if available
+            if hasattr(parent, 'clone_with_mutation'):
+                return parent.clone_with_mutation(self.mutation_strength)
             else:
                 raise ValueError(f"Agent type {type(parent).__name__} does not support mutation")
     
-    def _mutate_basic_agent(self, parent: BasicAgent) -> BasicAgent:
-        """Mutate a BasicAgent specifically."""
-        # Create a copy of the parent
-        child = BasicAgent(
-            state_dimensions=parent.state_dimensions,
-            action_count=parent.action_count
-        )
-        
-        # Copy Q-table
-        child.q_table = parent.q_table.copy()
-        
-        # Mutate learning parameters
-        if random.random() < self.learning_rate_mutation:
-            child.learning_rate = self._mutate_value(
-                parent.learning_rate, 0.01, 0.5
-            )
-        
-        if random.random() < self.epsilon_mutation:
-            child.randomness = self._mutate_value(
-                parent.randomness, 0.01, 0.5
-            )
-        
-        # Mutate Q-values
-        if random.random() < self.q_value_mutation:
-            self._mutate_q_table(child.q_table)
-        
-        return child
-    
-    def _mutate_value(self, value: float, min_val: float, max_val: float) -> float:
-        """Mutate a single value within bounds."""
-        mutation = (random.random() - 0.5) * 2 * self.mutation_strength
-        new_value = value + mutation
-        return max(min_val, min(max_val, new_value))
-    
-    def _mutate_q_table(self, q_table: QTable):
-        """Mutate Q-values in the Q-table."""
-        for state in q_table.table:
-            for action in q_table.table[state]:
-                if random.random() < self.q_value_mutation:
-                    current_value = q_table.table[state][action]
-                    mutation = (random.random() - 0.5) * 2 * self.mutation_strength
-                    q_table.table[state][action] = current_value + mutation
+    def _mutate_crawling_agent(self, parent: CrawlingAgent) -> CrawlingAgent:
+        """Mutate a CrawlingAgent with neural network-based learning."""
+        # Use the agent's built-in mutation capabilities
+        return parent.clone_with_mutation(self.mutation_strength)
 
 
 class CrossoverOperator(GeneticOperator):
@@ -135,82 +91,29 @@ class CrossoverOperator(GeneticOperator):
         Returns:
             A new agent created by crossover
         """
-        if isinstance(parent1, BasicAgent) and isinstance(parent2, BasicAgent):
-            return self._crossover_basic_agents(parent1, parent2)
+        if isinstance(parent1, CrawlingAgent) and isinstance(parent2, CrawlingAgent):
+            return self._crossover_crawling_agents(parent1, parent2)
         else:
-            # For other agent types (like CrawlingCrate), use their own crossover method
-            if (hasattr(parent1, 'crossover') and hasattr(parent2, 'crossover') and 
-                hasattr(parent1, 'copy') and hasattr(parent2, 'copy')):
+            # For other agent types, use their own crossover method if available
+            if hasattr(parent1, 'crossover') and hasattr(parent2, 'crossover'):
                 if random.random() > self.crossover_rate:
-                    # No crossover, return copy of parent1
-                    return parent1.copy()
+                    # No crossover, return mutated copy of parent1
+                    return parent1.clone_with_mutation(0.01)  # Small mutation
                 else:
                     # Use the agent's own crossover method
                     return parent1.crossover(parent2)
             else:
-                raise ValueError(f"Agent type {type(parent1).__name__} does not support crossover")
+                # Fallback: return mutated copy of parent1
+                return parent1.clone_with_mutation(0.01)
     
-    def _copy_agent(self, agent: BasicAgent) -> BasicAgent:
-        """Create a copy of an agent."""
-        copy_agent = BasicAgent(
-            state_dimensions=agent.state_dimensions,
-            action_count=agent.action_count
-        )
-        copy_agent.q_table = agent.q_table.copy()
-        copy_agent.learning_rate = agent.learning_rate
-        copy_agent.future_discount = agent.future_discount
-        copy_agent.randomness = agent.randomness
-        return copy_agent
-    
-    def _crossover_q_tables(self, q_table1: QTable, q_table2: QTable) -> QTable:
-        """Crossover two Q-tables."""
-        # Get all unique states
-        all_states = set(q_table1.table.keys()) | set(q_table2.table.keys())
-        
-        # Create new Q-table
-        new_q_table = QTable()
-        
-        for state in all_states:
-            new_q_table.table[state] = {}
-            
-            # Get actions from both parents
-            actions1 = q_table1.table.get(state, {})
-            actions2 = q_table2.table.get(state, {})
-            all_actions = set(actions1.keys()) | set(actions2.keys())
-            
-            for action in all_actions:
-                value1 = actions1.get(action, 0.0)
-                value2 = actions2.get(action, 0.0)
-                
-                # Randomly choose from parent or average
-                if random.random() < 0.5:
-                    new_q_table.table[state][action] = value1
-                else:
-                    new_q_table.table[state][action] = value2
-        
-        return new_q_table
-    
-    def _crossover_basic_agents(self, parent1: BasicAgent, parent2: BasicAgent) -> BasicAgent:
-        """Crossover two BasicAgent instances specifically."""
+    def _crossover_crawling_agents(self, parent1: CrawlingAgent, parent2: CrawlingAgent) -> CrawlingAgent:
+        """Crossover two CrawlingAgent instances."""
         if random.random() > self.crossover_rate:
-            # No crossover, return copy of parent1
-            return self._copy_agent(parent1)
+            # No crossover, return mutated copy of parent1
+            return parent1.clone_with_mutation(0.01)
         
-        # Create child with average parameters
-        child = BasicAgent(
-            state_dimensions=parent1.state_dimensions,
-            action_count=parent1.action_count
-        )
-        
-        # Average learning parameters
-        child.learning_rate = (parent1.learning_rate + parent2.learning_rate) / 2
-        child.future_discount = (parent1.future_discount + parent2.future_discount) / 2
-        child.randomness = (parent1.randomness + parent2.randomness) / 2
-        
-        # Crossover Q-table
-        child.q_table = self._crossover_q_tables(parent1.q_table, parent2.q_table)
-        
-        return child
+        # Use the agent's built-in crossover method
+        return parent1.crossover(parent2)
 
 
 class EvolutionEngine:
@@ -218,7 +121,7 @@ class EvolutionEngine:
     Main evolution engine that coordinates genetic operations.
     
     This class manages the evolutionary process including selection,
-    reproduction, and population replacement.
+    reproduction, and population replacement for neural network-based agents.
     """
     
     def __init__(self,
@@ -261,10 +164,15 @@ class EvolutionEngine:
         
         new_population = []
         
-        # Preserve elite agents
+        # Preserve elite agents (create copies to avoid reference issues)
         elite_agents = ranked_agents[:self.elite_size]
         for record in elite_agents:
-            new_population.append(record.agent)
+            if hasattr(record.agent, 'clone_with_mutation'):
+                # Elite agents get minimal mutation to preserve their performance
+                elite_copy = record.agent.clone_with_mutation(0.001)  # Very small mutation
+                new_population.append(elite_copy)
+            else:
+                new_population.append(record.agent)
         
         # Generate remaining agents through selection and reproduction
         while len(new_population) < self.population_controller.population_size:
@@ -275,17 +183,15 @@ class EvolutionEngine:
             # Create child through crossover and mutation
             if random.random() < 0.7:  # 70% crossover, 30% mutation
                 child = self.crossover_operator.apply(parent1, parent2)
-                # Apply mutation to crossover child
-                child = self.mutation_operator.apply(child)
+                # Apply additional mutation to crossover child
+                if hasattr(child, 'clone_with_mutation'):
+                    child = child.clone_with_mutation(0.05)  # Small additional mutation
             else:
                 # Direct mutation
                 child = self.mutation_operator.apply(parent1)
             
             new_population.append(child)
         
-        # No need to reassign IDs - agents already have unique IDs from cloning/crossover
-        # Reassigning breaks leaderboard button references after evolution
-
         return new_population
     
     def _tournament_selection(self, ranked_agents: List[AgentRecord]) -> BaseAgent:
@@ -401,7 +307,7 @@ class EvolutionEngine:
             'evolution_progress': evolution_progress,
             'elite_size': self.elite_size,
             'tournament_size': self.tournament_size,
-            'mutation_rate': self.mutation_operator.learning_rate_mutation,
+            'mutation_rate': self.mutation_operator.physical_mutation_rate,
             'crossover_rate': self.crossover_operator.crossover_rate,
             'generations_completed': len(self.generation_stats),
             'best_agent_id': self.get_best_agent().id if self.get_best_agent() else None
