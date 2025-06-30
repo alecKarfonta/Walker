@@ -309,43 +309,37 @@ class CrawlingAgent(BaseAgent):
     
     def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
         """Learn from experience using neural network."""
-        try:
-            if self._learning_system:
-                # Ensure states are numpy arrays
-                if not isinstance(prev_state, np.ndarray):
-                    prev_state = self.get_state_representation()
-                if not isinstance(new_state, np.ndarray):
-                    new_state = self.get_state_representation()
-                
-                self._learning_system.store_experience(prev_state, action, reward, new_state, done)
-                
-                # Train every 10 steps
-                if self.steps % 10 == 0:
-                    # Log first training session
-                    if not hasattr(self, '_training_started'):
-                        print(f"🚀 Agent {str(self.id)[:8]}: Neural network training STARTED at step {self.steps}")
-                        self._training_started = True
-                    
-                    training_stats = self._learning_system.learn()
-                    
-                    # Log training activity more frequently (every 50 steps instead of 100)
-                    if self.steps % 50 == 0 and training_stats:
-                        print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, "
-                              f"Loss: {training_stats.get('loss', 0.0):.4f}, "
-                              f"Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
-                    
-                    # Also log first few training sessions for each agent
-                    if hasattr(self, '_training_count'):
-                        self._training_count += 1
-                    else:
-                        self._training_count = 1
-                    
-                    if self._training_count <= 3 and training_stats:
-                        print(f"🔥 Agent {str(self.id)[:8]}: Training session #{self._training_count}, "
-                              f"Experience buffer size: {getattr(self._learning_system, 'replay_buffer_size', 'unknown')}")
-                    
-        except Exception as e:
-            print(f"❌ Error in learning for agent {self.id}: {e}")
+        # Ensure states are numpy arrays
+        if not prev_state:
+            return
+        
+        self._learning_system.store_experience(prev_state, action, reward, new_state, done)
+        
+        # Train every 30 steps (reduced frequency for better performance)
+        if self.steps % 1000 == 0:
+            # Log first training session
+            if not hasattr(self, '_training_started'):
+                print(f"🚀 Agent {str(self.id)[:8]}: Neural network training STARTED at step {self.steps}")
+                self._training_started = True
+            
+            training_stats = self._learning_system.learn()
+            
+            # Log training activity more frequently (every 50 steps instead of 100)
+            if self.steps % 50 == 0 and training_stats:
+                print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, "
+                        f"Loss: {training_stats.get('loss', 0.0):.4f}, "
+                        f"Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
+            
+            # Also log first few training sessions for each agent
+            if hasattr(self, '_training_count'):
+                self._training_count += 1
+            else:
+                self._training_count = 1
+            
+            if self._training_count <= 3 and training_stats:
+                print(f"🔥 Agent {str(self.id)[:8]}: Training session #{self._training_count}, "
+                        f"Experience buffer size: {getattr(self._learning_system, 'replay_buffer_size', 'unknown')}")
+            
     
     def apply_action(self, action: Tuple[float, float]):
         """Apply action to the robot's arms."""
