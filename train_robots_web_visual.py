@@ -2004,8 +2004,9 @@ class TrainingEnvironment:
         self._is_evolving = False  # Flag to prevent concurrent evolution
         self._agents_pending_destruction = []  # Safe destruction queue
         
-        # LIMB DISTRIBUTION TRACKING: Monitor multi-limb robot survival
-        self.limb_distribution_history = []
+        # LIMB DISTRIBUTION TRACKING: Monitor multi-limb robot survival (FIXED: Limited size)
+        from collections import deque
+        self.limb_distribution_history = deque(maxlen=100)  # FIXED: Limit to 100 entries
         self.last_limb_distribution_log = 0
         self.limb_distribution_interval = 10.0  # Log every 10 seconds
         self.agent_creation_log = {}  # Track when agents are created
@@ -2057,12 +2058,12 @@ class TrainingEnvironment:
         self.resource_generation_interval = 60.0  # Generate strategic resources every 1 minute for better survival balance
         self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
         
-        # Death and survival system
-        self.death_events = []  # Track recent death events for visualization
+        # Death and survival system (FIXED: Limited size)
+        self.death_events = deque(maxlen=50)  # FIXED: Limit to 50 death events for visualization
         self.agents_pending_replacement = []  # Queue for dead agents needing replacement
         
-        # Food consumption animation system
-        self.consumption_events = []  # Track active food consumption for animation
+        # Food consumption animation system (FIXED: Limited size)
+        self.consumption_events = deque(maxlen=100)  # FIXED: Limit to 100 consumption events for animation
         self.survival_stats = {
             'total_deaths': 0,
             'deaths_by_starvation': 0,
@@ -3091,7 +3092,8 @@ class TrainingEnvironment:
             
                             # Calculate average lifespan (only for events that have lifespan data)
             if self.survival_stats['total_deaths'] > 0:
-                events_with_lifespan = [event for event in self.death_events[-100:] if 'lifespan' in event]
+                # FIXED: Convert deque to list before slicing
+                events_with_lifespan = [event for event in list(self.death_events) if 'lifespan' in event]
                 if events_with_lifespan:
                     total_lifespan = sum(event['lifespan'] for event in events_with_lifespan)
                     self.survival_stats['average_lifespan'] = total_lifespan / len(events_with_lifespan)
@@ -3315,9 +3317,7 @@ class TrainingEnvironment:
             }
             self.limb_distribution_history.append(distribution_entry)
             
-            # Keep only last 100 entries
-            if len(self.limb_distribution_history) > 100:
-                self.limb_distribution_history = self.limb_distribution_history[-100:]
+            # Keep only last 100 entries (FIXED: deque maxlen=100 handles this automatically)
             
             # Log current distribution
             print(f"\n🦾 === LIMB DISTRIBUTION REPORT (Step {self.step_count}) ===")
