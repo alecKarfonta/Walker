@@ -316,7 +316,7 @@ class CrawlingAgent(BaseAgent):
         self._learning_system.store_experience(prev_state, action, reward, new_state, done)
         
         # Train every 30 steps (reduced frequency for better performance)
-        if self.steps % 1000 == 0:
+        if self.steps % 30 == 0:
             # Log first training session
             if not hasattr(self, '_training_started'):
                 print(f"🚀 Agent {str(self.id)[:8]}: Neural network training STARTED at step {self.steps}")
