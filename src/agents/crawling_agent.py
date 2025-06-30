@@ -310,7 +310,7 @@ class CrawlingAgent(BaseAgent):
     def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
         """Learn from experience using neural network."""
         # Ensure states are numpy arrays
-        if not prev_state:
+        if prev_state is None:
             return
         
         self._learning_system.store_experience(prev_state, action, reward, new_state, done)
@@ -359,12 +359,13 @@ class CrawlingAgent(BaseAgent):
         except Exception as e:
             print(f"⚠️ Error applying action for agent {self.id}: {e}")
     
-    def get_crawling_reward(self, prev_x: float) -> float:
-        """Calculate reward for crawling behavior with proper scaling."""
+    def get_crawling_reward(self, prev_x: float, food_info = None) -> float:
+        """Calculate reward for crawling behavior with food-seeking incentive."""
         if not self.body:
             return 0.0
             
         current_x = self.body.position.x
+        current_y = self.body.position.y
         total_reward = 0.0
         
         # Forward progress reward (FIXED: Much lower scaling)
@@ -389,6 +390,30 @@ class CrawlingAgent(BaseAgent):
             progress_reward = 0.0
         
         total_reward += progress_reward
+        
+        # Food-seeking reward (NEW: Reward moving toward closest edible food)
+        if food_info and food_info.get('distance', 999999) < 100:  # Only if food is reasonably close
+            current_food_distance = food_info['distance']
+            
+            # Initialize previous food distance if not exists
+            if not hasattr(self, 'prev_food_distance'):
+                self.prev_food_distance = current_food_distance
+            
+            # Reward getting closer to food
+            food_distance_change = self.prev_food_distance - current_food_distance
+            if food_distance_change > 0.1:  # Getting closer to food
+                food_seeking_reward = food_distance_change * 0.3  # Moderate reward for approaching food
+                total_reward += food_seeking_reward
+                
+                # Extra bonus if very close to food
+                if current_food_distance < 5.0:
+                    total_reward += 0.02  # Bonus for being near food
+            elif food_distance_change < -0.1:  # Moving away from food
+                food_seeking_penalty = food_distance_change * 0.1  # Small penalty for moving away
+                total_reward += food_seeking_penalty
+            
+            # Update previous food distance
+            self.prev_food_distance = current_food_distance
         
         # Stability reward (FIXED: Much smaller values)
         body_angle = abs(self.body.angle)
@@ -416,7 +441,17 @@ class CrawlingAgent(BaseAgent):
         
         # Calculate reward
         current_x = self.body.position.x if self.body else 0.0
-        reward = self.get_crawling_reward(self.prev_x)
+        
+        # Get food information from training environment if available
+        food_info = None
+        if hasattr(self, '_training_env') and self._training_env:
+            try:
+                food_info = self._training_env._get_closest_food_distance_for_agent(self)
+            except Exception as e:
+                # If food info fails, continue without it
+                pass
+        
+        reward = self.get_crawling_reward(self.prev_x, food_info)
         self.total_reward += reward
         self.immediate_reward = reward
         self.last_reward = reward
@@ -576,7 +611,14 @@ class CrawlingAgent(BaseAgent):
     
     def get_reward(self, prev_x: float) -> float:
         """Backward compatibility."""
-        return self.get_crawling_reward(prev_x)
+        # Get food info for backward compatibility
+        food_info = None
+        if hasattr(self, '_training_env') and self._training_env:
+            try:
+                food_info = self._training_env._get_closest_food_distance_for_agent(self)
+            except:
+                pass
+        return self.get_crawling_reward(prev_x, food_info)
     
     def update(self, delta_time: float):
         """Backward compatibility."""
