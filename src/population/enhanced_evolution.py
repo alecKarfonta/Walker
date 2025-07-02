@@ -1069,48 +1069,30 @@ class EnhancedEvolutionEngine:
         self._clear_position_tracking()
         
         for i in range(self.config.population_size):
-            # Create diverse physical parameters with specific focus on limb variety
-            if i < 5:  
-                # First few agents use default parameters (1 arm for baseline)
-                physical_params = PhysicalParameters()
-            else:
-                # Create TRULY diverse variants with explicit limb diversity
-                physical_params = PhysicalParameters.random_parameters()
-                
-                # FORCE LIMB DIVERSITY: Ensure we get robots with different limb counts
-                limb_distribution = [
-                    1, 1, 1, 1, 1,  # 20% single-arm (baseline)
-                    2, 2, 2, 2,     # 16% two-arm 
-                    3, 3, 3,        # 12% three-arm
-                    4, 4,           # 8% four-arm
-                    5,              # 4% five-arm
-                    6               # 4% six-arm (spider-like)
-                ]
-                
-                # Assign limb count based on position for guaranteed diversity
-                limb_index = (i - 5) % len(limb_distribution)
-                target_limbs = limb_distribution[limb_index]
-                physical_params.num_arms = target_limbs
-                
-                # Also vary segments per limb for even more diversity
-                if target_limbs >= 3:
-                    # Multi-limb robots can have more complex segments
-                    physical_params.segments_per_limb = random.choice([2, 3, 4])
-                else:
-                    # Simple robots keep simpler segments
-                    physical_params.segments_per_limb = random.choice([2, 3])
-                
-                # Ensure arrays match the new segment count
-                segments = physical_params.segments_per_limb
-                physical_params.segment_length_ratios = [1.0 + random.uniform(-0.3, 0.3) for _ in range(segments)]
-                physical_params.segment_width_ratios = [0.8 + random.uniform(-0.2, 0.2) for _ in range(segments)]
-                physical_params.joint_torques = [random.uniform(100, 200) for _ in range(segments)]
-                physical_params.joint_speeds = [random.uniform(2, 5) for _ in range(segments)]
-                physical_params.joint_lower_limits = [-random.uniform(0.5, 1.5) for _ in range(segments)]
-                physical_params.joint_upper_limits = [random.uniform(0.5, 1.5) for _ in range(segments)]
-                physical_params.joint_priority_weights = [random.uniform(0.5, 1.5) for _ in range(segments)]
-                
-                print(f"🦕 Agent {i}: Creating {target_limbs}-limb robot with {segments} segments per limb")
+            # SIMPLIFIED: All robots have identical morphology to prevent dimension mismatches
+            physical_params = PhysicalParameters()
+            
+            # FORCE IDENTICAL MORPHOLOGY: All robots have exactly 1 arm, 2 segments
+            physical_params.num_arms = 1  # Single arm only
+            physical_params.segments_per_limb = 2  # Fixed 2 segments
+            
+            # Ensure arrays match the fixed segment count
+            segments = 2  # Always 2 segments
+            physical_params.segment_length_ratios = [1.0, 1.0]  # Fixed ratios
+            physical_params.segment_width_ratios = [0.8, 0.8]  # Fixed ratios
+            physical_params.joint_torques = [150.0, 150.0]  # Fixed torques
+            physical_params.joint_speeds = [3.0, 3.0]  # Fixed speeds
+            physical_params.joint_lower_limits = [-1.0, -1.0]  # Fixed limits
+            physical_params.joint_upper_limits = [1.0, 1.0]  # Fixed limits
+            physical_params.joint_priority_weights = [1.0, 1.0]  # Fixed weights
+            
+            # Allow minor variation in other parameters for some diversity
+            physical_params.body_width = 1.0 + random.uniform(-0.1, 0.1)
+            physical_params.body_height = 0.5 + random.uniform(-0.05, 0.05)
+            physical_params.motor_torque = 100.0 + random.uniform(-10, 10)
+            physical_params.motor_speed = 5.0 + random.uniform(-0.5, 0.5)
+            
+            print(f"🤖 Agent {i}: Creating IDENTICAL 1-limb robot with 2 segments (state/action consistency)")
             
             # Get safe spawn position to avoid overlaps
             position = self._get_safe_spawn_position(position_index=i)

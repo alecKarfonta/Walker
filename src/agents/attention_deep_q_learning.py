@@ -61,57 +61,77 @@ class SimpleAttention(nn.Module):
         
         return output, attention_weights
 
-class ArmControlEncoder(nn.Module):
-    """Encoder for arm control and physics-based state representation."""
+class EnhancedRobotEncoder(nn.Module):
+    """Enhanced encoder for expanded robot state representation (19 dimensions)."""
     
-    def __init__(self, state_size: int = 5, embed_dim: int = 64):
+    def __init__(self, state_size: int = 19, embed_dim: int = 128):
         super().__init__()
         self.embed_dim = embed_dim
         
-        # Specialized encoders for different aspects
-        self.arm_encoder = nn.Linear(2, embed_dim // 2)      # arm_angle, elbow_angle
-        self.target_encoder = nn.Linear(2, embed_dim // 4)   # food_distance, food_direction
-        self.physics_encoder = nn.Linear(1, embed_dim // 4)  # is_ground_contact
+        # Specialized encoders for different feature groups
+        self.joint_encoder = nn.Linear(4, embed_dim // 4)      # Joint angles + velocities
+        self.body_encoder = nn.Linear(6, embed_dim // 4)       # Body position, velocity, orientation
+        self.food_encoder = nn.Linear(4, embed_dim // 4)       # Food targeting information
+        self.physics_encoder = nn.Linear(3, embed_dim // 8)    # Physics feedback
+        self.action_encoder = nn.Linear(2, embed_dim // 8)     # Action history
         
-        # Combine features
-        self.feature_combiner = nn.Linear(embed_dim, embed_dim)
+        # Feature combination layers
+        self.feature_combiner = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(embed_dim, embed_dim)
+        )
         self.layer_norm = nn.LayerNorm(embed_dim)
         
     def forward(self, state):
         """
-        Encode arm control state: [arm_angle, elbow_angle, food_distance, food_direction, is_ground_contact] = 5 dimensions
+        Encode expanded robot state: 19 dimensions total
+        - [0:4]: Joint angles and velocities
+        - [4:10]: Body state (position, velocity, orientation)
+        - [10:14]: Food targeting information
+        - [14:17]: Physics feedback
+        - [17:19]: Action history
         """
         if len(state.shape) == 1:
             state = state.unsqueeze(0)
         
-        # Split state into different feature types
-        arm_state = state[:, :2]        # arm_angle, elbow_angle
-        target_state = state[:, 2:4]    # food_distance, food_direction
-        physics_state = state[:, 4:5]   # is_ground_contact
+        # STRICT: Verify state dimensions - NO AUTO-FIXING
+        if state.shape[1] != 19:
+            raise ValueError(f"EnhancedRobotEncoder expected 19D state, got {state.shape[1]}D state! Shape: {state.shape}. This indicates a bug in state generation - fix the source instead of padding!")
         
-        # Encode each feature type
-        arm_embed = F.relu(self.arm_encoder(arm_state))
-        target_embed = F.relu(self.target_encoder(target_state))
+        # Split state into feature groups
+        joint_state = state[:, :4]       # Joint angles and velocities
+        body_state = state[:, 4:10]      # Body state
+        food_state = state[:, 10:14]     # Food targeting
+        physics_state = state[:, 14:17]  # Physics feedback
+        action_state = state[:, 17:19]   # Action history
+        
+        # Encode each feature group
+        joint_embed = F.relu(self.joint_encoder(joint_state))
+        body_embed = F.relu(self.body_encoder(body_state))
+        food_embed = F.relu(self.food_encoder(food_state))
         physics_embed = F.relu(self.physics_encoder(physics_state))
+        action_embed = F.relu(self.action_encoder(action_state))
         
-        # Combine and normalize
-        combined = torch.cat([arm_embed, target_embed, physics_embed], dim=-1)
+        # Combine all features
+        combined = torch.cat([joint_embed, body_embed, food_embed, physics_embed, action_embed], dim=-1)
         combined = self.feature_combiner(combined)
         combined = self.layer_norm(combined)
         
         return combined
 
-class ArmControlAttentionDQN(nn.Module):
-    """Dueling DQN with attention for arm-based food-seeking behavior."""
+class EnhancedRobotAttentionDQN(nn.Module):
+    """Enhanced Dueling DQN with attention for full robot state representation."""
     
-    def __init__(self, state_size: int = 5, action_size: int = 9, embed_dim: int = 64, num_heads: int = 4):
+    def __init__(self, state_size: int = 19, action_size: int = 15, embed_dim: int = 128, num_heads: int = 4):
         super().__init__()
         self.state_size = state_size
         self.action_size = action_size
         self.embed_dim = embed_dim
         
-        # Arm control feature encoder
-        self.feature_encoder = ArmControlEncoder(state_size, embed_dim)
+        # Enhanced robot state encoder
+        self.feature_encoder = EnhancedRobotEncoder(state_size, embed_dim)
         
         # Attention layer
         self.attention = SimpleAttention(embed_dim, num_heads)
@@ -169,32 +189,117 @@ class ArmControlAttentionDQN(nn.Module):
             'features': features
         }
 
-class AttentionDeepQLearning:
-    """Deep Q-Learning with attention for arm-based food-seeking behavior."""
+class PrioritizedReplayBuffer:
+    """Prioritized Experience Replay Buffer for enhanced learning."""
     
-    def __init__(self, state_dim: int = 5, action_dim: int = 9, learning_rate: float = 0.001):
+    def __init__(self, capacity: int = 2000, alpha: float = 0.6):
+        self.capacity = capacity
+        self.alpha = alpha
+        self.buffer = []
+        self.priorities = np.zeros((capacity,), dtype=np.float32)
+        self.position = 0
+        self.max_priority = 1.0
+    
+    def add(self, state, action, reward, next_state, done):
+        """Add experience with maximum priority."""
+        experience = (state, action, reward, next_state, done)
+        
+        if len(self.buffer) < self.capacity:
+            # Buffer not full yet, just append
+            self.buffer.append(experience)
+            self.priorities[len(self.buffer) - 1] = self.max_priority
+        else:
+            # Buffer is full, overwrite at current position
+            self.buffer[self.position] = experience
+            self.priorities[self.position] = self.max_priority
+            self.position = (self.position + 1) % self.capacity
+    
+    def sample(self, batch_size: int, beta: float = 0.4):
+        """Sample batch with prioritized sampling."""
+        if len(self.buffer) == 0:
+            return [], [], []
+        
+        # Ensure we don't sample more than available
+        actual_batch_size = min(batch_size, len(self.buffer))
+        
+        # Get priorities for existing buffer items
+        buffer_size = len(self.buffer)
+        prios = self.priorities[:buffer_size]
+        
+        # Ensure priorities are valid (no zeros)
+        prios = np.maximum(prios, 1e-6)
+        probs = prios ** self.alpha
+        probs /= probs.sum()
+        
+        # Sample indices
+        indices = np.random.choice(buffer_size, actual_batch_size, p=probs, replace=True)
+        experiences = [self.buffer[idx] for idx in indices]
+        
+        # Importance sampling weights
+        weights = (buffer_size * probs[indices]) ** (-beta)
+        weights /= weights.max()
+        
+        return experiences, indices, weights
+    
+    def update_priorities(self, indices, priorities):
+        """Update priorities for given indices."""
+        for idx, priority in zip(indices, priorities):
+            self.priorities[idx] = priority
+            self.max_priority = max(self.max_priority, priority)
+    
+    def __len__(self):
+        return len(self.buffer)
+
+class AttentionDeepQLearning:
+    """Enhanced Deep Q-Learning with Double DQN, Prioritized Replay, and attention."""
+    
+    def __init__(self, state_dim: int = 19, action_dim: int = 15, learning_rate: float = 0.001):
+        """
+        Initialize Enhanced Deep Q-Learning with Attention for Robot Crawling.
+        
+        CRITICAL PARAMETERS:
+        ===================
+        state_dim: Must be 19 (matches CrawlingAgent.get_state_representation())
+        action_dim: Must be 15 (matches CrawlingAgent locomotion action space)
+        
+        This ensures dimension consistency between robot state generation 
+        and neural network expectations. Any mismatch will cause training errors.
+        """
+        # FORCE CORRECT DIMENSIONS - no backward compatibility
+        if state_dim != 19:
+            print(f"🚨 FORCING state_dim to 19 (was {state_dim}) for dimension consistency!")
+            state_dim = 19
+        if action_dim != 15:
+            print(f"🚨 FORCING action_dim to 15 (was {action_dim}) for dimension consistency!")
+            action_dim = 15
+            
         # Initialize base Deep Q-Learning attributes
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.learning_rate = learning_rate
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Q-Learning hyperparameters
+        # Enhanced Q-Learning hyperparameters
         self.gamma = 0.99
         self.epsilon = 1.0
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.995
         self.batch_size = 32
-        self.target_update_freq = 1000
+        self.target_update_freq = 500  # More frequent updates for better stability
         self.steps_done = 0
         
-        # Experience replay memory (FIXED: Reduced from 10000 to 1000 to prevent memory leak)
-        self.memory = deque(maxlen=1000)
-        self.use_prioritized_replay = False
+        # ENHANCED: Prioritized Experience Replay - ALWAYS START FRESH
+        self.use_prioritized_replay = True
+        self.memory = PrioritizedReplayBuffer(capacity=2000, alpha=0.6)
+        self.beta = 0.4
+        self.beta_increment = 0.001
         
-        # Replace with arm control attention-based network
-        self.q_network = ArmControlAttentionDQN(state_dim, action_dim).to(self.device)
-        self.target_network = ArmControlAttentionDQN(state_dim, action_dim).to(self.device)
+        # FORCE CLEAR ANY EXISTING BUFFERS
+        print(f"🧹 FORCE CLEARING: Starting with completely empty experience buffer")
+        
+        # Enhanced robot attention-based network
+        self.q_network = EnhancedRobotAttentionDQN(state_dim, action_dim).to(self.device)
+        self.target_network = EnhancedRobotAttentionDQN(state_dim, action_dim).to(self.device)
         
         # Update optimizer
         self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=learning_rate)
@@ -211,8 +316,14 @@ class AttentionDeepQLearning:
         print(f"   🧹 Attention history: {self.attention_history.maxlen} records (optimized)")
     
     def store_experience(self, state, action, reward, next_state, done):
-        """Store experience in replay memory."""
-        self.memory.append((state, action, reward, next_state, done))
+        """Store experience in prioritized replay memory."""
+        if self.use_prioritized_replay:
+            self.memory.add(state, action, reward, next_state, done)
+        else:
+            # Fallback for non-prioritized replay
+            if not hasattr(self.memory, 'append'):
+                self.memory = deque(maxlen=2000)
+            self.memory.append((state, action, reward, next_state, done))
     
     def choose_action(self, state_vector: np.ndarray, agent_data: Dict[str, Any] = None) -> int:
         """Choose action with epsilon-greedy policy."""
@@ -239,17 +350,30 @@ class AttentionDeepQLearning:
             return np.random.randint(0, self.action_dim)
     
     def learn(self) -> Dict[str, float]:
-        """Enhanced learning with arm control attention."""
+        """Enhanced learning with Double DQN and Prioritized Replay."""
         if len(self.memory) < self.batch_size:
             return {}
         
-        # Simple random sampling from memory
-        experiences = random.sample(self.memory, self.batch_size)
-        weights = torch.ones(self.batch_size).to(self.device)
+        # Enhanced sampling with prioritized replay
+        if self.use_prioritized_replay and hasattr(self.memory, 'sample'):
+            experiences, indices, weights = self.memory.sample(self.batch_size, self.beta)
+            weights = torch.FloatTensor(weights).to(self.device)
+            # Increase beta over time for importance sampling
+            self.beta = min(1.0, self.beta + self.beta_increment)
+        else:
+            # Fallback to uniform sampling
+            try:
+                experiences = random.sample(list(self.memory), self.batch_size)
+                indices = None
+                weights = torch.ones(self.batch_size).to(self.device)
+            except (TypeError, AttributeError):
+                return {}
         
         # Log training initialization (first time only)
         if not hasattr(self, '_first_training_logged'):
-            print(f"🧠 Neural Network: First training session - Memory: {len(self.memory)}, Batch: {self.batch_size}")
+            print(f"🧠 Enhanced Neural Network: First training session - Memory: {len(self.memory)}, Batch: {self.batch_size}")
+            print(f"   🚀 Using Double DQN: True")
+            print(f"   🎯 Using Prioritized Replay: {self.use_prioritized_replay}")
             self._first_training_logged = True
         
         # Prepare batch
@@ -257,7 +381,29 @@ class AttentionDeepQLearning:
         Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done'])
         batch = Experience(*zip(*experiences))
         
-        states = torch.FloatTensor(batch.state).to(self.device)
+        # DIMENSION FIX: Check for dimension consistency and clear buffer if needed
+        try:
+            states = torch.FloatTensor(batch.state).to(self.device)
+        except (ValueError, RuntimeError) as e:
+            if "expected sequence of length" in str(e) or "cannot be multiplied" in str(e):
+                print(f"🔧 Dimension mismatch detected: {e}")
+                print(f"🧹 Clearing experience buffer to fix dimension inconsistency...")
+                # Clear the problematic buffer
+                if self.use_prioritized_replay and hasattr(self.memory, 'buffer'):
+                    self.memory.buffer.clear()
+                    self.memory.position = 0
+                    print(f"   ✅ Prioritized replay buffer cleared")
+                elif hasattr(self.memory, 'clear'):
+                    self.memory.clear()
+                    print(f"   ✅ Standard replay buffer cleared")
+                else:
+                    # Recreate buffer as fallback
+                    from collections import deque
+                    self.memory = deque(maxlen=2000)
+                    print(f"   ✅ Experience buffer recreated")
+                return {'buffer_cleared': 1.0}
+            else:
+                raise  # Re-raise if it's a different error
         actions = torch.LongTensor(batch.action).to(self.device)
         rewards = torch.FloatTensor(batch.reward).to(self.device)
         next_states = torch.FloatTensor(batch.next_state).to(self.device)
@@ -267,15 +413,26 @@ class AttentionDeepQLearning:
         current_q_values, current_attention = self.q_network(states)
         current_q_values = current_q_values.gather(1, actions.unsqueeze(1))
         
-        # Next Q-values from target network
+        # DOUBLE DQN: Use main network to select actions, target network to evaluate
         with torch.no_grad():
-            next_q_values, _ = self.target_network(next_states)
-            next_q_values = next_q_values.max(1)[0].detach()
+            # Use main network to select best actions
+            next_q_values_main, _ = self.q_network(next_states)
+            next_actions = next_q_values_main.argmax(1)
+            
+            # Use target network to evaluate selected actions
+            next_q_values_target, _ = self.target_network(next_states)
+            next_q_values = next_q_values_target.gather(1, next_actions.unsqueeze(1)).squeeze(1)
+            
             target_q_values = rewards + (self.gamma * next_q_values * ~dones)
         
-        # Compute loss
+        # Compute TD errors and loss
         td_errors = target_q_values.unsqueeze(1) - current_q_values
         loss = (weights.unsqueeze(1) * td_errors.pow(2)).mean()
+        
+        # Update priorities for prioritized replay
+        if self.use_prioritized_replay and indices is not None and hasattr(self.memory, 'update_priorities'):
+            priorities = torch.abs(td_errors).detach().cpu().numpy().flatten() + 1e-6
+            self.memory.update_priorities(indices, priorities)
         
         # Optimize
         self.optimizer.zero_grad()
@@ -296,7 +453,10 @@ class AttentionDeepQLearning:
         return {
             'loss': loss.item(),
             'mean_q_value': current_q_values.mean().item(),
-            'attention_entropy': self._calculate_attention_entropy(current_attention['attention_weights'])
+            'attention_entropy': self._calculate_attention_entropy(current_attention['attention_weights']),
+            'epsilon': self.epsilon,
+            'beta': self.beta if self.use_prioritized_replay else 0.0,
+            'mean_td_error': torch.abs(td_errors).mean().item()
         }
     
     def _calculate_attention_entropy(self, attention_weights):
@@ -309,51 +469,16 @@ class AttentionDeepQLearning:
             return 0.0
     
     def get_arm_control_state_representation(self, agent_data: Dict[str, Any]) -> np.ndarray:
-        """Convert agent data to arm control state representation."""
-        # NO try/catch fallback - let failures be explicit
+        """
+        DEPRECATED: This method returned 5-dimensional states which caused neural network errors.
         
-        # Arm joint angles (2 dimensions) - normalized to [-1, 1]
-        arm_angles = agent_data['arm_angles']
-        arm_angle = arm_angles['shoulder'] / np.pi  # Normalize shoulder angle
-        elbow_angle = arm_angles['elbow'] / np.pi   # Normalize elbow angle
-        
-        # Food targeting information (2 dimensions)
-        food_info = agent_data['nearest_food']
-        
-        # Food distance (normalized to [0, 1])
-        food_distance = min(1.0, food_info['distance'] / 100.0)
-        
-        # Food direction (signed x-distance normalized to [-1, 1])
-        # Positive = food is to the right, Negative = food is to the left
-        signed_distance = food_info['direction']
-        food_direction = np.clip(signed_distance / 50.0, -1.0, 1.0)  # Clamp to [-1, 1]
-        
-        # Ground contact detection using Box2D physics (1 dimension)
-        is_ground_contact = 0.0
-        if agent_data.get('ground_contact', False):
-            is_ground_contact = 1.0
-        elif 'physics_body' in agent_data and agent_data['physics_body']:
-            # Check Box2D contacts if available
-            body = agent_data['physics_body']
-            for contact_edge in body.contacts:
-                contact = contact_edge.contact
-                if contact.touching:
-                    fixture_a = contact.fixtureA
-                    fixture_b = contact.fixtureB
-                    # Check if contact is with ground (category bit 0x0001)
-                    if ((fixture_a.filterData.categoryBits & 0x0001) or 
-                        (fixture_b.filterData.categoryBits & 0x0001)):
-                        is_ground_contact = 1.0
-                        break
-        
-        # Create arm control state vector: [arm_angle, elbow_angle, food_distance, food_direction, is_ground_contact]
-        state = np.array([arm_angle, elbow_angle, food_distance, food_direction, is_ground_contact], dtype=np.float32)
-        
-        # Ensure no NaN or infinite values (but don't fallback to zeros)
-        if np.any(np.isnan(state)) or np.any(np.isinf(state)):
-            raise ValueError(f"Invalid state values detected: {state}")
-        
-        return state
+        All agents now use standardized 19-dimensional state representation via 
+        agent.get_state_representation() method for consistency.
+        """
+        raise DeprecationWarning(
+            "get_arm_control_state_representation is deprecated. "
+            "Use agent.get_state_representation() for 19-dimensional state consistency."
+        )
     
     def get_attention_analysis(self) -> Dict[str, Any]:
         """Analyze attention patterns for arm control features."""

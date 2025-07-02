@@ -11,11 +11,11 @@ import random
 import uuid
 import time
 
-from .crawling_crate_agent import CrawlingCrateAgent
+from .crawling_agent import CrawlingAgent  
 from .physical_parameters import PhysicalParameters
 
 
-class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
+class EvolutionaryCrawlingAgent(CrawlingAgent):
     """
     Enhanced CrawlingCrate agent with evolvable physical parameters.
     Uses ONLY attention-based deep Q-learning for optimal performance.
@@ -58,9 +58,9 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
         
         # Set required attributes before calling parent constructor
         self.temp_action_size = len(temp_actions)
-        # Dynamic state size based on actual morphology: joints + 3 metadata
-        actual_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
-        self.state_size = actual_joints + 3  # Dynamic size for neural networks
+        # FIXED: Use standardized 19D state size for neural network compatibility
+        # ALL agents must use 19D states to match the neural network architecture
+        self.state_size = 19  # Fixed size for neural network consistency
         
         # FORCE attention deep Q-learning - no other options
         self.learning_approach = "attention_deep_q_learning"
@@ -278,50 +278,82 @@ class EvolutionaryCrawlingAgent(CrawlingCrateAgent):
 
     def get_state_representation(self) -> np.ndarray:
         """
-        Get comprehensive state representation for attention-based neural networks.
-        Includes ALL joint angles for multi-limb robots with VARIABLE state size.
-        Always returns numpy array for consistent neural network input.
+        FIXED: Use standardized 19-dimensional state representation for neural network compatibility.
+        
+        This ensures ALL agents (evolutionary and standard) use the same state format
+        to prevent neural network dimension mismatch errors.
         """
         try:
-            # DYNAMIC STATE SIZE: Actual number of joints + 3 metadata elements
-            actual_joints = self.get_actual_joint_count()
-            state_size = actual_joints + 3  # joint angles + velocity + stability + progress
+            # FIXED: Always return 19 dimensions for neural network compatibility
+            state_array = np.zeros(19, dtype=np.float32)
             
-            # Initialize state array with exact size needed
-            state = np.zeros(state_size, dtype=np.float32)
+            # DEBUG: Minimal state generation confirmation (only once per agent)
+            if not hasattr(self, '_state_gen_confirmed'):
+                print(f"✅ Agent {str(self.id)[:8]}: Using 19D evolutionary state representation")
+                self._state_gen_confirmed = True
             
-            # Get ALL joint angles for multi-limb robots
-            joint_idx = 0
-            if hasattr(self, 'limb_joints') and self.limb_joints:
-                for limb_joints in self.limb_joints:
-                    for joint in limb_joints:
-                        if joint and joint_idx < actual_joints:
-                            # Normalize joint angles to [-1, 1] range
-                            state[joint_idx] = np.tanh(joint.angle)
-                            joint_idx += 1
+            # 1. Joint angles and velocities (4 values) - Use primary joints
+            if hasattr(self, 'limb_joints') and self.limb_joints and len(self.limb_joints) > 0:
+                # Use the first limb's first two joints (primary arm)
+                primary_limb = self.limb_joints[0]
+                if len(primary_limb) >= 1 and primary_limb[0]:
+                    state_array[0] = np.tanh(primary_limb[0].angle)  # First joint angle
+                    state_array[2] = np.tanh(primary_limb[0].motorSpeed / 10.0)  # First joint velocity
+                if len(primary_limb) >= 2 and primary_limb[1]:
+                    state_array[1] = np.tanh(primary_limb[1].angle)  # Second joint angle  
+                    state_array[3] = np.tanh(primary_limb[1].motorSpeed / 10.0)  # Second joint velocity
             
-            # Physical state information (last 3 elements)
-            velocity = np.tanh(self.body.linearVelocity.x / 5.0) if hasattr(self, 'body') else 0.0
-            stability = np.tanh(self.body.angle * 2.0) if hasattr(self, 'body') else 0.0
-            progress = np.tanh((self.body.position.x - self.prev_x) * 10.0) if hasattr(self, 'body') else 0.0
+            # 2. Body physics state (6 values)
+            if hasattr(self, 'body') and self.body:
+                # Position normalized relative to starting position
+                state_array[4] = np.tanh((self.body.position.x - self.initial_position[0]) / 20.0)
+                state_array[5] = np.tanh((self.body.position.y - self.initial_position[1]) / 10.0)
+                # Velocity
+                state_array[6] = np.tanh(self.body.linearVelocity.x / 5.0)
+                state_array[7] = np.tanh(self.body.linearVelocity.y / 5.0)
+                # Orientation
+                state_array[8] = np.tanh(self.body.angle * 2.0)
+                state_array[9] = np.tanh(self.body.angularVelocity / 3.0)
             
-            state[actual_joints] = velocity      # velocity
-            state[actual_joints + 1] = stability  # stability  
-            state[actual_joints + 2] = progress   # progress
+            # 3. Food targeting information (4 values) - Placeholder for now
+            # TODO: Connect to actual food system when available
+            state_array[10:14] = 0.0
             
-            return state
+            # 4. Environmental feedback (3 values)
+            # Ground contact detection  
+            ground_contact = 0.0
+            if hasattr(self, 'body') and self.body:
+                for contact_edge in self.body.contacts:
+                    if contact_edge.contact and contact_edge.contact.touching:
+                        fixture_a = contact_edge.contact.fixtureA
+                        fixture_b = contact_edge.contact.fixtureB
+                        if ((fixture_a.filterData.categoryBits & 0x0001) or 
+                            (fixture_b.filterData.categoryBits & 0x0001)):
+                            ground_contact = 1.0
+                            break
+            
+            state_array[14] = ground_contact
+            state_array[15] = 0.0  # arm_contact placeholder
+            
+            # Stability measure
+            if hasattr(self, 'body') and self.body:
+                stability = 1.0 / (1.0 + abs(self.body.angle) + abs(self.body.angularVelocity))
+                state_array[16] = stability
+            
+            # 5. Action history (2 values) - recent actions for temporal context
+            if hasattr(self, 'current_action_tuple') and self.current_action_tuple:
+                state_array[17] = self.current_action_tuple[0] if len(self.current_action_tuple) > 0 else 0.0
+                state_array[18] = self.current_action_tuple[1] if len(self.current_action_tuple) > 1 else 0.0
+            
+            # Ensure no NaN values
+            state_array = np.nan_to_num(state_array, nan=0.0, posinf=1.0, neginf=-1.0)
+            
+            return state_array
                 
         except Exception as e:
             print(f"⚠️ Error getting evolutionary state for agent {self.id}: {e}")
-            # Safe fallback with proper error handling
-            try:
-                actual_joints = self.get_actual_joint_count()
-                return np.zeros(actual_joints + 3, dtype=np.float32)  # Dynamic size based on morphology
-            except Exception as e2:
-                print(f"❌ CRITICAL: Could not determine joint count for agent {self.id}: {e2}")
-                # Ultimate fallback to prevent complete failure, but log it prominently
-                print(f"🚨 USING EMERGENCY FALLBACK STATE for agent {self.id} - this may indicate serious issues")
-                return np.zeros(5, dtype=np.float32)  # Emergency fallback: 2 joints + 3 metadata
+            # Safe fallback: return zero-filled 19-dimensional state
+            return np.zeros(19, dtype=np.float32)
 
     def choose_action(self) -> int:
         """Choose action using attention-based learning system."""

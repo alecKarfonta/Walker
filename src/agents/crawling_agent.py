@@ -65,9 +65,9 @@ class CrawlingAgent(BaseAgent):
         self.worst_reward_received = 0.0
         self.time_since_good_value = 0.0
         
-        # Action system - MUST be set before calling _calculate_state_size()
-        self.action_size = 9  # 3x3 grid for shoulder/elbow control
-        self.actions = self._generate_action_combinations()
+        # ENHANCED: Better action system for locomotion - MUST be set before calling _calculate_state_size()
+        self.action_size = 15  # Expanded action space for better locomotion control
+        self.actions = self._generate_locomotion_action_combinations()
         self.state_size = self._calculate_state_size()  # For learning manager compatibility
         
         # Initialize learning system now that action_size is set
@@ -107,17 +107,26 @@ class CrawlingAgent(BaseAgent):
               f"{self.segments_per_limb} segments each")
     
     def _initialize_learning_system(self):
-        """Initialize the neural network learning system."""
+        """
+        Initialize the neural network learning system with consistent parameters.
+        
+        CRITICAL: These parameters must match the robot's state and action generation:
+        - state_dim=19: Must match get_state_representation() output size
+        - action_dim=15: Must match _generate_locomotion_action_combinations() size
+        
+        Any dimension mismatch will cause "expected sequence of length X (got Y)" errors.
+        """
         try:
             # Import here to avoid circular imports
             from .attention_deep_q_learning import AttentionDeepQLearning
             
-            # Calculate state size
-            state_size = self._calculate_state_size()
+            # FIXED PARAMETERS: No dynamic calculation to avoid inconsistencies
+            state_size = 19  # Fixed - matches get_state_representation()
+            action_size = 15  # Fixed - matches locomotion action combinations
             
             self._learning_system = AttentionDeepQLearning(
                 state_dim=state_size,
-                action_dim=self.action_size,
+                action_dim=action_size,
                 learning_rate=0.001
             )
                 
@@ -126,18 +135,55 @@ class CrawlingAgent(BaseAgent):
             self._learning_system = None
     
     def _calculate_state_size(self) -> int:
-        """Calculate the state size based on robot morphology."""
-        # Dynamic size: 2 values per joint + 3 metadata values
-        total_joints = self.num_limbs * self.segments_per_limb
-        return total_joints + 3
+        """
+        Calculate state size for enhanced robot representation.
+        
+        ENHANCED STATE SPACE (19 dimensions total):
+        ===========================================
+        - Joint angles and velocities: 4 values 
+          * shoulder_angle, elbow_angle, shoulder_velocity, elbow_velocity
+        - Body physics state: 6 values
+          * position_x, position_y, velocity_x, velocity_y, body_angle, angular_velocity  
+        - Food targeting information: 4 values
+          * food_distance, food_direction_x, food_direction_y, approach_angle
+        - Environmental feedback: 3 values
+          * ground_contact, arm_contact, stability_measure
+        - Temporal context: 2 values
+          * recent_shoulder_action, recent_elbow_action
+        
+        TOTAL: 4 + 6 + 4 + 3 + 2 = 19 dimensions
+        
+        This matches the neural network architecture in AttentionDeepQLearning.
+        All robots use this consistent state representation for proper learning.
+        """
+        return 19  # Fixed size for consistent neural network architecture
     
-    def _generate_action_combinations(self) -> List[Tuple[float, float]]:
-        """Generate all possible action combinations for shoulder/elbow control."""
+    def _generate_locomotion_action_combinations(self) -> List[Tuple[float, float]]:
+        """Generate enhanced action combinations optimized for crawling locomotion."""
         combinations = []
+        
+        # Original 3x3 grid (9 actions) - keep for baseline
         for shoulder in [-1, 0, 1]:  # Backward, stop, forward
             for elbow in [-1, 0, 1]:  # Contract, stop, extend
                 combinations.append((shoulder, elbow))
+        
+        # Enhanced locomotion patterns (6 additional actions)
+        # These are common crawling patterns that should be easier to learn
+        combinations.extend([
+            # Coordinated crawling motions
+            (0.5, -0.5),   # Gentle reach forward while contracting elbow
+            (-0.5, 0.5),   # Pull back while extending elbow  
+            (0.8, -0.2),   # Strong reach with slight elbow contract
+            (-0.8, 0.2),   # Strong pull with slight elbow extend
+            (0.3, 0.7),    # Gentle shoulder with strong elbow extend
+            (-0.3, -0.7),  # Gentle shoulder back with strong elbow contract
+        ])
+        
         return combinations
+    
+    def _generate_action_combinations(self) -> List[Tuple[float, float]]:
+        """Backward compatibility - delegate to locomotion action generator."""
+        return self._generate_locomotion_action_combinations()
     
     def _create_physics_bodies(self):
         """Create Box2D physics bodies based on physical parameters."""
@@ -271,33 +317,152 @@ class CrawlingAgent(BaseAgent):
         self.wheel_joints = []
     
     def get_state_representation(self) -> np.ndarray:
-        """Get current state as numpy array for neural network."""
+        """
+        Get enhanced state representation for neural network training.
+        
+        Returns exactly 19 dimensions as documented in _calculate_state_size().
+        This ensures consistent input to the neural network architecture.
+        """
         try:
-            state_size = self._calculate_state_size()
-            state_array = np.zeros(state_size, dtype=np.float32)
+            state_array = np.zeros(19, dtype=np.float32)  # Fixed size for consistency
             
-            # For simple robot: shoulder and elbow angles
+            # DEBUG: Minimal state generation confirmation (only once per agent)
+            if not hasattr(self, '_state_gen_confirmed'):
+                print(f"✅ Agent {str(self.id)[:8]}: Using 19D state representation")
+                self._state_gen_confirmed = True
+            
+            # 1. Joint angles and velocities (4 values)
             if self.upper_arm_joint and self.lower_arm_joint:
+                # Normalize angles to [-1, 1]
                 shoulder_angle = np.tanh(self.upper_arm_joint.angle)
                 elbow_angle = np.tanh(self.lower_arm_joint.angle)
+                # Normalize angular velocities
+                shoulder_vel = np.tanh(self.upper_arm_joint.motorSpeed / 10.0)
+                elbow_vel = np.tanh(self.lower_arm_joint.motorSpeed / 10.0)
                 
                 state_array[0] = shoulder_angle
                 state_array[1] = elbow_angle
+                state_array[2] = shoulder_vel
+                state_array[3] = elbow_vel
             
-            # Physical state metadata (last 3 elements)
-            velocity = np.tanh(self.body.linearVelocity.x / 5.0) if self.body else 0.0
-            stability = np.tanh(self.body.angle * 2.0) if self.body else 0.0
-            progress = np.tanh((self.body.position.x - self.prev_x) * 10.0) if self.body else 0.0
+            # 2. Body state (6 values)
+            if self.body:
+                # Position normalized relative to starting position
+                state_array[4] = np.tanh((self.body.position.x - self.initial_position[0]) / 20.0)
+                state_array[5] = np.tanh((self.body.position.y - self.initial_position[1]) / 10.0)
+                # Velocity
+                state_array[6] = np.tanh(self.body.linearVelocity.x / 5.0)
+                state_array[7] = np.tanh(self.body.linearVelocity.y / 5.0)
+                # Orientation
+                state_array[8] = np.tanh(self.body.angle * 2.0)
+                state_array[9] = np.tanh(self.body.angularVelocity / 3.0)
             
-            state_array[-3] = velocity
-            state_array[-2] = stability
-            state_array[-1] = progress
+            # 3. Food targeting information (4 values)
+            # Get food info from training environment if available
+            food_info = None
+            if hasattr(self, '_training_env') and self._training_env:
+                try:
+                    food_info = self._training_env._get_closest_food_distance_for_agent(self)
+                except:
+                    pass
+            
+            if food_info and food_info.get('distance', 999999) < 100:
+                # Food distance normalized
+                state_array[10] = np.tanh(food_info['distance'] / 50.0)
+                # Food direction as x/y components
+                food_direction = food_info.get('direction', 0)
+                state_array[11] = np.tanh(food_direction / 25.0)  # X direction
+                # Y direction (if available)
+                food_y_dir = food_info.get('direction_y', 0)
+                state_array[12] = np.tanh(food_y_dir / 25.0)
+                # Approach angle (angle between body direction and food direction)
+                if self.body:
+                    body_angle = self.body.angle
+                    food_angle = np.arctan2(food_y_dir, food_direction)
+                    approach_angle = food_angle - body_angle
+                    state_array[13] = np.tanh(approach_angle / np.pi)
+                else:
+                    state_array[13] = 0.0
+            else:
+                # No food information available
+                state_array[10:14] = 0.0
+            
+            # 4. Physics feedback (3 values)
+            # Ground contact detection
+            ground_contact = 0.0
+            arm_contact = 0.0
+            if self.body:
+                for contact_edge in self.body.contacts:
+                    if contact_edge.contact and contact_edge.contact.touching:
+                        # Check for ground contact (assume ground has category bit 0x0001)
+                        fixture_a = contact_edge.contact.fixtureA
+                        fixture_b = contact_edge.contact.fixtureB
+                        if ((fixture_a.filterData.categoryBits & 0x0001) or 
+                            (fixture_b.filterData.categoryBits & 0x0001)):
+                            ground_contact = 1.0
+                        else:
+                            arm_contact = 1.0  # Contact with other objects
+            
+            state_array[14] = ground_contact
+            state_array[15] = arm_contact
+            
+            # Stability measure (combination of velocity and angle)
+            if self.body:
+                stability = 1.0 / (1.0 + abs(self.body.angle) + abs(self.body.angularVelocity))
+                state_array[16] = stability
+            else:
+                state_array[16] = 0.0
+            
+            # 5. Action history (2 values) - recent actions for temporal context
+            if hasattr(self, 'current_action_tuple') and self.current_action_tuple:
+                state_array[17] = self.current_action_tuple[0]  # Recent shoulder action
+                state_array[18] = self.current_action_tuple[1]  # Recent elbow action
+            else:
+                state_array[17:19] = 0.0
+            
+            # Ensure no NaN values
+            state_array = np.nan_to_num(state_array, nan=0.0, posinf=1.0, neginf=-1.0)
             
             return state_array
             
         except Exception as e:
-            print(f"⚠️ Error getting state for agent {self.id}: {e}")
-            return np.zeros(self._calculate_state_size(), dtype=np.float32)
+            print(f"⚠️ Error getting expanded state for agent {self.id}: {e}")
+            return np.zeros(19, dtype=np.float32)  # Return fixed size on error
+    
+    def _get_legacy_state_representation(self, expected_size: int) -> np.ndarray:
+        """Generate legacy state representation for backward compatibility."""
+        try:
+            state_array = np.zeros(expected_size, dtype=np.float32)
+            
+            # Legacy format: joint angles + metadata
+            idx = 0
+            
+            # Joint angles (simplified)
+            if self.upper_arm_joint and self.lower_arm_joint and idx < expected_size:
+                state_array[idx] = np.tanh(self.upper_arm_joint.angle)
+                idx += 1
+                if idx < expected_size:
+                    state_array[idx] = np.tanh(self.lower_arm_joint.angle)
+                    idx += 1
+            
+            # Fill remaining with basic physics metadata
+            if self.body and idx < expected_size:
+                state_array[idx] = np.tanh(self.body.linearVelocity.x / 5.0)
+                idx += 1
+                if idx < expected_size:
+                    state_array[idx] = np.tanh(self.body.angle * 2.0)
+                    idx += 1
+                if idx < expected_size:
+                    state_array[idx] = np.tanh((self.body.position.x - self.prev_x) * 10.0)
+                    idx += 1
+            
+            # Ensure no NaN values
+            state_array = np.nan_to_num(state_array, nan=0.0, posinf=1.0, neginf=-1.0)
+            return state_array
+            
+        except Exception as e:
+            print(f"⚠️ Error getting legacy state for agent {self.id}: {e}")
+            return np.zeros(expected_size, dtype=np.float32)
     
     def choose_action(self, state: np.ndarray) -> int:
         """Choose action using neural network."""
@@ -324,11 +489,14 @@ class CrawlingAgent(BaseAgent):
             
             training_stats = self._learning_system.learn()
             
-            # Log training activity more frequently (every 50 steps instead of 100)
-            if self.steps % 50 == 0 and training_stats:
-                print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, "
-                        f"Loss: {training_stats.get('loss', 0.0):.4f}, "
-                        f"Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
+            # Log training activity every 150 steps (LCM of 30 and 50) for detailed metrics
+            if self.steps % 150 == 0:
+                if training_stats:
+                    print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, "
+                            f"Loss: {training_stats.get('loss', 0.0):.4f}, "
+                            f"Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
+                else:
+                    print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, No stats returned")
             
             # Also log first few training sessions for each agent
             if hasattr(self, '_training_count'):
@@ -368,31 +536,31 @@ class CrawlingAgent(BaseAgent):
         current_y = self.body.position.y
         total_reward = 0.0
         
-        # Forward progress reward (FIXED: Much lower scaling)
+        # ENHANCED: Much stronger forward progress reward
         displacement = current_x - prev_x
-        if displacement > 0.001:  # Lower threshold
-            progress_reward = displacement * 0.5  # Much lower multiplier (was 8.0)
+        if displacement > 0.001:  # Lower threshold for sensitivity
+            progress_reward = displacement * 5.0  # MUCH stronger multiplier (was 0.5)
             
-            # Reduced sustained movement bonus (FIXED: Lower bonus)
+            # Sustained movement bonus with stronger incentive
             if hasattr(self, 'recent_displacements'):
                 self.recent_displacements.append(displacement)
                 if len(self.recent_displacements) > 10:
                     self.recent_displacements.pop(0)
                 if len(self.recent_displacements) >= 5:
                     avg_displacement = sum(self.recent_displacements) / len(self.recent_displacements)
-                    if avg_displacement > 0.003:  # Higher threshold
-                        progress_reward *= 1.1  # Much smaller bonus (was 1.5)
+                    if avg_displacement > 0.002:  # Lower threshold for bonus
+                        progress_reward *= 1.5  # Stronger bonus (was 1.1)
             else:
                 self.recent_displacements = [displacement]
         elif displacement < -0.0005:
-            progress_reward = displacement * 0.5  # Lower penalty multiplier
+            progress_reward = displacement * 2.0  # Stronger penalty for going backward
         else:
             progress_reward = 0.0
         
         total_reward += progress_reward
         
-        # Food-seeking reward (NEW: Reward moving toward closest edible food)
-        if food_info and food_info.get('distance', 999999) < 100:  # Only if food is reasonably close
+        # ENHANCED: Much stronger food-seeking reward
+        if food_info and food_info.get('distance', 999999) < 100:
             current_food_distance = food_info['distance']
             
             # Initialize previous food distance if not exists
@@ -401,29 +569,43 @@ class CrawlingAgent(BaseAgent):
             
             # Reward getting closer to food
             food_distance_change = self.prev_food_distance - current_food_distance
-            if food_distance_change > 0.1:  # Getting closer to food
-                food_seeking_reward = food_distance_change * 0.3  # Moderate reward for approaching food
+            if food_distance_change > 0.05:  # Lower threshold for sensitivity
+                food_seeking_reward = food_distance_change * 2.0  # Much stronger reward (was 0.3)
                 total_reward += food_seeking_reward
                 
                 # Extra bonus if very close to food
                 if current_food_distance < 5.0:
-                    total_reward += 0.02  # Bonus for being near food
-            elif food_distance_change < -0.1:  # Moving away from food
-                food_seeking_penalty = food_distance_change * 0.1  # Small penalty for moving away
+                    total_reward += 0.2  # Much stronger bonus (was 0.02)
+                elif current_food_distance < 10.0:
+                    total_reward += 0.1  # Medium bonus for being close
+            elif food_distance_change < -0.05:  # Moving away from food
+                food_seeking_penalty = food_distance_change * 0.5  # Stronger penalty (was 0.1)
                 total_reward += food_seeking_penalty
             
             # Update previous food distance
             self.prev_food_distance = current_food_distance
         
-        # Stability reward (FIXED: Much smaller values)
+        # ENHANCED: Stability reward with better scaling
         body_angle = abs(self.body.angle)
         if body_angle < 0.2:
-            total_reward += 0.01  # Was 0.08
+            total_reward += 0.05  # Stronger stability reward (was 0.01)
         elif body_angle > 1.5:
-            total_reward -= 0.005  # Was 0.04
+            total_reward -= 0.02  # Stronger penalty for instability (was 0.005)
         
-        # Much tighter reward clipping (FIXED: Smaller range)
-        total_reward = np.clip(total_reward, -0.1, 0.1)
+        # NEW: Velocity-based reward for maintaining good speed
+        if self.body.linearVelocity.x > 0.1:
+            velocity_reward = min(0.1, self.body.linearVelocity.x * 0.1)
+            total_reward += velocity_reward
+        
+        # NEW: Efficiency reward - penalize excessive joint movement
+        if hasattr(self, 'upper_arm_joint') and hasattr(self, 'lower_arm_joint'):
+            if self.upper_arm_joint and self.lower_arm_joint:
+                joint_efficiency = abs(self.upper_arm_joint.motorSpeed) + abs(self.lower_arm_joint.motorSpeed)
+                if joint_efficiency > 10.0:  # Penalize excessive movement
+                    total_reward -= 0.01
+        
+        # EXPANDED: Much wider reward range for stronger learning signals
+        total_reward = np.clip(total_reward, -1.0, 1.0)  # Was [-0.1, 0.1]
         
         return total_reward
     
