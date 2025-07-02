@@ -495,7 +495,9 @@ class EnhancedEvolutionEngine:
         self.used_positions: Set[Tuple[int, int]] = set()  # Track occupied grid positions
         self.min_spacing = 12  # Minimum spacing between robots (increased from 8)
         self.spawn_height = 8  # Height above ground for spawning
-        self.spawn_area_width = max(800, self.config.population_size * self.min_spacing * 1.5)  # Dynamic spawn area
+        # STRATEGIC FOOD ZONES: Match ecosystem world bounds (-200 to +200)
+        self.spawn_area_width = 300  # Span from -150 to +150 (safe margin within food zone bounds)
+        self.spawn_center_x = 0.0  # Center spawn area around x=0
         
         # Fitness tracking
         self.fitness_history: List[float] = []
@@ -1366,12 +1368,13 @@ class EnhancedEvolutionEngine:
         
         for attempt in range(max_attempts):
             if position_index is not None and attempt == 0:
-                # First try: use deterministic positioning based on index
-                x = position_index * self.min_spacing
+                # First try: use deterministic positioning based on index (CENTERED)
+                spacing_offset = (position_index - self.config.population_size / 2) * self.min_spacing
+                x = self.spawn_center_x + spacing_offset
                 y = self.spawn_height
             else:
-                # Random positioning with improved distribution
-                x = random.uniform(0, self.spawn_area_width)
+                # Random positioning centered around x=0 to match strategic food zones
+                x = self.spawn_center_x + random.uniform(-self.spawn_area_width/2, self.spawn_area_width/2)
                 y = self.spawn_height + random.uniform(-2, 4)  # Small height variation
             
             # Convert to grid coordinates for collision checking
@@ -1391,8 +1394,9 @@ class EnhancedEvolutionEngine:
                 print(f"🎯 Safe spawn position found: ({x:.1f}, {y:.1f}) after {attempt + 1} attempts")
                 return (x, y)
         
-        # Fallback: use the current population size to spread out
-        fallback_x = len(self.population) * self.min_spacing * 1.2
+        # Fallback: use centered positioning within strategic food zone bounds
+        fallback_offset = (len(self.population) % 20 - 10) * self.min_spacing  # Keep within bounds
+        fallback_x = self.spawn_center_x + fallback_offset
         fallback_y = self.spawn_height
         
         print(f"⚠️  Using fallback position after {max_attempts} attempts: ({fallback_x:.1f}, {fallback_y:.1f})")

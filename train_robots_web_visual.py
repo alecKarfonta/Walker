@@ -1860,8 +1860,10 @@ class TrainingEnvironment:
         self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
         self.dt = 1.0 / 60.0  # 60 FPS
 
-        # World bounds for resetting fallen agents
-        self.world_bounds_y = -20.0
+        # EXPANDED WORLD BOUNDS: 4x larger world for strategic food zone system
+        self.world_bounds_x_min = -200.0  # Expanded from -60 to match ecosystem
+        self.world_bounds_x_max = 200.0   # Expanded from 60 to match ecosystem  
+        self.world_bounds_y = -20.0       # Keep same for fallen agents
         
         # Collision filtering setup
         self.GROUND_CATEGORY = 0x0001
@@ -2398,17 +2400,14 @@ class TrainingEnvironment:
             print(f"❌ Error logging morphology-aware learning times: {e}")
  
     def _create_ground(self):
-        """Creates a static ground body."""
+        """Creates a static ground body for the EXPANDED strategic food zone world."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
-        # Calculate ground width to accommodate evolution engine spawn area
-        # Evolution engine uses: max(800, population_size * min_spacing * 1.5)
-        # With min_spacing = 12, this ensures ground covers the full spawn area
-        min_spacing = 12  # Must match evolution engine's min_spacing
-        calculated_spawn_width = max(800, self.num_agents * min_spacing * 1.5)
+        # STRATEGIC FOOD ZONES: Ground must support 400m wide world (-200 to +200)
+        # This matches the ecosystem_dynamics world bounds for strategic food placement
+        ground_width = 450  # Wide enough for -200 to +200 world with margin
         
-        # Add extra margin for robot movement beyond spawn area
-        ground_width = calculated_spawn_width + 200  # Extra 200 units for exploration
+        print(f"🌍 Creating expanded ground for strategic food zones: {ground_width}m wide")
         
         # The ground's mask is set to collide with the agent category
         ground_fixture = ground_body.CreateFixture(
@@ -2420,7 +2419,7 @@ class TrainingEnvironment:
                 maskBits=self.AGENT_CATEGORY  # Collide with all agents
             )
         )
-        print(f"🔧 Ground setup complete with width {ground_width} (spawn area: {calculated_spawn_width}) for {self.num_agents} agents.")
+        print(f"🔧 Expanded ground setup complete with width {ground_width}m for strategic food zones.")
 
     def _generate_realistic_terrain(self):
         """Generate robot-scale terrain with navigable features appropriate for 1.5m robots."""

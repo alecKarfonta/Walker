@@ -23,16 +23,54 @@ class FoodSource:
     regeneration_rate: float
     max_capacity: float
     
+@dataclass
+class FoodZone:
+    """Strategic food zone with fixed location and specialized food types"""
+    center_position: Tuple[float, float]
+    radius: float
+    zone_type: str  # "forest", "grassland", "water", "mountain", "desert"
+    food_types: List[str]
+    max_food_sources: int
+    regeneration_multiplier: float
+    active: bool = True
+
 class EcosystemDynamics:
-    """Advanced ecosystem with food webs and cooperation"""
+    """
+    REDESIGNED: Strategic ecosystem with fixed food zones instead of random spawning.
+    
+    Creates meaningful long-term goals by:
+    - Fixed food zone locations that robots must learn to navigate to
+    - Minimum travel distances to prevent instant rewards 
+    - Larger world size for proper exploration challenges
+    - Stable food sources that don't randomly appear near robots
+    """
     
     def __init__(self):
         self.food_sources: List[FoodSource] = []
         self.agent_roles: Dict[str, EcosystemRole] = {}
         
+        # EXPANDED WORLD: 4x larger than before for meaningful travel distances
+        self.world_bounds = {
+            'min_x': -200.0,  # Expanded from -60 to -200
+            'max_x': 200.0,   # Expanded from 60 to 200  
+            'min_y': -10.0,   # Slightly expanded ground level
+            'max_y': 50.0     # Expanded from 35 to 50
+        }
+        
+        # Strategic Food Zones - Fixed locations that create long-term goals
+        self.food_zones = self._create_strategic_food_zones()
+        
+        # Zone management
+        self.last_zone_update = time.time()
+        self.zone_update_interval = 120.0  # Update zones every 2 minutes
+        
+        # Minimum distances to prevent instant rewards
+        self.min_distance_from_agents = 25.0  # INCREASED from 6m to 25m minimum distance
+        self.min_distance_between_food = 15.0  # INCREASED from 12m to 15m between food sources
+        
         # Ecosystem parameters
-        self.carrying_capacity = 100
-        self.resource_scarcity = 1.0  # 1.0 = normal, >1.0 = scarce, <1.0 = abundant
+        self.carrying_capacity = 150  # Increased for larger world
+        self.resource_scarcity = 1.0
         self.cooperation_bonus = 1.2
         
         # Dynamic events
@@ -40,8 +78,75 @@ class EcosystemDynamics:
         self.population_pressure = 0.0
         self.seasonal_resource_modifier = 1.0
         
-        print("🌿 Ecosystem dynamics initialized!")
+        # Initialize strategic food zones with initial food sources
+        self._populate_food_zones()
+        
+        print("🌍 Strategic Ecosystem initialized!")
+        print(f"   🗺️ World size: {self.world_bounds['max_x'] - self.world_bounds['min_x']}m × {self.world_bounds['max_y'] - self.world_bounds['min_y']}m")
+        print(f"   🎯 Food zones: {len(self.food_zones)} strategic locations")
+        print(f"   📏 Minimum travel distance: {self.min_distance_from_agents}m")
+        print(f"   🍽️ Initial food sources: {len(self.food_sources)}")
     
+    def _create_strategic_food_zones(self) -> List[FoodZone]:
+        """Create fixed food zones at strategic locations across the expanded world."""
+        zones = []
+        
+        # Forest zones (plant-rich areas) - 4 corners of the world
+        zones.extend([
+            FoodZone((-150, 30), 25.0, "forest", ["plants", "seeds", "insects"], 8, 1.5),
+            FoodZone((150, 30), 25.0, "forest", ["plants", "seeds", "insects"], 8, 1.5),
+            FoodZone((-150, -5), 25.0, "forest", ["plants", "seeds"], 6, 1.2),
+            FoodZone((150, -5), 25.0, "forest", ["plants", "seeds"], 6, 1.2),
+        ])
+        
+        # Grassland zones (balanced food) - middle areas
+        zones.extend([
+            FoodZone((-75, 20), 20.0, "grassland", ["plants", "insects", "seeds"], 6, 1.3),
+            FoodZone((75, 20), 20.0, "grassland", ["plants", "insects", "seeds"], 6, 1.3),
+            FoodZone((-75, 5), 20.0, "grassland", ["seeds", "insects"], 5, 1.1),
+            FoodZone((75, 5), 20.0, "grassland", ["seeds", "insects"], 5, 1.1),
+        ])
+        
+        # Central oasis (high-value mixed food) - center of world
+        zones.append(
+            FoodZone((0, 25), 15.0, "oasis", ["plants", "seeds", "insects", "meat"], 10, 2.0)
+        )
+        
+        # Mountain zones (sparse but valuable) - extreme edges
+        zones.extend([
+            FoodZone((-180, 40), 15.0, "mountain", ["insects", "meat"], 4, 0.8),
+            FoodZone((180, 40), 15.0, "mountain", ["insects", "meat"], 4, 0.8),
+        ])
+        
+        # Water zones (specialized food) - along middle axis
+        zones.extend([
+            FoodZone((-100, 15), 12.0, "water", ["insects", "plants"], 5, 1.4),
+            FoodZone((100, 15), 12.0, "water", ["insects", "plants"], 5, 1.4),
+            FoodZone((0, 5), 12.0, "water", ["insects"], 4, 1.2),
+        ])
+        
+        return zones
+    
+    def _populate_food_zones(self):
+        """Populate each food zone with initial longer-lasting food sources."""
+        total_created = 0
+        
+        for zone in self.food_zones:
+            if not zone.active:
+                continue
+                
+            # Create food sources within each zone
+            for _ in range(zone.max_food_sources):
+                # Try to add food to zone using the standard method
+                new_food = self._add_food_to_zone(zone)
+                if new_food:
+                    self.food_sources.append(new_food)
+                    total_created += 1
+        
+        print(f"🌱 Populated {len(self.food_zones)} food zones with {total_created} longer-lasting strategic food sources")
+        print(f"   🍽️ Food persistence: 2-5x longer lasting than before")
+        print(f"   🔄 Strategic respawning: Food respawns in different locations within same zones")
+
     def update_ecosystem(self, generation: int, population_size: int, season: str = "summer"):
         """Update ecosystem dynamics for the current generation"""
         
@@ -57,18 +162,18 @@ class EcosystemDynamics:
         }
         self.seasonal_resource_modifier = seasonal_modifiers.get(season, 1.0)
         
-        # Update resources
-        self._update_food_sources()
+        # Update strategic zones instead of random spawning
+        self._update_strategic_zones()
         
         # Environmental pressures
         if self.population_pressure > 1.2:
             self._trigger_resource_competition()
         
-        # Migration events
+        # Migration events (may deactivate some zones temporarily)
         if random.random() < 0.03:  # 3% chance
             self._trigger_migration_event()
         
-        print(f"🌿 Ecosystem Gen {generation}: Population pressure {self.population_pressure:.2f}")
+        print(f"🌍 Strategic Ecosystem Gen {generation}: Population pressure {self.population_pressure:.2f}")
     
     def assign_ecosystem_role(self, agent_id: str, fitness_traits: Dict[str, float]):
         """Assign an ecosystem role based on agent characteristics"""
@@ -93,8 +198,6 @@ class EcosystemDynamics:
         
         print(f"🦎 Agent {str(agent_id)[:8]} assigned role: {role.value}")
         return role
-    
-
     
     def get_ecosystem_effects(self, agent_id: str, position: Tuple[float, float]) -> Dict[str, float]:
         """Get ecosystem effects for an agent at a specific position"""
@@ -127,332 +230,309 @@ class EcosystemDynamics:
         
         return effects
     
-    def _update_food_sources(self):
-        """Update food source availability"""
+    def _update_strategic_zones(self):
+        """Update food zones with longer-lasting but renewable food sources."""
+        current_time = time.time()
+        if current_time - self.last_zone_update < self.zone_update_interval:
+            return
         
-        # Keep all food sources including meat - all roles can consume meat at different efficiencies
+        self.last_zone_update = current_time
         
-        # Regenerate existing food sources
+        # Regenerate existing food sources within zones - SLOWER regeneration for longer goals
         for food in self.food_sources:
             if food.amount < food.max_capacity:
-                food.amount = min(food.max_capacity, 
-                                food.amount + food.regeneration_rate * self.seasonal_resource_modifier)
+                # REDUCED regeneration rate for longer-lasting goals
+                regen_amount = food.regeneration_rate * self.seasonal_resource_modifier * 0.3  # 70% slower
+                food.amount = min(food.max_capacity, food.amount + regen_amount)
         
-        # Remove effectively depleted food sources (using small threshold for floating point precision)
-        depletion_threshold = 0.05  # Food sources with less than 0.05 are considered depleted
+        # Track depleted food for strategic respawning
+        depleted_food = []
+        depleted_zones = {}  # Track which zones lost food
+        
+        # Remove completely depleted food sources (lower threshold for longer persistence)
+        depletion_threshold = 0.05  # Lower threshold means food persists longer
         initial_count = len(self.food_sources)
-        self.food_sources = [food for food in self.food_sources if food.amount > depletion_threshold]
-        removed_count = initial_count - len(self.food_sources)
         
-        # Silently remove depleted food sources
+        for food in self.food_sources[:]:  # Copy to avoid modification during iteration
+            if food.amount <= depletion_threshold:
+                # Track which zone this food was in for strategic respawning
+                depleted_zone = self._find_zone_for_position(food.position)
+                if depleted_zone:
+                    if depleted_zone not in depleted_zones:
+                        depleted_zones[depleted_zone] = []
+                    depleted_zones[depleted_zone].append(food)
+                
+                depleted_food.append(food)
+                self.food_sources.remove(food)
         
-        # Maintain minimum food population - ensure adequate resources for survival
-        min_food_sources = max(15, int(self.carrying_capacity * 0.2))  # At least 15 or 20% of carrying capacity
-        current_food_count = len(self.food_sources)
+        removed_count = len(depleted_food)
         
-        # Balanced food generation to maintain minimum population
-        food_spawn_chance = 0.08 * self.seasonal_resource_modifier  # Reduced from 15% to 8%
+        # STRATEGIC RESPAWNING: Replace depleted food in different locations within same zones
+        respawned_count = 0
+        for zone, lost_food_list in depleted_zones.items():
+            for lost_food in lost_food_list:
+                # Try to respawn food in a different location within the same zone
+                new_food = self._respawn_food_in_zone(zone, lost_food)
+                if new_food:
+                    self.food_sources.append(new_food)
+                    respawned_count += 1
         
-        # Increase spawn chance if below minimum threshold
-        if current_food_count < min_food_sources:
-            shortage_factor = (min_food_sources - current_food_count) / min_food_sources
-            food_spawn_chance += shortage_factor * 0.15  # Reduced from 30% to 15% additional chance when short
-        
-        # Add new food sources based on need and season
-        if random.random() < food_spawn_chance:
-            position = (random.uniform(-60, 60), random.uniform(-5, 35))
-            food_type = random.choice(["plants", "insects", "seeds", "meat"])  # All food types available
+        # Maintain zone capacity - add food to zones below minimum
+        for zone in self.food_zones:
+            if not zone.active:
+                continue
+                
+            current_food_count = self._count_zone_food(zone)
+            min_food_per_zone = max(2, zone.max_food_sources // 2)  # At least 2 or half capacity
             
-            # Generate more substantial food sources when population is low
-            if current_food_count < min_food_sources:
-                amount = random.uniform(20, 60)  # Larger food sources when needed
-                max_capacity = random.uniform(30, 100)
-                regeneration_rate = random.uniform(0.8, 2.5)  # Faster regeneration
-            else:
-                amount = random.uniform(10, 50)
-                max_capacity = random.uniform(20, 80)
-                regeneration_rate = random.uniform(0.5, 2.0)
-            
-            food_source = FoodSource(
-                position=position,
-                food_type=food_type,
-                amount=amount,
-                regeneration_rate=regeneration_rate,
-                max_capacity=max_capacity
-            )
-            self.food_sources.append(food_source)
+            if current_food_count < min_food_per_zone:
+                deficit = min_food_per_zone - current_food_count
+                for _ in range(min(deficit, 1)):  # Add at most 1 per update for stability
+                    new_food = self._add_food_to_zone(zone)
+                    if new_food:
+                        self.food_sources.append(new_food)
+                        respawned_count += 1
         
-        # Emergency food generation if critically low (much less aggressive)
-        if current_food_count < min_food_sources // 3:  # Less than one third minimum (was half)
-            emergency_spawns = min(2, min_food_sources - current_food_count)  # Spawn up to 2 at once (was 3)
-            for _ in range(emergency_spawns):
-                position = (random.uniform(-50, 50), random.uniform(-5, 30))
-                food_type = random.choice(["plants", "insects", "seeds", "meat"])  # All food types for survival
+        # Log strategic food management
+        if removed_count > 0 or respawned_count > 0:
+            print(f"🔄 Strategic food management: {removed_count} depleted → {respawned_count} respawned in zones")
+            if removed_count > respawned_count:
+                print(f"   📉 Net food reduction: {removed_count - respawned_count} (creates scarcity pressure)")
+            elif respawned_count > removed_count:
+                print(f"   📈 Net food increase: {respawned_count - removed_count} (maintains sustainability)")
+
+    def _count_zone_food(self, zone: FoodZone) -> int:
+        """Count food sources within a zone."""
+        count = 0
+        for food in self.food_sources:
+            distance = math.sqrt((food.position[0] - zone.center_position[0])**2 + 
+                               (food.position[1] - zone.center_position[1])**2)
+            if distance <= zone.radius:
+                count += 1
+        return count
+
+    def _add_food_to_zone(self, zone: FoodZone) -> Optional[FoodSource]:
+        """Add a new food source to a specific zone."""
+        # Find valid position within zone that's not too close to existing food
+        for attempt in range(20):  # Try up to 20 positions
+            angle = random.uniform(0, 2 * math.pi)
+            distance = random.uniform(zone.radius * 0.2, zone.radius * 0.9)  # Not at center or edge
+            
+            food_x = zone.center_position[0] + distance * math.cos(angle)
+            food_y = zone.center_position[1] + distance * math.sin(angle)
+            
+            # Keep within world bounds
+            food_x = max(self.world_bounds['min_x'], min(self.world_bounds['max_x'], food_x))
+            food_y = max(self.world_bounds['min_y'], min(self.world_bounds['max_y'], food_y))
+            
+            position = (food_x, food_y)
+            
+            # Check minimum distance from existing food
+            too_close = False
+            for existing_food in self.food_sources:
+                distance_to_existing = math.sqrt((position[0] - existing_food.position[0])**2 + 
+                                                (position[1] - existing_food.position[1])**2)
+                if distance_to_existing < self.min_distance_between_food:
+                    too_close = True
+                    break
+            
+            if not too_close:
+                # Create appropriate food source for this zone - LONGER LASTING
+                food_type = random.choice(zone.food_types)
+                base_amount = 60.0 + random.uniform(0, 40.0)  # INCREASED: 60-100 units vs 35-60
+                max_capacity = base_amount * 2.0  # INCREASED: 2x capacity vs 1.4x
+                regen_rate = (0.4 + random.uniform(0, 0.2)) * zone.regeneration_multiplier  # REDUCED: slower regen
                 
                 food_source = FoodSource(
                     position=position,
                     food_type=food_type,
-                    amount=random.uniform(25, 70),  # Generous emergency food
-                    regeneration_rate=random.uniform(1.0, 3.0),  # Fast regeneration
-                    max_capacity=random.uniform(40, 120)
+                    amount=base_amount,
+                    regeneration_rate=regen_rate,
+                    max_capacity=max_capacity
                 )
-                self.food_sources.append(food_source)
-                # Silently create emergency food to reduce spam
-                pass
-    
+                return food_source
+        
+        return None  # Failed to find valid position
+
+    def _find_zone_for_position(self, position: Tuple[float, float]) -> Optional[FoodZone]:
+        """Find which zone a position belongs to."""
+        for zone in self.food_zones:
+            distance = math.sqrt((position[0] - zone.center_position[0])**2 + 
+                               (position[1] - zone.center_position[1])**2)
+            if distance <= zone.radius:
+                return zone
+        return None
+
+    def _respawn_food_in_zone(self, zone: FoodZone, depleted_food: FoodSource) -> Optional[FoodSource]:
+        """Respawn food in a different location within the same zone, maintaining food type."""
+        # Try to find a new position that's different from the depleted food location
+        min_distance_from_old = 10.0  # Must be at least 10m from old position
+        
+        for attempt in range(25):  # More attempts since we have additional constraints
+            angle = random.uniform(0, 2 * math.pi)
+            distance = random.uniform(zone.radius * 0.1, zone.radius * 0.95)
+            
+            food_x = zone.center_position[0] + distance * math.cos(angle)
+            food_y = zone.center_position[1] + distance * math.sin(angle)
+            
+            # Keep within world bounds
+            food_x = max(self.world_bounds['min_x'], min(self.world_bounds['max_x'], food_x))
+            food_y = max(self.world_bounds['min_y'], min(self.world_bounds['max_y'], food_y))
+            
+            new_position = (food_x, food_y)
+            
+            # Check distance from depleted food position
+            distance_from_old = math.sqrt((new_position[0] - depleted_food.position[0])**2 + 
+                                        (new_position[1] - depleted_food.position[1])**2)
+            if distance_from_old < min_distance_from_old:
+                continue  # Too close to old position
+            
+            # Check minimum distance from existing food
+            too_close_to_existing = False
+            for existing_food in self.food_sources:
+                distance_to_existing = math.sqrt((new_position[0] - existing_food.position[0])**2 + 
+                                                (new_position[1] - existing_food.position[1])**2)
+                if distance_to_existing < self.min_distance_between_food:
+                    too_close_to_existing = True
+                    break
+            
+            if not too_close_to_existing:
+                # Create respawned food source - preserve food type but make it longer lasting
+                base_amount = 50.0 + random.uniform(0, 30.0)  # Fresh, substantial food
+                max_capacity = base_amount * 2.5  # Higher capacity than original
+                regen_rate = (0.3 + random.uniform(0, 0.2)) * zone.regeneration_multiplier  # Slower regen
+                
+                respawned_food = FoodSource(
+                    position=new_position,
+                    food_type=depleted_food.food_type,  # PRESERVE food type for consistency
+                    amount=base_amount,
+                    regeneration_rate=regen_rate,
+                    max_capacity=max_capacity
+                )
+                
+                return respawned_food
+        
+        return None  # Failed to find valid respawn position
+
     def generate_resources_between_agents(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
-        """Generate resources strategically between agents with stable placement and minimum distance from robots"""
+        """
+        STRATEGIC REPLACEMENT: Instead of generating random food, ensure zones are properly maintained
+        and agents are far enough from food sources to require meaningful travel.
+        """
         if len(agent_positions) < 2:
             return
         
-        # REDUCED: Only trim food if significantly over capacity (was 35, now 50)
-        if len(self.food_sources) > 50:  # Less aggressive trimming
-            # Keep more food sources for stability (was 25, now 35)
-            self.food_sources = self.food_sources[-35:]
-            print(f"🍂 Trimmed food sources to maintain performance (kept {len(self.food_sources)})")
-        
-        # Track original food count
-        initial_food_count = len(self.food_sources)
-        
-        # Generate resources between adjacent agents with MINIMUM DISTANCE enforcement
-        resources_created = 0
-        for i in range(len(agent_positions) - 1):
-            agent1_id, pos1 = agent_positions[i]
-            agent2_id, pos2 = agent_positions[i + 1]
-            
-            # Calculate midpoint with moderate randomness
-            base_mid_x = (pos1[0] + pos2[0]) / 2 + random.uniform(-8, 8)  # Increased spread
-            base_mid_y = (pos1[1] + pos2[1]) / 2 + random.uniform(-3, 10)  # Increased spread
-            
-            # Ensure resource is above ground
-            base_mid_y = max(base_mid_y, 3.0)  # Higher minimum ground clearance
-            
-            # CRITICAL: Ensure minimum distance from ALL agents (not just the two adjacent ones)
-            min_distance_from_agents = 6.0  # Must be at least 6m from any agent
-            valid_position = None
-            
-            # Try multiple positions to find one that's far enough from all agents
-            for attempt in range(10):  # Up to 10 attempts to find good position
-                test_x = base_mid_x + random.uniform(-5, 5)
-                test_y = base_mid_y + random.uniform(-3, 3)
-                test_position = (test_x, test_y)
-                
-                # Check distance from ALL agents
-                too_close = False
-                for agent_id, agent_pos in agent_positions:
-                    distance_to_agent = math.sqrt((test_x - agent_pos[0])**2 + (test_y - agent_pos[1])**2)
-                    if distance_to_agent < min_distance_from_agents:
-                        too_close = True
-                        break
-                
-                if not too_close:
-                    valid_position = test_position
+        # Remove any food that's too close to agents (prevents instant rewards)
+        removed_food = []
+        for food in self.food_sources[:]:  # Copy list to avoid modification during iteration
+            too_close_to_agent = False
+            for agent_id, agent_pos in agent_positions:
+                distance_to_agent = math.sqrt((food.position[0] - agent_pos[0])**2 + 
+                                            (food.position[1] - agent_pos[1])**2)
+                if distance_to_agent < self.min_distance_from_agents:
+                    too_close_to_agent = True
                     break
             
-            # Only create resource if we found a valid position far from agents
-            if valid_position is None:
-                continue  # Skip this resource - couldn't find safe distance
-            
-            # Check if there's already a resource too close to this position
-            if self._resource_nearby(valid_position, min_distance=12.0):  # Increased from 8.0 to 12.0
-                continue  # Skip if too close to existing food
-            
-            # Determine resource type based on nearby agent roles
-            agent1_role = self.agent_roles.get(agent1_id, EcosystemRole.OMNIVORE)
-            agent2_role = self.agent_roles.get(agent2_id, EcosystemRole.OMNIVORE)
-            
-            food_type = self._determine_resource_type(agent1_role, agent2_role)
-            
-            # Create resource with longer-lasting properties for stability
-            food_source = FoodSource(
-                position=valid_position,
-                food_type=food_type,
-                amount=random.uniform(25, 50),  # Larger initial amounts for longer stability
-                regeneration_rate=random.uniform(0.5, 1.2),  # Slower regeneration for stability
-                max_capacity=random.uniform(40, 80)  # Higher capacity for longer lasting food
-            )
-            self.food_sources.append(food_source)
-            resources_created += 1
+            if too_close_to_agent:
+                self.food_sources.remove(food)
+                removed_food.append(food)
         
-        # Log resource generation for transparency
-        if resources_created > 0:
-            print(f"🌱 Created {resources_created} new food sources (was {initial_food_count}, now {len(self.food_sources)})")
-            print(f"   📍 All food placed >6m from agents for stable rewards")
-    
-    def _determine_resource_type(self, role1: EcosystemRole, role2: EcosystemRole) -> str:
-        """Determine resource type based on nearby agent roles"""
-        role_preferences = {
-            EcosystemRole.HERBIVORE: ["plants", "seeds", "meat"],  # Can consume meat efficiently
-            EcosystemRole.CARNIVORE: [],  # PURE PREDATORS - NO environmental food preferences
-            EcosystemRole.OMNIVORE: ["plants", "insects", "seeds", "meat"],  # Can eat everything
-            EcosystemRole.SCAVENGER: [],  # PURE SCAVENGERS - NO environmental food preferences
-            EcosystemRole.SYMBIONT: ["plants", "seeds", "insects"]  # Plant focused but flexible
-        }
+        # Log removal of food that was too close to agents
+        if removed_food:
+            print(f"🚫 Removed {len(removed_food)} food sources too close to agents (<{self.min_distance_from_agents}m)")
+            print(f"   🎯 This ensures robots must travel meaningful distances for rewards")
         
-        # Combine preferences from both roles
-        combined_preferences = []
-        combined_preferences.extend(role_preferences.get(role1, ["plants"]))
-        combined_preferences.extend(role_preferences.get(role2, ["plants"]))
-        
-        # If no preferences (e.g., carnivores and scavengers), default to herbivore food
-        if not combined_preferences:
-            combined_preferences = ["plants", "seeds", "insects", "meat"]  # Default food types
-        
-        return random.choice(combined_preferences)
-    
-    def _resource_nearby(self, position: Tuple[float, float], min_distance: float) -> bool:
-        """Check if there's already a resource too close to the given position"""
-        for food in self.food_sources:
-            distance = math.sqrt((position[0] - food.position[0])**2 + 
-                               (position[1] - food.position[1])**2)
-            if distance < min_distance:
-                return True
-        return False
-    
-    def consume_resource(self, agent_id: str, agent_position: Tuple[float, float], consumption_rate: float = 10.0) -> Tuple[float, str, Optional[Tuple[float, float]]]:
-        """Agent consumes nearby resources and gains energy - COMPLETELY REWRITTEN"""
-        energy_gained = 0.0
-        consumption_distance = 5.0  # Increased to match resource placement distance
-        consumed_food_type = "none"
-        consumed_food_position = None
-        
-        # Get agent role
-        agent_role = self.agent_roles.get(agent_id, EcosystemRole.OMNIVORE)
-        
-        # Find nearest consumable resource
-        best_food = None
-        best_distance = float('inf')
-        
-        for food in self.food_sources:
-            if food.amount <= 0:
-                continue
-                
-            distance = math.sqrt((agent_position[0] - food.position[0])**2 + 
-                               (agent_position[1] - food.position[1])**2)
-            
-            if distance <= consumption_distance:
-                # Check if this agent can consume this food type
-                consumption_efficiency = self._get_consumption_efficiency(agent_role, food.food_type)
-                if consumption_efficiency > 0 and distance < best_distance:
-                    best_food = food
-                    best_distance = distance
-        
-        # Consume from best available food source
-        if best_food:
-            consumption_efficiency = self._get_consumption_efficiency(agent_role, best_food.food_type)
-            
-            # Calculate consumption amount based on efficiency and hunger
-            base_consumption = consumption_rate * consumption_efficiency
-            consumed = min(best_food.amount, base_consumption)
-            
-            # Remove food from source
-            best_food.amount -= consumed
-            
-            # Calculate energy gained (simplified system)
-            energy_per_unit = 0.1  # Base energy per unit consumed
-            energy_gained = consumed * energy_per_unit
-            
-            # Track consumption details
-            consumed_food_type = best_food.food_type
-            consumed_food_position = best_food.position
-            
-            # Log consumption
-            if energy_gained > 0.01:
-                efficiency_str = f"{consumption_efficiency*100:.0f}%"
-                print(f"🍽️ {str(agent_id)[:8]} consumed {consumed:.1f} {best_food.food_type} "
-                      f"(efficiency: {efficiency_str}, energy: +{energy_gained:.2f})")
-        
-        return energy_gained, consumed_food_type, consumed_food_position
+        # Ensure all zones have adequate food (but not too close to agents)
+        self._maintain_zone_integrity(agent_positions)
 
-    def consume_robot(self, predator_id: str, predator_position: Tuple[float, float], 
-                     all_agents: List[Any], agent_energy_levels: Dict[str, float], 
-                     agent_health: Dict[str, Dict]) -> Tuple[float, str, Optional[Tuple[float, float]]]:
-        """FIXED: Properly implement robot consumption for carnivores and scavengers"""
+    def _maintain_zone_integrity(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
+        """Ensure food zones maintain their intended food density while respecting agent distances."""
+        zones_replenished = 0
         
-        predator_role = self.agent_roles.get(predator_id, EcosystemRole.OMNIVORE)
-        
-        # Only certain roles can consume robots
-        if predator_role not in [EcosystemRole.CARNIVORE, EcosystemRole.OMNIVORE, EcosystemRole.SCAVENGER]:
-            return 0.0, "none", None
-        
-        consumption_distance = 5.0  # Same as food consumption
-        best_prey = None
-        best_distance = float('inf')
-        
-        # Find suitable prey
-        for prey_agent in all_agents:
-            if (getattr(prey_agent, '_destroyed', False) or not prey_agent.body or 
-                prey_agent.id == predator_id):
+        for zone in self.food_zones:
+            if not zone.active:
                 continue
-            
-            prey_position = (prey_agent.body.position.x, prey_agent.body.position.y)
-            distance = math.sqrt((predator_position[0] - prey_position[0])**2 + 
-                               (predator_position[1] - prey_position[1])**2)
-            
-            if distance <= consumption_distance:
-                prey_energy = agent_energy_levels.get(prey_agent.id, 1.0)
-                prey_health = agent_health.get(prey_agent.id, {'health': 1.0})['health']
-                prey_role = self.agent_roles.get(prey_agent.id, EcosystemRole.OMNIVORE)
                 
-                # Role-specific hunting rules
-                can_hunt = False
-                
-                if predator_role == EcosystemRole.CARNIVORE:
-                    # Carnivores can ONLY hunt herbivores, scavengers, and omnivores (not other carnivores or symbionts)
-                    valid_prey_roles = [EcosystemRole.HERBIVORE, EcosystemRole.SCAVENGER, EcosystemRole.OMNIVORE]
-                    can_hunt = (prey_role in valid_prey_roles and 
-                               prey_health > 0.2 and prey_energy > 0.1)
-                elif predator_role == EcosystemRole.OMNIVORE:
-                    # Omnivores hunt weakened prey
-                    can_hunt = (prey_energy < 0.5 or prey_health < 0.7)
-                elif predator_role == EcosystemRole.SCAVENGER:
-                    # Scavengers can consume ANY weakened robots (any role when low energy/health)
-                    can_hunt = (prey_energy < 0.3 and prey_health < 0.5)
-                
-                if can_hunt and distance < best_distance:
-                    best_prey = prey_agent
-                    best_distance = distance
+            current_food_count = self._count_zone_food(zone)
+            if current_food_count < zone.max_food_sources // 2:  # If zone is less than half capacity
+                # Try to add food to zone (but far from agents)
+                attempts = 0
+                while attempts < 10 and self._count_zone_food(zone) < zone.max_food_sources:
+                    if self._try_add_strategic_food_to_zone(zone, agent_positions):
+                        zones_replenished += 1
+                    attempts += 1
         
-        # Consume from best prey
-        if best_prey:
-            prey_id = best_prey.id
-            prey_energy = agent_energy_levels.get(prey_id, 1.0)
-            prey_health = agent_health.get(prey_id, {'health': 1.0})['health']
+        if zones_replenished > 0:
+            print(f"🔄 Replenished {zones_replenished} strategic food sources in zones")
+
+    def _try_add_strategic_food_to_zone(self, zone: FoodZone, agent_positions: List[Tuple[str, Tuple[float, float]]]) -> bool:
+        """Try to add food to a zone while maintaining minimum distance from all agents."""
+        for attempt in range(15):
+            # Random position within zone
+            angle = random.uniform(0, 2 * math.pi)
+            distance = random.uniform(zone.radius * 0.3, zone.radius * 0.8)
             
-            # Consumption efficiency by predator role - DRASTICALLY REDUCED for 10x longer survival
-            consumption_rates = {
-                EcosystemRole.CARNIVORE: 0.015,   # Reduced from 0.15 to 0.015 (90% reduction)
-                EcosystemRole.OMNIVORE: 0.008,    # Reduced from 0.08 to 0.008 (90% reduction)  
-                EcosystemRole.SCAVENGER: 0.012    # Reduced from 0.12 to 0.012 (90% reduction)
+            food_x = zone.center_position[0] + distance * math.cos(angle)
+            food_y = zone.center_position[1] + distance * math.sin(angle)
+            
+            # Keep within world bounds
+            food_x = max(self.world_bounds['min_x'], min(self.world_bounds['max_x'], food_x))
+            food_y = max(self.world_bounds['min_y'], min(self.world_bounds['max_y'], food_y))
+            
+            position = (food_x, food_y)
+            
+            # Check minimum distance from ALL agents
+            far_enough_from_agents = True
+            for agent_id, agent_pos in agent_positions:
+                distance_to_agent = math.sqrt((position[0] - agent_pos[0])**2 + 
+                                            (position[1] - agent_pos[1])**2)
+                if distance_to_agent < self.min_distance_from_agents:
+                    far_enough_from_agents = False
+                    break
+            
+            # Check minimum distance from existing food
+            far_enough_from_food = True
+            for existing_food in self.food_sources:
+                distance_to_food = math.sqrt((position[0] - existing_food.position[0])**2 + 
+                                           (position[1] - existing_food.position[1])**2)
+                if distance_to_food < self.min_distance_between_food:
+                    far_enough_from_food = False
+                    break
+            
+            if far_enough_from_agents and far_enough_from_food:
+                # Create strategic food source
+                food_type = random.choice(zone.food_types)
+                base_amount = 40.0 + random.uniform(0, 30.0)
+                max_capacity = base_amount * 1.5
+                regen_rate = (0.8 + random.uniform(0, 0.4)) * zone.regeneration_multiplier
+                
+                food_source = FoodSource(
+                    position=position,
+                    food_type=food_type,
+                    amount=base_amount,
+                    regeneration_rate=regen_rate,
+                    max_capacity=max_capacity
+                )
+                self.food_sources.append(food_source)
+                return True
+        
+        return False  # Failed to find valid position after all attempts
+
+    def get_strategic_zone_info(self) -> Dict[str, Any]:
+        """Get information about the strategic food zones for debugging/visualization."""
+        zone_info = {}
+        for i, zone in enumerate(self.food_zones):
+            food_count = self._count_zone_food(zone)
+            zone_info[f"zone_{i}_{zone.zone_type}"] = {
+                'center': zone.center_position,
+                'radius': zone.radius,
+                'type': zone.zone_type,
+                'food_types': zone.food_types,
+                'current_food': food_count,
+                'max_food': zone.max_food_sources,
+                'active': zone.active
             }
-            consumption_rate = consumption_rates.get(predator_role, 0.05)
-            
-            # Damage prey (no regeneration - predation should be effective)
-            health_damage = min(prey_health, consumption_rate)
-            energy_damage = min(prey_energy, consumption_rate * 0.5)
-            
-            # Apply damage to prey
-            agent_health[prey_id]['health'] = max(0.0, prey_health - health_damage)
-            agent_energy_levels[prey_id] = max(0.0, prey_energy - energy_damage)
-            
-            # Predator gains energy from consumed health/energy
-            energy_gained = (health_damage + energy_damage) * 0.8  # Good conversion rate
-            
-            prey_position = (best_prey.body.position.x, best_prey.body.position.y)
-            
-            # Log predation
-            predation_type = {
-                EcosystemRole.CARNIVORE: "hunting",
-                EcosystemRole.OMNIVORE: "consuming", 
-                EcosystemRole.SCAVENGER: "scavenging"
-            }.get(predator_role, "consuming")
-            
-            print(f"🍖 {str(predator_id)[:8]} is {predation_type} {str(prey_id)[:8]} "
-                  f"(energy: +{energy_gained:.2f}, prey health: {agent_health[prey_id]['health']:.2f})")
-            
-            return energy_gained, prey_id, prey_position
-        
-        return 0.0, "none", None
+        return zone_info
     
     def _trigger_resource_competition(self):
         """Trigger increased competition for resources"""
@@ -529,4 +609,149 @@ class EcosystemDynamics:
                     'distance': distance,
                     'regeneration_rate': food.regeneration_rate
                 })
-        return nearby 
+        return nearby
+
+    def consume_resource(self, agent_id: str, agent_position: Tuple[float, float], consumption_rate: float = 10.0) -> Tuple[float, str, Optional[Tuple[float, float]]]:
+        """Agent consumes nearby resources and gains energy"""
+        energy_gained = 0.0
+        consumption_distance = 5.0  # Distance within which agents can consume food
+        consumed_food_type = "none"
+        consumed_food_position = None
+        
+        # Get agent role
+        agent_role = self.agent_roles.get(agent_id, EcosystemRole.OMNIVORE)
+        
+        # Find nearest consumable resource
+        best_food = None
+        best_distance = float('inf')
+        
+        for food in self.food_sources:
+            if food.amount <= 0:
+                continue
+                
+            distance = math.sqrt((agent_position[0] - food.position[0])**2 + 
+                               (agent_position[1] - food.position[1])**2)
+            
+            if distance <= consumption_distance:
+                # Check if this agent can consume this food type
+                consumption_efficiency = self._get_consumption_efficiency(agent_role, food.food_type)
+                if consumption_efficiency > 0 and distance < best_distance:
+                    best_food = food
+                    best_distance = distance
+        
+        # Consume from best available food source
+        if best_food:
+            consumption_efficiency = self._get_consumption_efficiency(agent_role, best_food.food_type)
+            
+            # Calculate consumption amount based on efficiency and hunger
+            base_consumption = consumption_rate * consumption_efficiency
+            consumed = min(best_food.amount, base_consumption)
+            
+            # Remove food from source
+            best_food.amount -= consumed
+            
+            # Calculate energy gained (simplified system)
+            energy_per_unit = 0.1  # Base energy per unit consumed
+            energy_gained = consumed * energy_per_unit
+            
+            # Track consumption details
+            consumed_food_type = best_food.food_type
+            consumed_food_position = best_food.position
+            
+            # Log consumption
+            if energy_gained > 0.01:
+                efficiency_str = f"{consumption_efficiency*100:.0f}%"
+                print(f"🍽️ {str(agent_id)[:8]} consumed {consumed:.1f} {best_food.food_type} "
+                      f"(efficiency: {efficiency_str}, energy: +{energy_gained:.2f})")
+        
+        return energy_gained, consumed_food_type, consumed_food_position
+
+    def consume_robot(self, predator_id: str, predator_position: Tuple[float, float], 
+                     all_agents: List[Any], agent_energy_levels: Dict[str, float], 
+                     agent_health: Dict[str, Dict]) -> Tuple[float, str, Optional[Tuple[float, float]]]:
+        """Implement robot consumption for carnivores and scavengers"""
+        
+        predator_role = self.agent_roles.get(predator_id, EcosystemRole.OMNIVORE)
+        
+        # Only certain roles can consume robots
+        if predator_role not in [EcosystemRole.CARNIVORE, EcosystemRole.OMNIVORE, EcosystemRole.SCAVENGER]:
+            return 0.0, "none", None
+        
+        consumption_distance = 5.0  # Same as food consumption
+        best_prey = None
+        best_distance = float('inf')
+        
+        # Find suitable prey
+        for prey_agent in all_agents:
+            if (getattr(prey_agent, '_destroyed', False) or not prey_agent.body or 
+                prey_agent.id == predator_id):
+                continue
+            
+            prey_position = (prey_agent.body.position.x, prey_agent.body.position.y)
+            distance = math.sqrt((predator_position[0] - prey_position[0])**2 + 
+                               (predator_position[1] - prey_position[1])**2)
+            
+            if distance <= consumption_distance:
+                prey_energy = agent_energy_levels.get(prey_agent.id, 1.0)
+                prey_health = agent_health.get(prey_agent.id, {'health': 1.0})['health']
+                prey_role = self.agent_roles.get(prey_agent.id, EcosystemRole.OMNIVORE)
+                
+                # Role-specific hunting rules
+                can_hunt = False
+                
+                if predator_role == EcosystemRole.CARNIVORE:
+                    # Carnivores can hunt herbivores, scavengers, and omnivores
+                    valid_prey_roles = [EcosystemRole.HERBIVORE, EcosystemRole.SCAVENGER, EcosystemRole.OMNIVORE]
+                    can_hunt = (prey_role in valid_prey_roles and 
+                               prey_health > 0.2 and prey_energy > 0.1)
+                elif predator_role == EcosystemRole.OMNIVORE:
+                    # Omnivores hunt weakened prey
+                    can_hunt = (prey_energy < 0.5 or prey_health < 0.7)
+                elif predator_role == EcosystemRole.SCAVENGER:
+                    # Scavengers can consume weakened robots
+                    can_hunt = (prey_energy < 0.3 and prey_health < 0.5)
+                
+                if can_hunt and distance < best_distance:
+                    best_prey = prey_agent
+                    best_distance = distance
+        
+        # Consume from best prey
+        if best_prey:
+            prey_id = best_prey.id
+            prey_energy = agent_energy_levels.get(prey_id, 1.0)
+            prey_health = agent_health.get(prey_id, {'health': 1.0})['health']
+            
+            # Consumption efficiency by predator role - REDUCED for longer survival
+            consumption_rates = {
+                EcosystemRole.CARNIVORE: 0.015,   # Reduced for longer survival
+                EcosystemRole.OMNIVORE: 0.008,    # Reduced for longer survival  
+                EcosystemRole.SCAVENGER: 0.012    # Reduced for longer survival
+            }
+            consumption_rate = consumption_rates.get(predator_role, 0.05)
+            
+            # Damage prey
+            health_damage = min(prey_health, consumption_rate)
+            energy_damage = min(prey_energy, consumption_rate * 0.5)
+            
+            # Apply damage to prey
+            agent_health[prey_id]['health'] = max(0.0, prey_health - health_damage)
+            agent_energy_levels[prey_id] = max(0.0, prey_energy - energy_damage)
+            
+            # Predator gains energy from consumed health/energy
+            energy_gained = (health_damage + energy_damage) * 0.8  # Good conversion rate
+            
+            prey_position = (best_prey.body.position.x, best_prey.body.position.y)
+            
+            # Log predation
+            predation_type = {
+                EcosystemRole.CARNIVORE: "hunting",
+                EcosystemRole.OMNIVORE: "consuming", 
+                EcosystemRole.SCAVENGER: "scavenging"
+            }.get(predator_role, "consuming")
+            
+            print(f"🍖 {str(predator_id)[:8]} is {predation_type} {str(prey_id)[:8]} "
+                  f"(energy: +{energy_gained:.2f}, prey health: {agent_health[prey_id]['health']:.2f})")
+            
+            return energy_gained, prey_id, prey_position
+        
+        return 0.0, "none", None 
