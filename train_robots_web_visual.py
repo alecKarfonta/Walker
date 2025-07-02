@@ -2049,6 +2049,18 @@ class TrainingEnvironment:
         # Enhanced visualization systems
         self.ecosystem_dynamics = EcosystemDynamics()
         self.environmental_system = EnvironmentalSystem()
+        
+        # Dynamic world generation system for expanding exploration
+        try:
+            from src.world.dynamic_world_manager import DynamicWorldManager
+            self.dynamic_world_manager = DynamicWorldManager(
+                box2d_world=self.world,
+                ecosystem_dynamics=self.ecosystem_dynamics
+            )
+            print("🌍 Dynamic world generation system initialized")
+        except Exception as e:
+            print(f"⚠️ Dynamic world manager initialization failed: {e}")
+            self.dynamic_world_manager = None
         self.agent_health = {}  # Track agent health/energy for visualization
         self.agent_statuses = {}  # Track agent statuses (hunting, feeding, etc.)
         self.predation_events = []  # Track recent predation events for visualization
@@ -2740,6 +2752,21 @@ class TrainingEnvironment:
                 event for event in self.consumption_events
                 if current_time - event['timestamp'] < event['duration']
             ]
+            
+            # Update dynamic world generation based on robot positions
+            if self.dynamic_world_manager:
+                try:
+                    # Get robot positions for world expansion
+                    robot_positions = []
+                    for agent in self.agents:
+                        if not getattr(agent, '_destroyed', False) and agent.body:
+                            robot_positions.append((agent.id, (agent.body.position.x, agent.body.position.y)))
+                    
+                    # Update dynamic world (generates new tiles as robots progress)
+                    self.dynamic_world_manager.update(robot_positions)
+                    
+                except Exception as e:
+                    print(f"⚠️ Error updating dynamic world: {e}")
             
         except Exception as e:
             print(f"⚠️ Error updating ecosystem dynamics: {e}")
@@ -4620,6 +4647,8 @@ class TrainingEnvironment:
                             }
                             for f in visible_food_sources
                         ],
+                        # Dynamic world status
+                        'dynamic_world': self.dynamic_world_manager.get_world_status() if self.dynamic_world_manager else None,
                         'predation_events': recent_predation_events,
                         'death_events': [
                             {
@@ -4739,6 +4768,13 @@ class TrainingEnvironment:
                 print("📊 Evaluation services stopped")
             except Exception as e:
                 print(f"⚠️  Error stopping evaluation services: {e}")
+        
+        # Cleanup dynamic world manager
+        if hasattr(self, 'dynamic_world_manager') and self.dynamic_world_manager:
+            try:
+                self.dynamic_world_manager.cleanup_all_tiles()
+            except Exception as e:
+                print(f"⚠️ Error cleaning up dynamic world: {e}")
         
         if self.thread:
             self.thread.join()
