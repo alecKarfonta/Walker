@@ -93,9 +93,9 @@ class DeepQLearningConfig:
     batch_size: int = 32
     target_update_freq: int = 2000
     
-    # Training frequency (to balance performance)
+    # Training frequency (to balance performance) - Increased by 25% for longer intervals
     experience_collection_freq: int = 10
-    training_freq: int = 15000
+    training_freq: int = 18750  # Increased from 15000 (25% longer interval)
     min_buffer_size: int = 5000
     
     def __post_init__(self):

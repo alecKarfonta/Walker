@@ -55,15 +55,43 @@ class CrawlingAgent(BaseAgent):
         self.mutation_count = 0
         self.crossover_count = 0
         
-        # Performance tracking
-        self.total_reward = 0.0
+        # 🌊 INFINITE EXPLORATION REWARD SYSTEM: Replace episodic rewards with rolling windows
+        self.total_reward = 0.0  # Keep for backward compatibility, but deprecate usage
         self.immediate_reward = 0.0
         self.last_reward = 0.0
-        self.steps = 0
-        self.max_speed = 0.0
-        self.best_reward_received = 0.0
-        self.worst_reward_received = 0.0
-        self.time_since_good_value = 0.0
+        
+        # 🎯 NEW: Rolling reward system for infinite exploration
+        self.reward_window_size = 1000  # Track last 1000 steps
+        self.recent_rewards = deque(maxlen=self.reward_window_size)  # Sliding window of rewards
+        self.recent_steps_window = deque(maxlen=self.reward_window_size)  # Corresponding step numbers
+        
+        # Performance metrics over different time scales
+        self.short_term_window = deque(maxlen=100)   # Last 100 steps (short-term performance)
+        self.medium_term_window = deque(maxlen=500)  # Last 500 steps (medium-term performance)
+        self.long_term_window = deque(maxlen=2000)   # Last 2000 steps (long-term performance)
+        
+        # 📊 Performance tracking for infinite exploration
+        self.reward_rate = 0.0          # Reward per step (current performance)
+        self.short_term_avg = 0.0       # Average reward over last 100 steps
+        self.medium_term_avg = 0.0      # Average reward over last 500 steps
+        self.long_term_avg = 0.0        # Average reward over last 2000 steps
+        self.performance_trend = 0.0    # Improvement rate (positive = getting better)
+        
+        # 🎖️ Achievement tracking for motivation
+        self.best_short_term_avg = -float('inf')
+        self.best_medium_term_avg = -float('inf')
+        self.best_long_term_avg = -float('inf')
+        self.achievement_count = 0      # Number of personal records broken
+        
+        # 📈 Progressive benchmarks instead of episodes
+        self.benchmark_intervals = [100, 500, 1000, 2000, 5000, 10000]  # Steps at which to evaluate
+        self.benchmark_scores = {}      # Store scores at each benchmark
+        self.next_benchmark_step = 100  # Next milestone to evaluate
+        
+        # 🕒 Time-based performance windows
+        self.performance_history = []   # (timestamp, reward_rate, avg_reward) tuples
+        self.last_performance_update = time.time()
+        self.performance_update_interval = 30.0  # Update every 30 seconds
         
         # ENHANCED: Better action system for locomotion - MUST be set before calling _calculate_state_size()
         self.action_size = 15  # Expanded action space for better locomotion control
@@ -85,6 +113,7 @@ class CrawlingAgent(BaseAgent):
         self.max_action_history = 50
         self.recent_displacements = []
         self.prev_x = position[0]
+        self.prev_y = position[1]
         self.prev_food_distance = float('inf')
         
         # Motor parameters - reduced for stable crawling motion
@@ -105,6 +134,16 @@ class CrawlingAgent(BaseAgent):
         
         print(f"🤖 Created CrawlingAgent {self.id} with {self.num_limbs} limbs, "
               f"{self.segments_per_limb} segments each")
+        
+        # Restore missing basic attributes
+        self.steps = 0
+        self.max_speed = 0.0
+        self.best_reward_received = 0.0
+        self.worst_reward_received = 0.0
+        self.time_since_good_value = 0.0
+        
+        # Optional training environment reference (for food info)
+        self._training_env = None
     
     def _initialize_learning_system(self):
         """
@@ -345,11 +384,13 @@ class CrawlingAgent(BaseAgent):
                 state_array[2] = shoulder_vel
                 state_array[3] = elbow_vel
             
-            # 2. Body state (6 values)
+            # 2. Body state (6 values) - NO ABSOLUTE COORDINATES
             if self.body:
-                # Position normalized relative to starting position
-                state_array[4] = np.tanh((self.body.position.x - self.initial_position[0]) / 20.0)
-                state_array[5] = np.tanh((self.body.position.y - self.initial_position[1]) / 10.0)
+                # Recent movement direction instead of absolute position
+                displacement_x = self.body.position.x - self.prev_x if hasattr(self, 'prev_x') else 0.0
+                displacement_y = self.body.position.y - getattr(self, 'prev_y', self.initial_position[1])
+                state_array[4] = np.tanh(displacement_x * 100.0)  # Recent x movement
+                state_array[5] = np.tanh(displacement_y * 100.0)  # Recent y movement
                 # Velocity
                 state_array[6] = np.tanh(self.body.linearVelocity.x / 5.0)
                 state_array[7] = np.tanh(self.body.linearVelocity.y / 5.0)
@@ -480,8 +521,8 @@ class CrawlingAgent(BaseAgent):
         
         self._learning_system.store_experience(prev_state, action, reward, new_state, done)
         
-        # Train every 30 steps (reduced frequency for better performance)
-        if self.steps % 30 == 0:
+        # Train every 38 steps (increased by 25% from 30 steps for better performance)
+        if self.steps % 38 == 0:
             # Log first training session
             if not hasattr(self, '_training_started'):
                 print(f"🚀 Agent {str(self.id)[:8]}: Neural network training STARTED at step {self.steps}")
@@ -561,10 +602,14 @@ class CrawlingAgent(BaseAgent):
         current_y = self.body.position.y
         total_reward = 0.0
         
-        # ENHANCED: Much stronger forward progress reward
+        # ENHANCED: Much stronger forward progress reward + rightward movement incentive
         displacement = current_x - prev_x
         if displacement > 0.001:  # Lower threshold for sensitivity
             progress_reward = displacement * 5.0  # MUCH stronger multiplier (was 0.5)
+            
+            # 🎯 RIGHTWARD MOVEMENT BONUS: Small consistent reward for moving right
+            rightward_bonus = displacement * 2.0  # Additional bonus for rightward movement
+            progress_reward += rightward_bonus
             
             # Sustained movement bonus with stronger incentive
             if hasattr(self, 'recent_displacements'):
@@ -580,7 +625,8 @@ class CrawlingAgent(BaseAgent):
         elif displacement < -0.0005:
             progress_reward = displacement * 2.0  # Stronger penalty for going backward
         else:
-            progress_reward = 0.0
+            # 🎯 SMALL REWARD: Even when stationary, slight encouragement to move right
+            progress_reward = 0.01 if self.body.linearVelocity.x > 0.05 else 0.0
         
         total_reward += progress_reward
         
@@ -659,9 +705,32 @@ class CrawlingAgent(BaseAgent):
                 pass
         
         reward = self.get_crawling_reward(self.prev_x, food_info)
-        self.total_reward += reward
+        
+        # 🌊 NEW: Update rolling reward system instead of just accumulating total_reward
         self.immediate_reward = reward
         self.last_reward = reward
+        
+        # Add to rolling windows
+        self.recent_rewards.append(reward)
+        self.recent_steps_window.append(self.steps)
+        self.short_term_window.append(reward)
+        self.medium_term_window.append(reward)
+        self.long_term_window.append(reward)
+        
+        # 📊 Calculate rolling performance metrics
+        self._update_performance_metrics()
+        
+        # 🎖️ Check for achievements (personal records)
+        self._check_achievements()
+        
+        # 📈 Check for benchmark milestones
+        self._check_benchmarks()
+        
+        # 🕒 Update time-based performance history
+        self._update_performance_history()
+        
+        # Keep total_reward for backward compatibility, but it's deprecated
+        self.total_reward += reward
         
         # Time-based action selection
         current_time = time.time()
@@ -691,6 +760,7 @@ class CrawlingAgent(BaseAgent):
         
         # Update tracking
         self.prev_x = current_x
+        self.prev_y = self.body.position.y if self.body else 0.0
         self.steps += 1
     
     def reset(self):
@@ -709,6 +779,7 @@ class CrawlingAgent(BaseAgent):
         self.last_action_time = time.time()
         self.current_action_tuple = (1, 0)
         self.prev_x = self.initial_position[0]
+        self.prev_y = self.initial_position[1]
         
         # Reset tracking
         self.action_history = []
@@ -911,3 +982,121 @@ class CrawlingAgent(BaseAgent):
             distance = current_x - self.initial_position[0]
             return max(0.0, distance)  # Ensure non-negative fitness
         return 0.0 
+    
+    # 🌊 INFINITE EXPLORATION: Rolling reward system helper methods
+    def _update_performance_metrics(self):
+        """Update rolling performance metrics from windowed rewards."""
+        import numpy as np
+        
+        # Calculate rolling averages for different time scales
+        if len(self.short_term_window) > 0:
+            self.short_term_avg = float(np.mean(self.short_term_window))
+        
+        if len(self.medium_term_window) > 0:
+            self.medium_term_avg = float(np.mean(self.medium_term_window))
+            
+        if len(self.long_term_window) > 0:
+            self.long_term_avg = float(np.mean(self.long_term_window))
+        
+        # Calculate current reward rate (recent performance)
+        if len(self.recent_rewards) >= 10:  # Need at least 10 samples
+            recent_10 = list(self.recent_rewards)[-10:]
+            self.reward_rate = float(np.mean(recent_10))
+        
+        # Calculate performance trend (improvement over time)
+        if len(self.medium_term_window) >= 100:
+            first_half = list(self.medium_term_window)[:len(self.medium_term_window)//2]
+            second_half = list(self.medium_term_window)[len(self.medium_term_window)//2:]
+            
+            first_half_avg = np.mean(first_half)
+            second_half_avg = np.mean(second_half)
+            self.performance_trend = float(second_half_avg - first_half_avg)
+    
+    def _check_achievements(self):
+        """Check for personal record achievements to maintain motivation."""
+        # Check short-term achievement
+        if self.short_term_avg > self.best_short_term_avg:
+            self.best_short_term_avg = self.short_term_avg
+            self.achievement_count += 1
+            if self.steps % 1000 == 0:  # Log occasionally to avoid spam
+                print(f"🎖️ Agent {str(self.id)[:8]}: New short-term record! Avg reward = {self.short_term_avg:.4f}")
+        
+        # Check medium-term achievement  
+        if self.medium_term_avg > self.best_medium_term_avg:
+            self.best_medium_term_avg = self.medium_term_avg
+            self.achievement_count += 1
+            if self.steps % 2000 == 0:  # Log occasionally
+                print(f"🏆 Agent {str(self.id)[:8]}: New medium-term record! Avg reward = {self.medium_term_avg:.4f}")
+        
+        # Check long-term achievement
+        if self.long_term_avg > self.best_long_term_avg:
+            self.best_long_term_avg = self.long_term_avg
+            self.achievement_count += 1
+            if self.steps % 5000 == 0:  # Log occasionally
+                print(f"🌟 Agent {str(self.id)[:8]}: New long-term record! Avg reward = {self.long_term_avg:.4f}")
+    
+    def _check_benchmarks(self):
+        """Check if we've reached a benchmark milestone for evaluation."""
+        if self.steps >= self.next_benchmark_step:
+            # Record performance at this benchmark
+            self.benchmark_scores[self.next_benchmark_step] = {
+                'short_term_avg': self.short_term_avg,
+                'medium_term_avg': self.medium_term_avg,
+                'long_term_avg': self.long_term_avg,
+                'reward_rate': self.reward_rate,
+                'performance_trend': self.performance_trend,
+                'achievement_count': self.achievement_count,
+                'timestamp': time.time()
+            }
+            
+            # Find next benchmark
+            for milestone in self.benchmark_intervals:
+                if milestone > self.steps:
+                    self.next_benchmark_step = milestone
+                    break
+            else:
+                # If we've passed all predefined benchmarks, add more
+                self.next_benchmark_step = self.steps + 5000
+    
+    def _update_performance_history(self):
+        """Update time-based performance history."""
+        current_time = time.time()
+        if current_time - self.last_performance_update >= self.performance_update_interval:
+            # Record current performance
+            self.performance_history.append((
+                current_time,
+                self.reward_rate,
+                self.short_term_avg,
+                self.medium_term_avg,
+                self.performance_trend
+            ))
+            
+            # Keep only last 100 entries (about 50 minutes of history)
+            if len(self.performance_history) > 100:
+                self.performance_history.pop(0)
+            
+            self.last_performance_update = current_time
+    
+    # 🎯 NEW: Methods to get meaningful performance metrics for infinite exploration
+    def get_current_performance(self):
+        """Get current performance metrics instead of total_reward."""
+        return {
+            'reward_rate': self.reward_rate,
+            'short_term_avg': self.short_term_avg,
+            'medium_term_avg': self.medium_term_avg, 
+            'long_term_avg': self.long_term_avg,
+            'performance_trend': self.performance_trend,
+            'achievement_count': self.achievement_count,
+            'steps': self.steps,
+            'benchmarks_reached': len(self.benchmark_scores)
+        }
+    
+    def get_fitness_score(self):
+        """Get a comparable fitness score for infinite exploration."""
+        # Combine multiple metrics for a comprehensive fitness score
+        base_score = self.medium_term_avg * 100  # Base performance
+        trend_bonus = max(0, self.performance_trend * 50)  # Improvement bonus
+        achievement_bonus = self.achievement_count * 5  # Achievement bonus
+        consistency_bonus = max(0, 10 - abs(self.short_term_avg - self.medium_term_avg) * 100)  # Consistency
+        
+        return base_score + trend_bonus + achievement_bonus + consistency_bonus 

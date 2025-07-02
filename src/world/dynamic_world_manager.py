@@ -90,6 +90,15 @@ class DynamicWorldManager:
         self.tiles_cleaned_up = 0
         self.last_generation_time = time.time()
         
+        # 🎯 PROGRESSIVE DIFFICULTY SYSTEM
+        self.robot_performance_tracker = {
+            'max_distances': [],  # Track furthest robot positions
+            'average_distances': [],  # Track average robot progression
+            'performance_samples': 20,  # Keep last 20 samples
+            'baseline_distance': 50.0,  # Starting difficulty baseline
+            'difficulty_multiplier': 0.5,  # Start with 50% obstacle sizes
+        }
+        
         # Create initial setup
         self._create_left_wall_barrier()
         self._generate_initial_tiles()
@@ -146,13 +155,62 @@ class DynamicWorldManager:
         if not robot_positions:
             return
         
-        # Find the rightmost robot position
-        rightmost_x = max(pos[1][0] for _, pos in robot_positions)
+        # CRITICAL SAFEGUARD: Rate limiting to prevent runaway generation
+        current_time = time.time()
+        if hasattr(self, 'last_update_time'):
+            if current_time - self.last_update_time < 1.0:  # Back to 1 second between updates
+                return
+        self.last_update_time = current_time
+        
+        # CRITICAL SAFEGUARD: Maximum tiles per session
+        MAX_TILES_EVER = 50  # Hard limit to prevent infinite generation
+        if self.tiles_generated >= MAX_TILES_EVER:
+            print(f"🛑 SAFETY LIMIT: Max tiles ({MAX_TILES_EVER}) reached, stopping generation")
+            return
+        
+        # Find the rightmost robot position with proper error handling
+        try:
+            # Extract robot positions - simplified filtering
+            valid_positions = []
+            for agent_id, pos in robot_positions:
+                try:
+                    if pos and len(pos) >= 2:
+                        x_pos = float(pos[0])
+                        valid_positions.append(x_pos)
+                except (TypeError, ValueError, IndexError):
+                    continue  # Skip invalid positions
+            
+            if not valid_positions:  # No valid positions found
+                return
+                
+            rightmost_x = max(valid_positions)
+            average_x = sum(valid_positions) / len(valid_positions)
+            
+            # 🎯 UPDATE PROGRESSIVE DIFFICULTY SYSTEM
+            self._update_robot_performance(rightmost_x, average_x)
+            
+        except Exception as e:
+            print(f"❌ Error processing robot positions: {e}")
+            return
+        
+        # CRITICAL SAFEGUARD: Prevent excessive tile generation
+        if len(self.tiles) >= 20:  # Emergency brake before max_active_tiles
+            print(f"⚠️ WARNING: {len(self.tiles)} active tiles, forcing cleanup")
+            self._cleanup_old_tiles()
+            return
         
         # Check if we need to generate new tiles
         distance_to_edge = self.current_right_edge - rightmost_x
+        
         if distance_to_edge <= self.generation_trigger_distance:
+            # ADDITIONAL SAFEGUARD: Minimum distance between tiles
+            if hasattr(self, 'last_generation_time'):
+                if current_time - self.last_generation_time < 5.0:  # 5 second cooldown
+                    return
+            
+            print(f"🆕 Generating tile #{self.tiles_generated + 1} at distance {distance_to_edge:.1f}m from rightmost robot")
             self._generate_next_tile()
+            self.last_generation_time = current_time
             
         # Check if we need to clean up old tiles
         if len(self.tiles) > self.max_active_tiles:
@@ -160,6 +218,44 @@ class DynamicWorldManager:
         
         # Update left wall if needed (push it forward if robots are getting too spread out)
         self._update_left_wall_position(robot_positions)
+
+    def _update_robot_performance(self, max_distance: float, avg_distance: float):
+        """Update robot performance tracking and adjust difficulty accordingly."""
+        try:
+            tracker = self.robot_performance_tracker
+            
+            # Add new performance samples
+            tracker['max_distances'].append(max_distance)
+            tracker['average_distances'].append(avg_distance)
+            
+            # Keep only recent samples
+            if len(tracker['max_distances']) > tracker['performance_samples']:
+                tracker['max_distances'].pop(0)
+            if len(tracker['average_distances']) > tracker['performance_samples']:
+                tracker['average_distances'].pop(0)
+            
+            # Calculate difficulty multiplier based on robot progress
+            if len(tracker['max_distances']) >= 5:  # Need at least 5 samples
+                avg_max_distance = sum(tracker['max_distances']) / len(tracker['max_distances'])
+                
+                # Calculate progress beyond baseline
+                progress_ratio = max(0.0, (avg_max_distance - tracker['baseline_distance']) / 200.0)
+                
+                # Scale difficulty from 0.3 (easy) to 1.2 (hard) based on progress
+                new_difficulty = 0.3 + (progress_ratio * 0.9)
+                new_difficulty = min(1.2, max(0.3, new_difficulty))  # Clamp to reasonable range
+                
+                # Smooth transition (only change by 10% at a time)
+                old_difficulty = tracker['difficulty_multiplier']
+                tracker['difficulty_multiplier'] = old_difficulty * 0.9 + new_difficulty * 0.1
+                
+                # Log difficulty changes
+                if abs(tracker['difficulty_multiplier'] - old_difficulty) > 0.05:
+                    print(f"🎯 Difficulty adjusted: {old_difficulty:.2f} → {tracker['difficulty_multiplier']:.2f} "
+                          f"(progress: {avg_max_distance:.1f}m)")
+            
+        except Exception as e:
+            print(f"❌ Error updating robot performance: {e}")
 
     def _generate_next_tile(self):
         """Generate the next world tile to the right."""
@@ -280,10 +376,10 @@ class DynamicWorldManager:
             x = random.uniform(tile.x_start + 5, tile.x_end - 5)
             
             if feature_type == 'hill':
-                # Create small hill
-                y = random.uniform(2, 8)
-                width = random.uniform(8, 15)
-                height = random.uniform(3, 6)
+                # 🤖 ROBOT-SCALE: Much smaller hills for 1.5m robots
+                y = random.uniform(1, 3)  # Lower y position
+                width = random.uniform(3, 6)  # Reduced from 8-15 to 3-6
+                height = random.uniform(1, 2.5)  # Reduced from 3-6 to 1-2.5
                 
                 hill_body = self.world.CreateStaticBody(position=(x, y))
                 hill_fixture = hill_body.CreateFixture(
@@ -300,16 +396,17 @@ class DynamicWorldManager:
                 hill_body.userData = {
                     'type': 'terrain_hill',
                     'tile_id': tile.id,
-                    'biome': tile.biome.value
+                    'biome': tile.biome.value,
+                    'color': biome_config['color']
                 }
                 
                 tile.ground_bodies.append(hill_body)
                 
             elif feature_type == 'platform':
-                # Create elevated platform
-                y = random.uniform(8, 15)
-                width = random.uniform(12, 25)
-                height = random.uniform(1, 3)
+                # 🤖 ROBOT-SCALE: Much smaller platforms for 1.5m robots
+                y = random.uniform(3, 6)  # Reduced from 8-15 to 3-6
+                width = random.uniform(4, 8)  # Reduced from 12-25 to 4-8
+                height = random.uniform(0.5, 1.5)  # Reduced from 1-3 to 0.5-1.5
                 
                 platform_body = self.world.CreateStaticBody(position=(x, y))
                 platform_fixture = platform_body.CreateFixture(
@@ -326,7 +423,8 @@ class DynamicWorldManager:
                 platform_body.userData = {
                     'type': 'terrain_platform',
                     'tile_id': tile.id,
-                    'biome': tile.biome.value
+                    'biome': tile.biome.value,
+                    'color': biome_config['color']
                 }
                 
                 tile.ground_bodies.append(platform_body)
@@ -335,44 +433,64 @@ class DynamicWorldManager:
             print(f"❌ Error generating terrain feature: {e}")
 
     def _generate_tile_obstacles(self, tile: WorldTile):
-        """Generate obstacles for a tile based on its biome."""
+        """Generate obstacles for a tile based on its biome and progressive difficulty."""
         try:
             biome_config = self._get_biome_config(tile.biome)
             obstacle_count = random.randint(biome_config['min_obstacles'], biome_config['max_obstacles'])
             
-            for _ in range(obstacle_count):
+            # CRITICAL SAFEGUARD: Limit obstacles per tile to prevent physics overload
+            MAX_OBSTACLES_PER_TILE = 3  # Reduced from 5 to 3
+            obstacle_count = min(obstacle_count, MAX_OBSTACLES_PER_TILE)
+            
+            print(f"🎯 Generating {obstacle_count} obstacles for tile {tile.id} ({tile.biome.value})")
+            
+            # 🤖 ROBOT-SCALE: Much smaller obstacles for 1.5m robots
+            for i in range(obstacle_count):
                 # Random position within tile
                 x = random.uniform(tile.x_start + 8, tile.x_end - 8)
-                y = random.uniform(2, 20)
+                y = random.uniform(1, 4)  # Lower y position for small obstacles
                 
-                # Random obstacle size based on biome
-                size = random.uniform(biome_config['obstacle_size_min'], biome_config['obstacle_size_max'])
-                height = random.uniform(size * 0.5, size * 2.0)
+                # 🤖 FIXED: Much smaller obstacles appropriate for 1.5m robots
+                size = random.uniform(0.8, 2.5)  # Small obstacles: 0.8m to 2.5m
+                height = random.uniform(0.8, 3.0)  # Manageable height: 0.8m to 3.0m
+                
+                print(f"   Creating obstacle {i+1}: size={size:.1f}m, height={height:.1f}m at ({x:.1f}, {y:.1f})")
                 
                 # Create obstacle body
-                obstacle_body = self.world.CreateStaticBody(position=(x, y))
-                obstacle_fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2PolygonShape(box=(size / 2, height / 2)),
-                    density=0.0,
-                    friction=biome_config['obstacle_friction'],
-                    restitution=0.3,
-                    filter=b2.b2Filter(
-                        categoryBits=0x0004,  # OBSTACLE_CATEGORY
-                        maskBits=0x0002  # AGENT_CATEGORY
+                try:
+                    obstacle_body = self.world.CreateStaticBody(position=(x, y))
+                    obstacle_fixture = obstacle_body.CreateFixture(
+                        shape=b2.b2PolygonShape(box=(size / 2, height / 2)),
+                        density=0.0,
+                        friction=biome_config['obstacle_friction'],
+                        restitution=0.3,
+                        filter=b2.b2Filter(
+                            categoryBits=0x0004,  # OBSTACLE_CATEGORY
+                            maskBits=0x0002  # AGENT_CATEGORY
+                        )
                     )
-                )
-                
-                obstacle_body.userData = {
-                    'type': 'dynamic_obstacle',
-                    'tile_id': tile.id,
-                    'biome': tile.biome.value,
-                    'obstacle_type': random.choice(biome_config['obstacle_types'])
-                }
-                
-                tile.obstacle_bodies.append(obstacle_body)
+                    
+                    obstacle_body.userData = {
+                        'type': 'dynamic_obstacle',
+                        'tile_id': tile.id,
+                        'biome': tile.biome.value,
+                        'obstacle_type': random.choice(biome_config['obstacle_types']),
+                        'color': biome_config['color']
+                    }
+                    
+                    tile.obstacle_bodies.append(obstacle_body)
+                    print(f"   ✅ Successfully created obstacle {i+1}")
+                    
+                except Exception as obstacle_error:
+                    print(f"⚠️ Failed to create obstacle {i} for tile {tile.id}: {obstacle_error}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
                 
         except Exception as e:
             print(f"❌ Error generating tile obstacles: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _generate_tile_food_sources(self, tile: WorldTile):
         """Generate food sources for a tile based on its biome."""
@@ -424,7 +542,8 @@ class DynamicWorldManager:
                     food_type=food_type,
                     amount=base_amount,
                     regeneration_rate=regen_rate,
-                    max_capacity=max_capacity
+                    max_capacity=max_capacity,
+                    source="dynamic_world"  # 🌍 Mark as dynamic world food source
                 )
                 
                 tile.food_sources.append(food_source)
@@ -441,75 +560,81 @@ class DynamicWorldManager:
         configs = {
             BiomeType.PLAINS: {
                 'ground_friction': 0.7,
-                'min_features': 1, 'max_features': 3,
+                'min_features': 0, 'max_features': 2,  # Reduced features
                 'terrain_features': ['hill', 'platform'],
-                'min_obstacles': 2, 'max_obstacles': 5,
-                'obstacle_size_min': 3.0, 'obstacle_size_max': 8.0,
+                'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
+                'obstacle_size_min': 0.8, 'obstacle_size_max': 2.0,  # 🤖 Much smaller obstacles
                 'obstacle_friction': 0.6,
                 'obstacle_types': ['rock', 'bush', 'tree'],
                 'min_food_sources': 3, 'max_food_sources': 6,
                 'food_types': ['plants', 'seeds', 'insects'],
-                'food_regen_multiplier': 1.2
+                'food_regen_multiplier': 1.2,
+                'color': (0.5, 0.8, 0.3)  # Light green
             },
             BiomeType.FOREST: {
                 'ground_friction': 0.8,
-                'min_features': 2, 'max_features': 4,
+                'min_features': 1, 'max_features': 2,  # Reduced features
                 'terrain_features': ['hill', 'platform'],
-                'min_obstacles': 4, 'max_obstacles': 8,
-                'obstacle_size_min': 4.0, 'obstacle_size_max': 12.0,
+                'min_obstacles': 1, 'max_obstacles': 3,  # Reduced obstacles
+                'obstacle_size_min': 1.0, 'obstacle_size_max': 2.5,  # 🤖 Much smaller obstacles
                 'obstacle_friction': 0.8,
                 'obstacle_types': ['tree', 'log', 'boulder'],
                 'min_food_sources': 4, 'max_food_sources': 8,
                 'food_types': ['plants', 'seeds', 'insects', 'meat'],
-                'food_regen_multiplier': 1.5
+                'food_regen_multiplier': 1.5,
+                'color': (0.2, 0.6, 0.2)  # Dark green
             },
             BiomeType.DESERT: {
                 'ground_friction': 0.5,
-                'min_features': 0, 'max_features': 2,
+                'min_features': 0, 'max_features': 1,  # Reduced features
                 'terrain_features': ['hill'],
-                'min_obstacles': 1, 'max_obstacles': 3,
-                'obstacle_size_min': 2.0, 'obstacle_size_max': 6.0,
+                'min_obstacles': 0, 'max_obstacles': 1,  # Reduced obstacles
+                'obstacle_size_min': 0.6, 'obstacle_size_max': 1.8,  # 🤖 Much smaller obstacles
                 'obstacle_friction': 0.4,
                 'obstacle_types': ['cactus', 'rock', 'dune'],
                 'min_food_sources': 1, 'max_food_sources': 3,
                 'food_types': ['insects', 'seeds'],
-                'food_regen_multiplier': 0.7
+                'food_regen_multiplier': 0.7,
+                'color': (0.9, 0.8, 0.4)  # Sandy yellow
             },
             BiomeType.ROCKY: {
                 'ground_friction': 0.9,
-                'min_features': 3, 'max_features': 6,
+                'min_features': 1, 'max_features': 3,  # Reduced features
                 'terrain_features': ['hill', 'platform'],
-                'min_obstacles': 3, 'max_obstacles': 7,
-                'obstacle_size_min': 5.0, 'obstacle_size_max': 15.0,
+                'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
+                'obstacle_size_min': 1.2, 'obstacle_size_max': 3.0,  # 🤖 Much smaller obstacles
                 'obstacle_friction': 0.9,
                 'obstacle_types': ['boulder', 'cliff', 'rock'],
                 'min_food_sources': 2, 'max_food_sources': 4,
                 'food_types': ['insects', 'meat'],
-                'food_regen_multiplier': 0.8
+                'food_regen_multiplier': 0.8,
+                'color': (0.6, 0.5, 0.4)  # Gray-brown
             },
             BiomeType.WETLANDS: {
                 'ground_friction': 0.4,
-                'min_features': 1, 'max_features': 3,
+                'min_features': 0, 'max_features': 2,  # Reduced features
                 'terrain_features': ['platform'],
-                'min_obstacles': 2, 'max_obstacles': 4,
-                'obstacle_size_min': 3.0, 'obstacle_size_max': 8.0,
+                'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
+                'obstacle_size_min': 0.8, 'obstacle_size_max': 2.2,  # 🤖 Much smaller obstacles
                 'obstacle_friction': 0.3,
                 'obstacle_types': ['marsh', 'reed', 'mud'],
                 'min_food_sources': 5, 'max_food_sources': 9,
                 'food_types': ['plants', 'insects', 'seeds'],
-                'food_regen_multiplier': 1.8
+                'food_regen_multiplier': 1.8,
+                'color': (0.3, 0.7, 0.6)  # Teal
             },
             BiomeType.VOLCANIC: {
                 'ground_friction': 0.6,
-                'min_features': 2, 'max_features': 4,
+                'min_features': 1, 'max_features': 2,  # Reduced features
                 'terrain_features': ['hill'],
-                'min_obstacles': 3, 'max_obstacles': 6,
-                'obstacle_size_min': 4.0, 'obstacle_size_max': 10.0,
+                'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
+                'obstacle_size_min': 1.0, 'obstacle_size_max': 2.8,  # 🤖 Much smaller obstacles
                 'obstacle_friction': 0.7,
                 'obstacle_types': ['lava_rock', 'crater', 'ash'],
                 'min_food_sources': 1, 'max_food_sources': 2,
                 'food_types': ['meat', 'insects'],
-                'food_regen_multiplier': 0.5
+                'food_regen_multiplier': 0.5,
+                'color': (0.8, 0.3, 0.2)  # Red-orange
             }
         }
         
@@ -580,8 +705,19 @@ class DynamicWorldManager:
             if not robot_positions or not self.tiles:
                 return
             
-            # Find leftmost robot
-            leftmost_x = min(pos[1][0] for _, pos in robot_positions)
+            # Find leftmost robot with proper error handling
+            try:
+                # Filter valid robot positions first
+                valid_positions = [pos[1][0] for _, pos in robot_positions if isinstance(pos[1], tuple) and len(pos[1]) >= 2]
+                
+                if not valid_positions:  # No valid positions found
+                    return
+                    
+                leftmost_x = min(valid_positions)
+                
+            except (ValueError, IndexError, TypeError) as e:
+                print(f"❌ Error accessing leftmost robot positions: {e}")
+                return
             
             # Find leftmost active tile
             leftmost_tile_x = min(tile.x_start for tile in self.tiles.values() if tile.active)
@@ -629,9 +765,22 @@ class DynamicWorldManager:
         active_tiles = [tile for tile in self.tiles.values() if tile.active]
         
         biome_counts = {}
+        biome_colors = {}
+        biome_configs = {}
+        
         for tile in active_tiles:
             biome_name = tile.biome.value
             biome_counts[biome_name] = biome_counts.get(biome_name, 0) + 1
+            
+            # Get biome color and config info
+            if biome_name not in biome_colors:
+                config = self._get_biome_config(tile.biome)
+                biome_colors[biome_name] = config.get('color', (0.5, 0.5, 0.5))
+                biome_configs[biome_name] = {
+                    'obstacles': f"{config['min_obstacles']}-{config['max_obstacles']}",
+                    'food_sources': f"{config['min_food_sources']}-{config['max_food_sources']}",
+                    'food_regen_multiplier': config['food_regen_multiplier']
+                }
         
         total_food_sources = sum(len(tile.food_sources) for tile in active_tiles)
         total_obstacles = sum(len(tile.obstacle_bodies) for tile in active_tiles)
@@ -644,9 +793,15 @@ class DynamicWorldManager:
             'left_wall_position': self.left_wall_position,
             'world_span': self.current_right_edge - self.left_wall_position,
             'biome_distribution': biome_counts,
+            'biome_colors': biome_colors,  # RGB colors for each biome
+            'biome_configs': biome_configs,  # Configuration details for each biome
             'total_food_sources': total_food_sources,
             'total_obstacles': total_obstacles,
-            'last_generation_time': self.last_generation_time
+            'last_generation_time': self.last_generation_time,
+            # 🎯 PROGRESSIVE DIFFICULTY STATUS
+            'difficulty_multiplier': self.robot_performance_tracker['difficulty_multiplier'],
+            'robot_max_distance': self.robot_performance_tracker['max_distances'][-1] if self.robot_performance_tracker['max_distances'] else 0.0,
+            'performance_samples': len(self.robot_performance_tracker['max_distances'])
         }
 
     def get_tile_at_position(self, x: float) -> Optional[WorldTile]:

@@ -222,7 +222,7 @@ class QLearningMetrics:
 class QLearningEvaluator:
     """Evaluates Q-learning performance across different agent types."""
     
-    def __init__(self, evaluation_window: int = 1000, update_frequency: int = 100):
+    def __init__(self, evaluation_window: int = 1000, update_frequency: int = 125):  # Increased by 25%
         self.evaluation_window = evaluation_window
         self.update_frequency = update_frequency
         
@@ -647,13 +647,16 @@ class QLearningEvaluator:
         
         if len(predictions) > 0 and len(actual_rewards) > 0:
             min_len = min(len(predictions), len(actual_rewards))
-            pred_array = np.array(predictions[-min_len:])
-            actual_array = np.array(actual_rewards[-min_len:])
+            pred_list = predictions[-min_len:]
+            actual_list = actual_rewards[-min_len:]
             
-            errors = np.abs(pred_array - actual_array)
+            # Calculate errors manually to work with NumpySubstitute
+            errors = [abs(p - a) for p, a in zip(pred_list, actual_list)]
             value_prediction_error = float(errors[-1]) if len(errors) > 0 else 0.0
             value_prediction_mae = float(np.mean(errors))
-            value_prediction_rmse = float(np.sqrt(np.mean(errors ** 2)))
+            # Calculate RMSE manually
+            squared_errors = [e * e for e in errors]
+            value_prediction_rmse = float(np.sqrt(np.mean(squared_errors)))
         
         # Q-value analysis
         q_value_mean = float(np.mean(q_history)) if q_history else 0.0

@@ -22,6 +22,7 @@ class FoodSource:
     amount: float
     regeneration_rate: float
     max_capacity: float
+    source: str = "strategic"  # "strategic" or "dynamic_world" - identifies food source origin
     
 @dataclass
 class FoodZone:
@@ -348,7 +349,8 @@ class EcosystemDynamics:
                     food_type=food_type,
                     amount=base_amount,
                     regeneration_rate=regen_rate,
-                    max_capacity=max_capacity
+                    max_capacity=max_capacity,
+                    source="strategic"  # 🎯 Mark as strategic zone food source
                 )
                 return food_source
         
@@ -407,7 +409,8 @@ class EcosystemDynamics:
                     food_type=depleted_food.food_type,  # PRESERVE food type for consistency
                     amount=base_amount,
                     regeneration_rate=regen_rate,
-                    max_capacity=max_capacity
+                    max_capacity=max_capacity,
+                    source="strategic"  # 🎯 Mark as strategic zone food source
                 )
                 
                 return respawned_food
@@ -418,13 +421,20 @@ class EcosystemDynamics:
         """
         STRATEGIC REPLACEMENT: Instead of generating random food, ensure zones are properly maintained
         and agents are far enough from food sources to require meaningful travel.
+        
+        ⚠️ IMPORTANT: This method now preserves dynamic world food sources!
         """
         if len(agent_positions) < 2:
             return
         
         # Remove any food that's too close to agents (prevents instant rewards)
+        # BUT PRESERVE DYNAMIC WORLD FOOD SOURCES
         removed_food = []
         for food in self.food_sources[:]:  # Copy list to avoid modification during iteration
+            # 🌍 SKIP DYNAMIC WORLD FOOD SOURCES - Don't remove them!
+            if hasattr(food, 'source') and food.source == 'dynamic_world':
+                continue  # Preserve dynamic world food sources
+            
             too_close_to_agent = False
             for agent_id, agent_pos in agent_positions:
                 distance_to_agent = math.sqrt((food.position[0] - agent_pos[0])**2 + 
@@ -439,8 +449,8 @@ class EcosystemDynamics:
         
         # Log removal of food that was too close to agents
         if removed_food:
-            print(f"🚫 Removed {len(removed_food)} food sources too close to agents (<{self.min_distance_from_agents}m)")
-            print(f"   🎯 This ensures robots must travel meaningful distances for rewards")
+            print(f"🚫 Removed {len(removed_food)} strategic food sources too close to agents (<{self.min_distance_from_agents}m)")
+            print(f"   🌍 Dynamic world food sources preserved for continuous exploration")
         
         # Ensure all zones have adequate food (but not too close to agents)
         self._maintain_zone_integrity(agent_positions)
@@ -511,7 +521,8 @@ class EcosystemDynamics:
                     food_type=food_type,
                     amount=base_amount,
                     regeneration_rate=regen_rate,
-                    max_capacity=max_capacity
+                    max_capacity=max_capacity,
+                    source="strategic"  # 🎯 Mark as strategic zone food source
                 )
                 self.food_sources.append(food_source)
                 return True

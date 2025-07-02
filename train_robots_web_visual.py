@@ -1103,6 +1103,9 @@ HTML_TEMPLATE = """
 
             ctx.restore(); // Restore to pre-camera transform state
             
+            // 🐛 DEBUG: Always draw debug info (overlay, not affected by camera transform)
+            drawDebugInfo(ctx);
+            
             // Draw FPS counters (overlay, not affected by camera transform)
             if (showFpsCounters) {
                 drawFpsCounters(data);
@@ -1144,10 +1147,24 @@ HTML_TEMPLATE = """
                 const [x, y] = obstacle.position;
                 const size = obstacle.size;
                 
-                // Color based on danger level
-                const red = Math.floor(100 + (dangerLevel * 155));
-                const green = Math.floor(150 - (dangerLevel * 100));
-                const blue = Math.floor(100 - (dangerLevel * 50));
+                // 🌍 USE BIOME COLORS for dynamic world obstacles
+                let red, green, blue;
+                if (obstacle.is_dynamic_world && obstacle.biome_color) {
+                    // Convert biome colors from 0-1 range to 0-255 range
+                    red = Math.floor(obstacle.biome_color[0] * 255);
+                    green = Math.floor(obstacle.biome_color[1] * 255);
+                    blue = Math.floor(obstacle.biome_color[2] * 255);
+                    
+                    // Slightly darken for obstacles to distinguish from terrain
+                    red = Math.floor(red * 0.8);
+                    green = Math.floor(green * 0.8);
+                    blue = Math.floor(blue * 0.8);
+                } else {
+                    // Fallback to danger level coloring for non-dynamic world obstacles
+                    red = Math.floor(100 + (dangerLevel * 155));
+                    green = Math.floor(150 - (dangerLevel * 100));
+                    blue = Math.floor(100 - (dangerLevel * 50));
+                }
                 
                 ctx.fillStyle = `rgba(${red}, ${green}, ${blue}, 0.6)`;
                 ctx.strokeStyle = `rgb(${red}, ${green}, ${blue})`;
@@ -1588,6 +1605,15 @@ HTML_TEMPLATE = """
         let lastFetchTime = 0;
         const fetchInterval = 33; // ~30 FPS instead of 60 FPS for performance
         
+        // 🐛 DEBUG: Add debug state tracking
+        let debugInfo = {
+            fetchCount: 0,
+            lastFetchSuccess: null,
+            lastDataSize: 0,
+            errors: [],
+            renderCount: 0
+        };
+
         function fetchData() {
             const now = Date.now();
             if (now - lastFetchTime < fetchInterval) {
@@ -1596,26 +1622,145 @@ HTML_TEMPLATE = """
             }
             lastFetchTime = now;
             
+            debugInfo.fetchCount++;
+            console.log(`🐛 DEBUG: Fetch attempt #${debugInfo.fetchCount} at ${new Date().toLocaleTimeString()}`);
+            
             // Send canvas dimensions, camera position, and culling preference for viewport culling
             const canvasWidth = canvas.width;
             const canvasHeight = canvas.height;
             const cullingParam = viewportCullingEnabled ? '&viewport_culling=true' : '&viewport_culling=false';
             const cameraParam = `&camera_x=${cameraPosition.x}&camera_y=${cameraPosition.y}`;
             
-            fetch(`./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}${cullingParam}${cameraParam}`)
-                .then(response => response.json())
+            const url = `./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}${cullingParam}${cameraParam}`;
+            console.log(`🐛 DEBUG: Fetching data from: ${url}`);
+            
+            fetch(url)
+                .then(response => {
+                    console.log(`🐛 DEBUG: Response status: ${response.status} ${response.statusText}`);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
+                    debugInfo.lastFetchSuccess = new Date();
+                    debugInfo.lastDataSize = JSON.stringify(data).length;
+                    console.log(`🐛 DEBUG: Data received - Size: ${debugInfo.lastDataSize} bytes`);
+                    console.log(`🐛 DEBUG: Data keys: ${Object.keys(data).join(', ')}`);
+                    
+                    // Log specific data counts
+                    if (data.shapes && data.shapes.robots) {
+                        console.log(`🐛 DEBUG: Found ${data.shapes.robots.length} robots`);
+                    } else {
+                        console.log(`🐛 DEBUG: ⚠️ No robots data found in response`);
+                    }
+                    
+                    if (data.environment && data.environment.obstacles) {
+                        console.log(`🐛 DEBUG: Found ${data.environment.obstacles.length} obstacles`);
+                    } else {
+                        console.log(`🐛 DEBUG: ⚠️ No obstacles data found in response`);
+                    }
+                    
+                    if (data.ecosystem && data.ecosystem.food_sources) {
+                        console.log(`🐛 DEBUG: Found ${data.ecosystem.food_sources.length} food sources`);
+                    } else {
+                        console.log(`🐛 DEBUG: ⚠️ No food sources data found in response`);
+                    }
+                    
                     window.lastData = data; // Store latest data globally
                     drawWorld(data);
                     updateStats(data);
                     requestAnimationFrame(fetchData);
                 })
                 .catch(error => {
-                    console.error('Error fetching data:', error);
+                    debugInfo.errors.push({
+                        time: new Date(),
+                        error: error.toString()
+                    });
+                    console.error('🐛 DEBUG: ❌ Error fetching data:', error);
+                    console.log(`🐛 DEBUG: Total errors so far: ${debugInfo.errors.length}`);
+                    displayDebugError(error.toString());
                     setTimeout(fetchData, 1000); // Try again after a second
                 });
         }
         
+        // 🐛 DEBUG: Visual debug display function
+        function displayDebugError(errorMessage) {
+            // Create or update debug overlay
+            let debugOverlay = document.getElementById('debug-overlay');
+            if (!debugOverlay) {
+                debugOverlay = document.createElement('div');
+                debugOverlay.id = 'debug-overlay';
+                debugOverlay.style.cssText = `
+                    position: fixed;
+                    top: 10px;
+                    left: 10px;
+                    background: rgba(255, 0, 0, 0.9);
+                    color: white;
+                    padding: 10px;
+                    border-radius: 5px;
+                    font-family: monospace;
+                    font-size: 12px;
+                    z-index: 10000;
+                    max-width: 400px;
+                    white-space: pre-wrap;
+                `;
+                document.body.appendChild(debugOverlay);
+            }
+            
+            const timestamp = new Date().toLocaleTimeString();
+            debugOverlay.innerHTML = `🐛 DEBUG ERROR [${timestamp}]\n${errorMessage}\n\nPress F12 to see console for full details.`;
+            
+            // Auto-hide after 10 seconds
+            setTimeout(() => {
+                if (debugOverlay.style.opacity !== '0.3') {
+                    debugOverlay.style.opacity = '0.3';
+                }
+            }, 10000);
+        }
+
+        // 🐛 DEBUG: Status display on canvas
+        function drawDebugInfo(ctx) {
+            debugInfo.renderCount++;
+            
+            // Save context
+            ctx.save();
+            
+            // Reset transform for UI overlay
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            
+            // Background
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.fillRect(10, 80, 350, 140);
+            
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(10, 80, 350, 140);
+            
+            // Text
+            ctx.fillStyle = '#00FF00';
+            ctx.font = '14px monospace';
+            ctx.textAlign = 'left';
+            
+            const lines = [
+                `🐛 DEBUG STATUS`,
+                `Fetch Count: ${debugInfo.fetchCount}`,
+                `Render Count: ${debugInfo.renderCount}`,
+                `Last Success: ${debugInfo.lastFetchSuccess ? debugInfo.lastFetchSuccess.toLocaleTimeString() : 'Never'}`,
+                `Data Size: ${debugInfo.lastDataSize} bytes`,
+                `Errors: ${debugInfo.errors.length}`,
+                `Canvas: ${canvas.width}x${canvas.height}`,
+                `Camera: (${cameraPosition.x.toFixed(1)}, ${cameraPosition.y.toFixed(1)})`,
+                `Last Data Keys: ${window.lastData ? Object.keys(window.lastData).slice(0, 3).join(', ') + '...' : 'None'}`
+            ];
+            
+            lines.forEach((line, i) => {
+                ctx.fillText(line, 20, 100 + i * 16);
+            });
+            
+            ctx.restore();
+        }
+
         // Start the main loop
         fetchData();
 
@@ -2095,8 +2240,9 @@ class TrainingEnvironment:
         self.terrain_collision_bodies = []  # Store terrain collision bodies
         self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
         
+        # 🌍 DISABLE static terrain generation - let dynamic world handle everything
         # Generate realistic terrain at startup
-        self._generate_realistic_terrain()
+        # self._generate_realistic_terrain()  # DISABLED: Using dynamic world biome system instead
 
         # Initialize elite robot management system
         self.elite_manager = EliteManager(
@@ -2576,9 +2722,10 @@ class TrainingEnvironment:
         # Clean up existing terrain
         self._cleanup_all_terrain()
         
+        # 🌍 DISABLE static terrain generation - let dynamic world handle everything
         # Update style and regenerate
         self.terrain_style = new_style
-        self._generate_realistic_terrain()
+        # self._generate_realistic_terrain()  # DISABLED: Using dynamic world biome system instead
         
         print(f"✅ Terrain changed to '{new_style}' style")
         return True
@@ -2756,17 +2903,45 @@ class TrainingEnvironment:
             # Update dynamic world generation based on robot positions
             if self.dynamic_world_manager:
                 try:
+                    # PERFORMANCE MONITOR: Track dynamic world update time
+                    world_update_start = time.time()
+                    
                     # Get robot positions for world expansion
                     robot_positions = []
                     for agent in self.agents:
                         if not getattr(agent, '_destroyed', False) and agent.body:
                             robot_positions.append((agent.id, (agent.body.position.x, agent.body.position.y)))
                     
+                    # SAFEGUARD: Skip update if too many robots (performance protection)
+                    if len(robot_positions) > 100:
+                        print(f"⚠️ PERFORMANCE: Skipping dynamic world update ({len(robot_positions)} robots)")
+                        return
+                    
                     # Update dynamic world (generates new tiles as robots progress)
                     self.dynamic_world_manager.update(robot_positions)
                     
+                    # PERFORMANCE MONITOR: Warn if update takes too long
+                    world_update_time = time.time() - world_update_start
+                    if world_update_time > 0.5:  # More than 500ms is problematic
+                        print(f"🐌 SLOW: Dynamic world update took {world_update_time:.2f}s")
+                        
+                        # Get world status for debugging
+                        status = self.dynamic_world_manager.get_world_status()
+                        print(f"   📊 World status: {status.get('active_tiles', 0)} tiles, {status.get('total_obstacles', 0)} obstacles")
+                    
                 except Exception as e:
-                    print(f"⚠️ Error updating dynamic world: {e}")
+                    print(f"❌ Error updating dynamic world: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # EMERGENCY SAFEGUARD: Disable dynamic world if it keeps failing
+                    if not hasattr(self, '_dynamic_world_errors'):
+                        self._dynamic_world_errors = 0
+                    self._dynamic_world_errors += 1
+                    
+                    if self._dynamic_world_errors >= 5:
+                        print(f"🚨 EMERGENCY: Disabling dynamic world after {self._dynamic_world_errors} consecutive errors")
+                        self.dynamic_world_manager = None
             
         except Exception as e:
             print(f"⚠️ Error updating ecosystem dynamics: {e}")
@@ -3432,7 +3607,23 @@ class TrainingEnvironment:
                 self.robot_stats[agent_id]['steps_alive'] += 1
                 self.robot_stats[agent_id]['total_distance'] = total_distance
                 self.robot_stats[agent_id]['fitness'] = total_distance
-                self.robot_stats[agent_id]['episode_reward'] = getattr(agent, 'total_reward', 0.0)
+                
+                # 🌊 INFINITE EXPLORATION: Use rolling rewards instead of total_reward
+                if hasattr(agent, 'get_current_performance'):
+                    performance = agent.get_current_performance()
+                    self.robot_stats[agent_id]['reward_rate'] = performance['reward_rate']
+                    self.robot_stats[agent_id]['short_term_avg'] = performance['short_term_avg'] 
+                    self.robot_stats[agent_id]['medium_term_avg'] = performance['medium_term_avg']
+                    self.robot_stats[agent_id]['performance_trend'] = performance['performance_trend']
+                    self.robot_stats[agent_id]['achievement_count'] = performance['achievement_count']
+                    self.robot_stats[agent_id]['fitness_score'] = agent.get_fitness_score() if hasattr(agent, 'get_fitness_score') else total_distance
+                else:
+                    # Fallback for backward compatibility
+                    self.robot_stats[agent_id]['reward_rate'] = getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1))
+                    self.robot_stats[agent_id]['fitness_score'] = total_distance
+                
+                # Keep episode_reward for backward compatibility but mark as deprecated
+                self.robot_stats[agent_id]['episode_reward'] = getattr(agent, 'total_reward', 0.0)  # DEPRECATED
                 self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
                 
             except Exception as e:
@@ -3626,6 +3817,15 @@ class TrainingEnvironment:
         last_mlflow_log = time.time()
         
         step_count = 0
+        
+        # CRITICAL SAFEGUARD: Emergency shutdown conditions
+        emergency_shutdown = {
+            'max_consecutive_slow_frames': 10,
+            'consecutive_slow_frames': 0,
+            'max_physics_bodies': 1000,
+            'max_memory_mb': 2000,
+            'last_emergency_check': last_time
+        }
 
         while self.is_running:
             frame_start_time = time.time()
@@ -3635,6 +3835,68 @@ class TrainingEnvironment:
             
             # Add frame time to the accumulator
             accumulator += frame_time
+            
+            # CRITICAL SAFEGUARD: Emergency shutdown detection
+            if current_time - emergency_shutdown['last_emergency_check'] >= 5.0:  # Check every 5 seconds
+                try:
+                    import psutil
+                    import os
+                    process = psutil.Process(os.getpid())
+                    memory_mb = process.memory_info().rss / 1024 / 1024
+                    
+                    # Count physics bodies
+                    physics_body_count = 0
+                    for agent in self.agents:
+                        if hasattr(agent, 'body') and agent.body:
+                            physics_body_count += 1
+                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                            physics_body_count += 1
+                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                            physics_body_count += 1
+                        if hasattr(agent, 'wheels') and agent.wheels:
+                            physics_body_count += len(agent.wheels)
+                    
+                    # Add dynamic world bodies
+                    if self.dynamic_world_manager:
+                        status = self.dynamic_world_manager.get_world_status()
+                        physics_body_count += status.get('total_obstacles', 0)
+                    
+                    # Check emergency conditions
+                    emergency_triggered = False
+                    
+                    if memory_mb > emergency_shutdown['max_memory_mb']:
+                        print(f"🚨 EMERGENCY: Memory usage {memory_mb:.1f}MB exceeds limit {emergency_shutdown['max_memory_mb']}MB")
+                        emergency_triggered = True
+                    
+                    if physics_body_count > emergency_shutdown['max_physics_bodies']:
+                        print(f"🚨 EMERGENCY: Physics bodies {physics_body_count} exceeds limit {emergency_shutdown['max_physics_bodies']}")
+                        emergency_triggered = True
+                    
+                    if frame_time > 0.5:  # Frame took more than 500ms
+                        emergency_shutdown['consecutive_slow_frames'] += 1
+                        print(f"🐌 SLOW FRAME: {frame_time:.2f}s ({emergency_shutdown['consecutive_slow_frames']}/{emergency_shutdown['max_consecutive_slow_frames']})")
+                        
+                        if emergency_shutdown['consecutive_slow_frames'] >= emergency_shutdown['max_consecutive_slow_frames']:
+                            print(f"🚨 EMERGENCY: {emergency_shutdown['consecutive_slow_frames']} consecutive slow frames")
+                            emergency_triggered = True
+                    else:
+                        emergency_shutdown['consecutive_slow_frames'] = 0
+                    
+                    if emergency_triggered:
+                        print("🚨 TRIGGERING EMERGENCY SHUTDOWN TO PREVENT SYSTEM FREEZE")
+                        if self.dynamic_world_manager:
+                            print("🧹 Cleaning up dynamic world...")
+                            self.dynamic_world_manager.cleanup_all_tiles()
+                            self.dynamic_world_manager = None
+                        
+                        self.is_running = False
+                        break
+                    
+                    emergency_shutdown['last_emergency_check'] = current_time
+                    
+                except Exception as e:
+                    print(f"⚠️ Error in emergency check: {e}")
+                    emergency_shutdown['last_emergency_check'] = current_time
             
             # Fixed-step physics updates with enhanced thread safety
             while accumulator >= self.dt:
@@ -3733,13 +3995,11 @@ class TrainingEnvironment:
                                             agent.steps += 1
 
                                     # Check for reset conditions but don't reset immediately
+                                    # 🌍 INFINITE WORLD: Only reset if agents fall off the world, no episode limits!
                                     if agent.body and agent.body.position.y < self.world_bounds_y:
                                         agents_to_reset.append(('world_bounds', agent))
-                                    else:
-                                        # MORPHOLOGY-AWARE EPISODE LENGTH: Complex robots get more time
-                                        agent_episode_length = self.get_morphology_aware_episode_length(agent)
-                                        if agent.steps >= agent_episode_length:
-                                            agents_to_reset.append(('episode_end', agent))
+                                    # REMOVED: Episode-based resets for infinite world exploration
+                                    # Robots can now explore forever without being teleported back!
                                 except Exception as e:
                                     print(f"⚠️  Error updating agent {agent.id}: {e}")
                                     import traceback
@@ -3754,26 +4014,11 @@ class TrainingEnvironment:
                                     
                                 try:
                                     if reset_type == 'world_bounds':
-                                        # Always just reset position for world bounds (agent fell)
+                                        # 🌍 INFINITE WORLD: Only reset position when agent falls off world
+                                        # Preserve learning and continue exploration from spawn point
                                         agent.reset_position()
-                                    elif reset_type == 'episode_end':
-                                        # LEARNING PRESERVATION: Use intelligent reset strategy
-                                        preserve_learning = self.should_preserve_learning_on_reset(agent)
-                                        
-                                        if preserve_learning:
-                                            # Preserve learning: only reset position and physical state
-                                            agent.reset_position()
-                                            # Reset step counter but keep learning progress
-                                            agent.steps = 0
-                                            # Log learning preservation for complex robots
-                                            if hasattr(agent, 'physical_params'):
-                                                joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
-                                                if joints > 4:
-                                                    print(f"🧠 Preserved learning for {joints}-joint robot {str(agent.id)[:8]} (reward: {agent.total_reward:.3f})")
-                                        else:
-                                            # Full reset: agent isn't learning effectively
-                                            agent.reset()  # This resets learning but preserves Q-table structure
-                                            agent.reset_position()
+                                        print(f"🌍 Agent {str(agent.id)[:8]} fell off world - respawned to continue infinite exploration!")
+                                    # REMOVED: episode_end handling - no more episode limits!
                                             
                                 except Exception as e:
                                     print(f"⚠️  Error resetting agent {agent.id}: {e}")
@@ -5592,12 +5837,111 @@ class TrainingEnvironment:
                         'active': True
                     })
             
+            # 🌍 ADD DYNAMIC WORLD TERRAIN with biome colors
+            if hasattr(self, 'dynamic_world_manager') and self.dynamic_world_manager:
+                try:
+                    # Get all active tiles from dynamic world
+                    for tile in self.dynamic_world_manager.tiles.values():
+                        if tile.active:
+                            biome_config = self.dynamic_world_manager._get_biome_config(tile.biome)
+                            biome_color = biome_config.get('color', (0.5, 0.5, 0.5))  # Default gray
+                            
+                            # Add ground bodies from this tile
+                            for ground_body in tile.ground_bodies:
+                                if hasattr(ground_body, 'position'):
+                                    position_array = [ground_body.position.x, ground_body.position.y]
+                                    
+                                    # Determine size from fixtures
+                                    size = 4.0  # Default
+                                    if ground_body.fixtures:
+                                        fixture = ground_body.fixtures[0]
+                                        shape = fixture.shape
+                                        if hasattr(shape, 'vertices'):
+                                            vertices = shape.vertices
+                                            if vertices:
+                                                x_coords = [v[0] for v in vertices]
+                                                y_coords = [v[1] for v in vertices]
+                                                size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
+                                    
+                                    terrain_data = {
+                                        'type': ground_body.userData.get('type', 'dynamic_terrain') if hasattr(ground_body, 'userData') and ground_body.userData else 'dynamic_terrain',
+                                        'position': position_array,
+                                        'size': size,
+                                        'height': size,
+                                        'source': 'dynamic_world',
+                                        'danger_level': 0.1,  # Ground is safe
+                                        'active': True,
+                                        'biome_color': list(biome_color),  # Convert tuple to list for JSON
+                                        'biome_type': tile.biome.value,
+                                        'is_dynamic_world': True
+                                    }
+                                    
+                                    obstacles_for_ui.append(terrain_data)
+                                
+                            # 🎯 ADD ACTUAL DYNAMIC WORLD OBSTACLES from tile.obstacle_bodies
+                            for obstacle_body in tile.obstacle_bodies:
+                                try:
+                                    if obstacle_body and hasattr(obstacle_body, 'userData') and obstacle_body.userData:
+                                        obstacle_type = obstacle_body.userData.get('type', 'dynamic_obstacle')
+                                        position = (obstacle_body.position.x, obstacle_body.position.y)
+                                        
+                                        # Get size from fixture
+                                        size = 2.0  # Default
+                                        if obstacle_body.fixtures:
+                                            fixture = obstacle_body.fixtures[0]
+                                            shape = fixture.shape
+                                            if hasattr(shape, 'radius'):  # Circle
+                                                size = shape.radius * 2
+                                            elif hasattr(shape, 'vertices'):  # Polygon box
+                                                # Get the box half-extents and convert to full size
+                                                vertices = shape.vertices
+                                                if vertices and len(vertices) >= 2:
+                                                    width = abs(vertices[1][0] - vertices[0][0])
+                                                    height = abs(vertices[2][1] - vertices[1][1]) if len(vertices) >= 3 else width
+                                                    size = max(width, height)
+                                        
+                                        # Convert position tuple to array for JavaScript
+                                        position_array = [position[0], position[1]]
+                                        
+                                        # Get biome data
+                                        biome_color = obstacle_body.userData.get('color', None)
+                                        biome_type = obstacle_body.userData.get('biome', None)
+                                        
+                                        obstacle_data = {
+                                            'type': obstacle_type,
+                                            'position': position_array,
+                                            'size': size,
+                                            'height': size,  # Height for 3D rendering
+                                            'source': 'dynamic_world',
+                                            'danger_level': 0.4,  # Medium difficulty for small obstacles
+                                            'active': True,
+                                            'biome_color': list(biome_color) if biome_color else None,  # Convert tuple to list for JSON
+                                            'biome_type': biome_type,
+                                            'is_dynamic_world': True,
+                                            'tile_id': obstacle_body.userData.get('tile_id', None)
+                                        }
+                                        
+                                        obstacles_for_ui.append(obstacle_data)
+                                        
+                                except Exception as obstacle_error:
+                                    print(f"⚠️ Error processing dynamic obstacle: {obstacle_error}")
+                                    continue
+                                    
+                except Exception as e:
+                    # Don't fail if dynamic world isn't available
+                    pass
+            
             # Add obstacles that have physics bodies (including any remaining dynamic ones)
             if hasattr(self, 'obstacle_bodies'):
                 for obstacle_id, body in self.obstacle_bodies.items():
                     if body and hasattr(body, 'userData') and body.userData:
                         obstacle_type = body.userData.get('obstacle_type', 'unknown')
                         position = (body.position.x, body.position.y)
+                        
+                        # 🎨 EXTRACT BIOME COLOR from dynamic world obstacles
+                        biome_color = body.userData.get('color', None)
+                        biome_type = body.userData.get('biome', None)
+                        is_dynamic_world = body.userData.get('type') == 'dynamic_obstacle'
                         
                         # Determine size based on fixtures
                         size = 2.0  # Default
@@ -5626,14 +5970,22 @@ class TrainingEnvironment:
                         elif obstacle_type == 'boulder':
                             danger_level = 0.6  # Medium danger
                         
-                        obstacles_for_ui.append({
+                        obstacle_data = {
                             'id': obstacle_id,
                             'type': obstacle_type,
                             'position': position_array,  # JavaScript expects array [x, y]
                             'size': size,
                             'danger_level': danger_level,  # JavaScript expects this for coloring
                             'active': True
-                        })
+                        }
+                        
+                        # 🌍 ADD BIOME COLOR INFORMATION for dynamic world obstacles
+                        if is_dynamic_world and biome_color:
+                            obstacle_data['biome_color'] = list(biome_color)  # Convert tuple to list for JSON
+                            obstacle_data['biome_type'] = biome_type
+                            obstacle_data['is_dynamic_world'] = True
+                        
+                        obstacles_for_ui.append(obstacle_data)
             
             return obstacles_for_ui
             
