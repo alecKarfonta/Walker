@@ -87,8 +87,8 @@ class CrawlingAgent(BaseAgent):
         self.prev_x = position[0]
         self.prev_food_distance = float('inf')
         
-        # Motor parameters
-        self.motor_speed = 8.0
+        # Motor parameters - reduced for stable crawling motion
+        self.motor_speed = 3.0  # Reduced from 8.0 to match evolutionary agents
         self.motor_torque = 2000.0
         
         # Physics bodies (will be created)
@@ -486,15 +486,40 @@ class CrawlingAgent(BaseAgent):
             if not hasattr(self, '_training_started'):
                 print(f"🚀 Agent {str(self.id)[:8]}: Neural network training STARTED at step {self.steps}")
                 self._training_started = True
+                # Initialize moving average tracking
+                self._loss_history = []
+                self._qval_history = []
+                self._moving_avg_window = 10  # Track last 10 values
             
             training_stats = self._learning_system.learn()
             
+            # Track moving averages
+            if training_stats:
+                loss = training_stats.get('loss', 0.0)
+                qval = training_stats.get('mean_q_value', 0.0)
+                
+                # Add to history and maintain window size
+                self._loss_history.append(loss)
+                self._qval_history.append(qval)
+                
+                if len(self._loss_history) > self._moving_avg_window:
+                    self._loss_history.pop(0)
+                if len(self._qval_history) > self._moving_avg_window:
+                    self._qval_history.pop(0)
+            
             # Log training activity every 150 steps (LCM of 30 and 50) for detailed metrics
             if self.steps % 150 == 0:
-                if training_stats:
+                if training_stats and hasattr(self, '_loss_history'):
+                    # Calculate moving averages
+                    loss_avg = sum(self._loss_history) / len(self._loss_history) if self._loss_history else 0.0
+                    qval_avg = sum(self._qval_history) / len(self._qval_history) if self._qval_history else 0.0
+                    
+                    current_loss = training_stats.get('loss', 0.0)
+                    current_qval = training_stats.get('mean_q_value', 0.0)
+                    
                     print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, "
-                            f"Loss: {training_stats.get('loss', 0.0):.4f}, "
-                            f"Q-val: {training_stats.get('mean_q_value', 0.0):.3f}")
+                            f"Loss: {current_loss:.4f} (avg: {loss_avg:.4f}), "
+                            f"Q-val: {current_qval:.3f} (avg: {qval_avg:.3f})")
                 else:
                     print(f"🧠 Agent {str(self.id)[:8]}: Training step {self.steps}, No stats returned")
             

@@ -618,7 +618,7 @@ HTML_TEMPLATE = """
                         userHasManuallyPanned = true; // flag manual pan
                         const totalZoom = cameraZoom * scale;
                         cameraPosition.x -= (e.clientX - lastMouseX) / totalZoom;
-                        cameraPosition.y += (e.clientY - lastMouseY) / totalZoom;
+                        cameraPosition.y -= (e.clientY - lastMouseY) / totalZoom; // Fixed: Changed += to -= to fix inverted Y-axis
                         lastMouseX = e.clientX;
                         lastMouseY = e.clientY;
                     }
