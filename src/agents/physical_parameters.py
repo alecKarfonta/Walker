@@ -624,6 +624,89 @@ class PhysicalParameters:
         
         return mutated
     
+    def mutate_sizes_only(self, mutation_rate: float = 0.15) -> 'PhysicalParameters':
+        """
+        Create a mutated copy with only body part size changes for respawning.
+        Preserves all complex structural features while allowing size variations.
+        
+        Args:
+            mutation_rate: Base mutation rate for size parameters (default: 0.15)
+            
+        Returns:
+            New PhysicalParameters with only size mutations applied
+        """
+        mutated = deepcopy(self)
+        
+        # Body size mutations (keep it simple - only basic dimensions)
+        if random.random() < mutation_rate:
+            mutated.body_width = self._mutate_bounded(
+                self.body_width, 0.2, 0.8, 2.5  # ±20% variation
+            )
+        if random.random() < mutation_rate:
+            mutated.body_height = self._mutate_bounded(
+                self.body_height, 0.2, 0.4, 1.2  # ±20% variation
+            )
+        
+        # Overall scale mutation (affects everything proportionally)
+        if random.random() < mutation_rate:
+            mutated.overall_scale = self._mutate_bounded(
+                self.overall_scale, 0.15, 0.7, 1.5  # ±15% size variation
+            )
+        
+        # Arm size mutations
+        if random.random() < mutation_rate:
+            mutated.arm_length = self._mutate_bounded(
+                self.arm_length, 0.2, 0.6, 1.8  # ±20% variation
+            )
+        if random.random() < mutation_rate:
+            mutated.arm_width = self._mutate_bounded(
+                self.arm_width, 0.2, 0.12, 0.35  # ±20% variation
+            )
+        if random.random() < mutation_rate:
+            mutated.wrist_length = self._mutate_bounded(
+                self.wrist_length, 0.2, 0.6, 1.8  # ±20% variation
+            )
+        if random.random() < mutation_rate:
+            mutated.wrist_width = self._mutate_bounded(
+                self.wrist_width, 0.2, 0.12, 0.35  # ±20% variation
+            )
+        
+        # Wheel size mutations
+        if random.random() < mutation_rate:
+            mutated.wheel_radius = self._mutate_bounded(
+                self.wheel_radius, 0.2, 0.3, 0.8  # ±20% variation
+            )
+        if random.random() < mutation_rate:
+            mutated.leg_spread = self._mutate_bounded(
+                self.leg_spread, 0.15, 1.2, 3.0  # ±15% variation
+            )
+        
+        # Individual wheel sizes (if using advanced wheel system)
+        if random.random() < mutation_rate and mutated.wheel_sizes:
+            mutated.wheel_sizes = [
+                self._mutate_bounded(size, 0.15, 0.3, 0.8) for size in mutated.wheel_sizes
+            ]
+        
+        # Segment size mutations (if using variable segments)
+        if random.random() < mutation_rate and mutated.segment_length_ratios:
+            mutated.segment_length_ratios = [
+                self._mutate_bounded(ratio, 0.15, 0.6, 1.6) for ratio in mutated.segment_length_ratios
+            ]
+        if random.random() < mutation_rate and mutated.segment_width_ratios:
+            mutated.segment_width_ratios = [
+                self._mutate_bounded(ratio, 0.15, 0.5, 1.3) for ratio in mutated.segment_width_ratios
+            ]
+        
+        # Body segment sizes (if using body segmentation)
+        if random.random() < mutation_rate and mutated.segment_size_ratios:
+            mutated.segment_size_ratios = [
+                self._mutate_bounded(ratio, 0.15, 0.6, 1.8) for ratio in mutated.segment_size_ratios
+            ]
+        
+        print(f"🧬 Applied size-only mutations: scale={mutated.overall_scale:.2f}, body={mutated.body_width:.2f}x{mutated.body_height:.2f}")
+        
+        return mutated.validate_and_repair()
+    
     def _mutate_bounded(self, value: float, mutation_strength: float, 
                        min_val: float, max_val: float) -> float:
         """

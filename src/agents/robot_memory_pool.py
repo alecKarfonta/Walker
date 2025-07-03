@@ -72,13 +72,14 @@ class RobotMemoryPool:
     
     def acquire_robot(self, 
                      position: Tuple[float, float] = (0, 10),
-                     physical_params: Optional[PhysicalParameters] = None) -> CrawlingAgent:
-        """Acquire a robot from the pool."""
+                     physical_params: Optional[PhysicalParameters] = None,
+                     apply_size_mutations: bool = True) -> CrawlingAgent:
+        """Acquire a robot from the pool with optional size mutations."""
         try:
             # Try to reuse an existing robot
             if self.available_robots:
                 robot = self.available_robots.popleft()
-                self._reset_robot(robot, position, physical_params)
+                self._reset_robot(robot, position, physical_params, apply_size_mutations)
                 self.pool_stats['reused_count'] += 1
                 print(f"♻️ Reused robot {robot.id} (pool: {len(self.available_robots)} available)")
             else:
@@ -137,13 +138,19 @@ class RobotMemoryPool:
 
     def _reset_robot(self, robot: CrawlingAgent, 
                     position: Tuple[float, float],
-                    physical_params: Optional[PhysicalParameters] = None):
-        """Reset a robot for reuse."""
+                    physical_params: Optional[PhysicalParameters] = None,
+                    apply_size_mutations: bool = True):
+        """Reset a robot for reuse with optional size mutations."""
         # Generate new ID for the reused robot
         robot.id = str(uuid.uuid4())[:8]
         
-        # Update physical parameters if provided
-        if physical_params is not None:
+        # Apply size mutations to existing physical parameters if enabled
+        if apply_size_mutations and hasattr(robot, 'physical_params') and robot.physical_params:
+            # Apply size-only mutations while preserving Q-network weights
+            mutated_params = robot.physical_params.mutate_sizes_only(mutation_rate=0.12)
+            robot.physical_params = mutated_params
+            print(f"🧬 Applied size mutations to respawned robot {robot.id}")
+        elif physical_params is not None:
             robot.physical_params = physical_params.validate_and_repair()
         
         # Reset basic state

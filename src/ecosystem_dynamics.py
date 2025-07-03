@@ -54,8 +54,8 @@ class EcosystemDynamics:
         self.world_bounds = {
             'min_x': -200.0,  # Expanded from -60 to -200
             'max_x': 200.0,   # Expanded from 60 to 200  
-            'min_y': -10.0,   # Slightly expanded ground level
-            'max_y': 50.0     # Expanded from 35 to 50
+            'min_y': 0.0,     # FIXED: Ground surface is at Y=-1, so food should spawn at Y=0+ (just above ground)
+            'max_y': 8.0      # FIXED: Reasonable robot reach height instead of 50m in the air
         }
         
         # Strategic Food Zones - Fixed locations that create long-term goals

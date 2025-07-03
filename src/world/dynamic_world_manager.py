@@ -444,23 +444,31 @@ class DynamicWorldManager:
             
             print(f"🎯 Generating {obstacle_count} obstacles for tile {tile.id} ({tile.biome.value})")
             
-            # 🤖 ROBOT-SCALE: Much smaller obstacles for 1.5m robots
+            # 🤖 ROBOT-SCALE: Small passable obstacles for 1.5m robots
             for i in range(obstacle_count):
                 # Random position within tile
                 x = random.uniform(tile.x_start + 8, tile.x_end - 8)
-                y = random.uniform(1, 4)  # Lower y position for small obstacles
+                y = random.uniform(0.2, 1.0)  # PASSABLE: Very low to ground position
                 
-                # 🤖 FIXED: Much smaller obstacles appropriate for 1.5m robots
-                size = random.uniform(0.8, 2.5)  # Small obstacles: 0.8m to 2.5m
-                height = random.uniform(0.8, 3.0)  # Manageable height: 0.8m to 3.0m
+                # 🔺 PASSABLE TRIANGLES: Small, low obstacles robots can climb over
+                size = random.uniform(0.3, 0.8)  # SMALLER: 0.3m to 0.8m width (was 0.8-2.5m)
+                height = random.uniform(0.2, 0.6)  # LOWER: 0.2m to 0.6m tall (was 0.8-3.0m)
                 
                 print(f"   Creating obstacle {i+1}: size={size:.1f}m, height={height:.1f}m at ({x:.1f}, {y:.1f})")
                 
                 # Create obstacle body
                 try:
                     obstacle_body = self.world.CreateStaticBody(position=(x, y))
+                    
+                    # 🔺 TRIANGULAR OBSTACLES: Create upward-pointing triangular obstacles instead of rectangles
+                    triangle_vertices = [
+                        (-size / 2, -height / 2),  # Bottom left
+                        (size / 2, -height / 2),   # Bottom right  
+                        (0, height / 2)            # Top center (pointing up)
+                    ]
+                    
                     obstacle_fixture = obstacle_body.CreateFixture(
-                        shape=b2.b2PolygonShape(box=(size / 2, height / 2)),
+                        shape=b2.b2PolygonShape(vertices=triangle_vertices),
                         density=0.0,
                         friction=biome_config['obstacle_friction'],
                         restitution=0.3,
@@ -499,7 +507,7 @@ class DynamicWorldManager:
             
             # Create a food zone for this tile
             zone_center_x = tile.x_start + self.tile_width / 2
-            zone_center_y = 15.0
+            zone_center_y = 4.0  # FIXED: Lower center height to match robot scale (ground at Y=-1)
             zone_radius = self.tile_width * 0.4  # Zone covers 80% of tile width
             
             food_zone = FoodZone(
@@ -525,9 +533,9 @@ class DynamicWorldManager:
                 food_x = zone_center_x + distance * math.cos(angle)
                 food_y = zone_center_y + distance * math.sin(angle)
                 
-                # Keep within tile bounds
+                # Keep within tile bounds and proper ground height
                 food_x = max(tile.x_start + 5, min(tile.x_end - 5, food_x))
-                food_y = max(2.0, min(self.tile_height - 5, food_y))
+                food_y = max(0.5, min(8.0, food_y))  # FIXED: Ground at Y=-1, so food between Y=0.5 to Y=8.0
                 
                 # Select food type based on biome
                 food_type = random.choice(biome_config['food_types'])

@@ -62,18 +62,20 @@ class SimpleAttention(nn.Module):
         return output, attention_weights
 
 class EnhancedRobotEncoder(nn.Module):
-    """Enhanced encoder for expanded robot state representation (19 dimensions)."""
+    """Enhanced encoder for expanded robot state representation (29 dimensions with ray sensing)."""
     
-    def __init__(self, state_size: int = 19, embed_dim: int = 128):
+    def __init__(self, state_size: int = 29, embed_dim: int = 128):
         super().__init__()
         self.embed_dim = embed_dim
+        self.state_size = state_size
         
-        # Specialized encoders for different feature groups
-        self.joint_encoder = nn.Linear(4, embed_dim // 4)      # Joint angles + velocities
-        self.body_encoder = nn.Linear(6, embed_dim // 4)       # Body position, velocity, orientation
-        self.food_encoder = nn.Linear(4, embed_dim // 4)       # Food targeting information
-        self.physics_encoder = nn.Linear(3, embed_dim // 8)    # Physics feedback
-        self.action_encoder = nn.Linear(2, embed_dim // 8)     # Action history
+        # Specialized encoders for different feature groups (dimensions add up to exactly embed_dim)
+        self.joint_encoder = nn.Linear(4, 21)      # Joint angles + velocities
+        self.body_encoder = nn.Linear(6, 21)       # Body position, velocity, orientation
+        self.food_encoder = nn.Linear(4, 21)       # Food targeting information
+        self.physics_encoder = nn.Linear(3, 16)    # Physics feedback
+        self.action_encoder = nn.Linear(2, 16)     # Action history
+        self.ray_encoder = nn.Linear(10, 33)       # Ray sensing data (5 rays × 2 values) - extra 1 dim to reach 128 total
         
         # Feature combination layers
         self.feature_combiner = nn.Sequential(
@@ -86,19 +88,20 @@ class EnhancedRobotEncoder(nn.Module):
         
     def forward(self, state):
         """
-        Encode expanded robot state: 19 dimensions total
+        Encode expanded robot state: 29 dimensions total
         - [0:4]: Joint angles and velocities
         - [4:10]: Body state (position, velocity, orientation)
         - [10:14]: Food targeting information
         - [14:17]: Physics feedback
         - [17:19]: Action history
+        - [19:29]: Ray sensing data (5 rays × 2 values each)
         """
         if len(state.shape) == 1:
             state = state.unsqueeze(0)
         
         # STRICT: Verify state dimensions - NO AUTO-FIXING
-        if state.shape[1] != 19:
-            raise ValueError(f"EnhancedRobotEncoder expected 19D state, got {state.shape[1]}D state! Shape: {state.shape}. This indicates a bug in state generation - fix the source instead of padding!")
+        if state.shape[1] != self.state_size:
+            raise ValueError(f"EnhancedRobotEncoder expected {self.state_size}D state, got {state.shape[1]}D state! Shape: {state.shape}. This indicates a bug in state generation - fix the source instead of padding!")
         
         # Split state into feature groups
         joint_state = state[:, :4]       # Joint angles and velocities
@@ -106,6 +109,7 @@ class EnhancedRobotEncoder(nn.Module):
         food_state = state[:, 10:14]     # Food targeting
         physics_state = state[:, 14:17]  # Physics feedback
         action_state = state[:, 17:19]   # Action history
+        ray_state = state[:, 19:29]      # Ray sensing data
         
         # Encode each feature group
         joint_embed = F.relu(self.joint_encoder(joint_state))
@@ -113,9 +117,10 @@ class EnhancedRobotEncoder(nn.Module):
         food_embed = F.relu(self.food_encoder(food_state))
         physics_embed = F.relu(self.physics_encoder(physics_state))
         action_embed = F.relu(self.action_encoder(action_state))
+        ray_embed = F.relu(self.ray_encoder(ray_state))
         
         # Combine all features
-        combined = torch.cat([joint_embed, body_embed, food_embed, physics_embed, action_embed], dim=-1)
+        combined = torch.cat([joint_embed, body_embed, food_embed, physics_embed, action_embed, ray_embed], dim=-1)
         combined = self.feature_combiner(combined)
         combined = self.layer_norm(combined)
         
@@ -124,7 +129,7 @@ class EnhancedRobotEncoder(nn.Module):
 class EnhancedRobotAttentionDQN(nn.Module):
     """Enhanced Dueling DQN with attention for full robot state representation."""
     
-    def __init__(self, state_size: int = 19, action_size: int = 15, embed_dim: int = 128, num_heads: int = 4):
+    def __init__(self, state_size: int = 29, action_size: int = 15, embed_dim: int = 128, num_heads: int = 4):
         super().__init__()
         self.state_size = state_size
         self.action_size = action_size
@@ -253,22 +258,22 @@ class PrioritizedReplayBuffer:
 class AttentionDeepQLearning:
     """Enhanced Deep Q-Learning with Double DQN, Prioritized Replay, and attention."""
     
-    def __init__(self, state_dim: int = 19, action_dim: int = 15, learning_rate: float = 0.001):
+    def __init__(self, state_dim: int = 29, action_dim: int = 15, learning_rate: float = 0.001):
         """
         Initialize Enhanced Deep Q-Learning with Attention for Robot Crawling.
         
         CRITICAL PARAMETERS:
         ===================
-        state_dim: Must be 19 (matches CrawlingAgent.get_state_representation())
+        state_dim: Must be 29 (matches CrawlingAgent.get_state_representation() with ray sensing)
         action_dim: Must be 15 (matches CrawlingAgent locomotion action space)
         
         This ensures dimension consistency between robot state generation 
         and neural network expectations. Any mismatch will cause training errors.
         """
         # FORCE CORRECT DIMENSIONS - no backward compatibility
-        if state_dim != 19:
-            print(f"🚨 FORCING state_dim to 19 (was {state_dim}) for dimension consistency!")
-            state_dim = 19
+        if state_dim != 29:
+            print(f"🚨 FORCING state_dim to 29 (was {state_dim}) for dimension consistency!")
+            state_dim = 29
         if action_dim != 15:
             print(f"🚨 FORCING action_dim to 15 (was {action_dim}) for dimension consistency!")
             action_dim = 15

@@ -1,6 +1,14 @@
 Are the neural networks of sufficient size to learn this task?
 - [x] When I click a robot it should become the focused robot ✅ **FIXED**: Corrected Box2D coordinate system transformation (15x scale factor)
 
+- [ ] Implement a dynamic world generation that will create new world bits as the robots progress in a certain direction. The new parts should be randomly generated with potentional obstacles or different food sources. only add new worlds bits to the right. Make a wall to the left that prevents robots from going too far in that direction. Create a limit wherevy once X number of new world tiles are genereated to the right then world tiles to the left start to being removed
+
+- [ ]Lets make the obstacles that are generated for the dynamic world tiles be trianlges instead of squares. 
+
+
+- If we cache the dimensions of robot parts then we only need to get their current position and angle in status updates.
+
+
 - [x] FPS counter in frontend (show UI and physics engine FPS) ✅ **WORKING**: Both UI and Physics FPS displayed with color coding
 
 ### Q-Learning & Elite Robot Persistence 🧠✅ **COMPLETED**

@@ -183,8 +183,7 @@ WEBGL_HTML_TEMPLATE = """
         <div id="canvas-wrapper">
             <canvas id="simulation-canvas"></canvas>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
-            <button id="toggleViewportCulling" onclick="toggleViewportCulling()" style="position:absolute; top:10px; left:250px; z-index:50; background:#00BCD4; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">🔍 Viewport Culling: ON</button>
-            <div id="renderer-status" style="position:absolute; top:45px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; font-size:11px; pointer-events:none;">⚡ WebGL Enabled</div>
+            <button id="toggleHealthBars" onclick="toggleHealthBars()" style="position:absolute; top:40px; left:120px; z-index:50; background:#E91E63; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Health Bars: OFF</button>
             
             <div id="speed-controls" style="position:absolute; top:90px; right:10px; z-index:50; background:rgba(0,0,0,0.8); color:white; padding:8px 12px; border-radius:6px; border:1px solid #3498db;">
                 <div style="margin-bottom: 6px; font-size: 11px; color: #bdc3c7;">
@@ -258,12 +257,10 @@ WEBGL_HTML_TEMPLATE = """
                 
                 if (!this.gl) {
                                 console.error('❌ WebGL not supported, cannot render');
-            this.updateRendererStatus('WebGL Required', '#FF0000');
                     return;
                 }
                 
                 console.log('🚀 WebGL context initialized successfully');
-                this.updateRendererStatus('WebGL Enabled', '#4CAF50');
                 this.initialize();
             }
             
@@ -512,6 +509,11 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             drawHealthEnergyBars(x, y, health, energy) {
+                // Don't render anything if health bars are disabled
+                if (!showHealthBars) {
+                    return;
+                }
+                
                 // Health and energy bars positioned above the robot
                 const barWidth = 8.0;  
                 const barHeight = 1.2; 
@@ -641,13 +643,7 @@ WEBGL_HTML_TEMPLATE = """
                 this.gl.drawElements(this.gl.TRIANGLES, indices.length, this.gl.UNSIGNED_SHORT, 0);
             }
             
-            updateRendererStatus(message, color) {
-                const statusElement = document.getElementById('renderer-status');
-                if (statusElement) {
-                    statusElement.textContent = `⚡ ${message}`;
-                    statusElement.style.background = color;
-                }
-            }
+
             
             // Canvas 2D fallback removed - WebGL is required
         }
@@ -664,7 +660,7 @@ WEBGL_HTML_TEMPLATE = """
         let cameraZoom = 1.0;
         let focusedAgentId = null;
         let showFoodLines = false;
-        let viewportCullingEnabled = true;
+        let showHealthBars = false;
         
         // FPS tracking
         let uiFpsCounter = 0;
@@ -757,13 +753,9 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             // Draw ecosystem elements (food sources) with enhanced rendering
-            // Use viewport culling if enabled for better performance
+            // Backend already filters food sources when viewport culling is enabled
             let foodSources = [];
-            if (data.viewport_culling && data.viewport_culling.enabled && data.ecosystem?.visible_food_sources) {
-                // Use only visible food sources when viewport culling is enabled
-                foodSources = data.ecosystem.visible_food_sources;
-            } else if (data.ecosystem?.food_sources) {
-                // Use all food sources when viewport culling is disabled
+            if (data.ecosystem?.food_sources) {
                 foodSources = data.ecosystem.food_sources;
             }
             
@@ -778,16 +770,11 @@ WEBGL_HTML_TEMPLATE = """
             });
             
             // Draw robots with health and energy bars
-            // Use viewport culling if enabled for better performance
+            // Backend already filters robot shapes when viewport culling is enabled
             let robotShapes = [];
             let agentList = [];
             
-            if (data.viewport_culling && data.viewport_culling.enabled && data.shapes?.visible_robots) {
-                // Use only visible robots when viewport culling is enabled
-                robotShapes = data.shapes.visible_robots;
-                agentList = data.visible_agents || data.all_agents || data.agents;
-            } else if (data.shapes?.robots) {
-                // Use all robots when viewport culling is disabled
+            if (data.shapes?.robots) {
                 robotShapes = data.shapes.robots;
                 agentList = data.all_agents || data.agents;
             }
@@ -823,8 +810,8 @@ WEBGL_HTML_TEMPLATE = """
                         }
                     });
                     
-                    // Draw health and energy bars above the robot
-                    if (agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
+                    // Draw health and energy bars above the robot (only if enabled)
+                    if (showHealthBars && agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
                         const robotX = agent.body.x;
                         const robotY = agent.body.y;
                         
@@ -881,16 +868,11 @@ WEBGL_HTML_TEMPLATE = """
             }
             
             // Draw robots (simplified) with health and energy bars  
-            // Use viewport culling if enabled for better performance (Canvas2D fallback)
+            // Backend already filters robot shapes when viewport culling is enabled (Canvas2D fallback)
             let robotShapes = [];
             let agentList = [];
             
-            if (data.viewport_culling && data.viewport_culling.enabled && data.shapes?.visible_robots) {
-                // Use only visible robots when viewport culling is enabled
-                robotShapes = data.shapes.visible_robots;
-                agentList = data.visible_agents || data.all_agents || data.agents;
-            } else if (data.shapes?.robots) {
-                // Use all robots when viewport culling is disabled
+            if (data.shapes?.robots) {
                 robotShapes = data.shapes.robots;
                 agentList = data.all_agents || data.agents;
             }
@@ -940,8 +922,8 @@ WEBGL_HTML_TEMPLATE = """
                         ctx.stroke();
                     });
                     
-                    // Draw health and energy bars (Canvas 2D fallback version)
-                    if (agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
+                    // Draw health and energy bars (Canvas 2D fallback version - only if enabled)
+                    if (showHealthBars && agent.body && agent.body.x !== undefined && agent.body.y !== undefined) {
                         const robotX = agent.body.x;
                         const robotY = agent.body.y;
                         const barWidth = 2.0;
@@ -983,17 +965,39 @@ WEBGL_HTML_TEMPLATE = """
             }
         }
         
-        function toggleViewportCulling() {
-            viewportCullingEnabled = !viewportCullingEnabled;
-            const button = document.getElementById('toggleViewportCulling');
-            if (viewportCullingEnabled) {
-                button.textContent = '🔍 Viewport Culling: ON';
-                button.style.background = '#00BCD4';
-            } else {
-                button.textContent = '🔍 Viewport Culling: OFF';
-                button.style.background = '#FF5722';
-            }
+        function toggleHealthBars() {
+            showHealthBars = !showHealthBars;
+            const button = document.getElementById('toggleHealthBars');
+            
+            // Call backend to toggle health bars
+            fetch('./toggle_health_bars', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enable: showHealthBars })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Update button based on actual backend state
+                    showHealthBars = data.show_health_bars;
+                    if (showHealthBars) {
+                        button.textContent = 'Health Bars: ON';
+                        button.style.background = '#4CAF50';
+                    } else {
+                        button.textContent = 'Health Bars: OFF';
+                        button.style.background = '#E91E63';
+                    }
+                    console.log(`💖 Health bars ${showHealthBars ? 'enabled' : 'disabled'}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error toggling health bars:', error);
+                // Revert button state on error
+                showHealthBars = !showHealthBars;
+            });
         }
+        
+
         
         function setSimulationSpeed(speed) {
             fetch('./set_simulation_speed', {
@@ -1186,10 +1190,9 @@ WEBGL_HTML_TEMPLATE = """
             
             const canvasWidth = canvas.width;
             const canvasHeight = canvas.height;
-            const cullingParam = viewportCullingEnabled ? '&viewport_culling=true' : '&viewport_culling=false';
             const cameraParam = `&camera_x=${cameraPosition.x}&camera_y=${cameraPosition.y}`;
             
-            fetch(`./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}${cullingParam}${cameraParam}`)
+            fetch(`./status?canvas_width=${canvasWidth}&canvas_height=${canvasHeight}&viewport_culling=true${cameraParam}`)
                 .then(response => response.json())
                 .then(data => {
                     // Update camera from backend if not manually panning
@@ -1217,6 +1220,21 @@ WEBGL_HTML_TEMPLATE = """
                     // Update focused agent
                     if (data.focused_agent_id !== undefined) {
                         focusedAgentId = data.focused_agent_id;
+                    }
+                    
+                    // Update health bar toggle state from server
+                    if (data.show_health_bars !== undefined) {
+                        showHealthBars = data.show_health_bars;
+                        const button = document.getElementById('toggleHealthBars');
+                        if (button) {
+                            if (showHealthBars) {
+                                button.textContent = 'Health Bars: ON';
+                                button.style.background = '#4CAF50';
+                            } else {
+                                button.textContent = 'Health Bars: OFF';
+                                button.style.background = '#E91E63';
+                            }
+                        }
                     }
                     
                     // Render the world

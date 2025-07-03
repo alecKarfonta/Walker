@@ -71,7 +71,7 @@ class TrainingEnvironment:
     Manages physics simulation and evolution of diverse crawling robots.
     Enhanced with comprehensive evaluation framework.
     """
-    def __init__(self, num_agents=60, enable_evaluation=False):  # Reduced from 50 to 30 to save memory
+    def __init__(self, num_agents=30, enable_evaluation=False):  # PERFORMANCE FIX: Reduced from 60 to 30 to improve FPS
         self.num_agents = num_agents
         # CRITICAL FIX: Disable sleeping at the world level to prevent static bodies from going to sleep
         self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
@@ -295,6 +295,8 @@ class TrainingEnvironment:
         
         # Food consumption animation system (FIXED: Limited size)
         self.consumption_events = deque(maxlen=100)  # FIXED: Limit to 100 consumption events for animation
+        
+        # Ray casting visualization removed for performance
         self.survival_stats = {
             'total_deaths': 0,
             'deaths_by_starvation': 0,
@@ -355,13 +357,16 @@ class TrainingEnvironment:
         self.web_data_cache = {}
         self.web_cache_valid = False
         
+        # Health bar rendering toggle (PERFORMANCE OPTIMIZATION)
+        self.show_health_bars = False  # Default: enabled, can be toggled off for performance
+        
         # Simulation speed control
         self.simulation_speed_multiplier = 10.0  # 10x speed by default for faster training
         self.max_speed_multiplier = 500.0  # Maximum 500x speed for high-speed training
         
         # AI Processing optimization settings
         self.ai_optimization_enabled = True  # Enable AI processing optimizations
-        self.ai_batch_percentage = 0.25  # Process 25% of agents per frame
+        self.ai_batch_percentage = 0.15  # PERFORMANCE FIX: Process only 15% of agents per frame (was 25%)
         self.ai_spatial_culling_enabled = False  # Only update AI for agents near camera
         self.ai_spatial_culling_distance = 50.0  # Distance from camera to update AI
         
@@ -375,6 +380,20 @@ class TrainingEnvironment:
         import threading
         self._background_processing_active = False
         self._background_lock = threading.Lock()
+        
+        # Emergency shutdown tracking (for performance monitoring)
+        self._emergency_shutdown_state = {
+            'max_consecutive_slow_frames': 10,
+            'consecutive_slow_frames': 0,
+            'max_physics_bodies': 1000,
+            'max_memory_mb': 2000,
+            'last_emergency_check': 0
+        }
+    
+    @property
+    def slow_frame_count(self):
+        """Get current slow frame count for performance monitoring."""
+        return self._emergency_shutdown_state.get('consecutive_slow_frames', 0)
 
         # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
         try:
@@ -972,6 +991,8 @@ class TrainingEnvironment:
                 if current_time - event['timestamp'] < event['duration']
             ]
             
+            # Ray casting events cleanup removed for performance
+            
             # Update dynamic world generation based on robot positions
             if self.dynamic_world_manager:
                 try:
@@ -1081,7 +1102,7 @@ class TrainingEnvironment:
         """Validate that resources maintain proper distance from agents and are at reachable heights."""
         try:
             minimum_safe_distance = 6.0  # Must be at least 6m from any agent (matches ecosystem_dynamics)
-            minimum_height = -2.0  # Minimum Y coordinate (below ground level)
+            minimum_height = 0.0   # FIXED: Minimum Y coordinate (ground at Y=-1, so food at Y=0+)
             maximum_height = 8.0   # Maximum Y coordinate robots can reasonably reach
             resources_to_remove = []
             
@@ -1391,7 +1412,7 @@ class TrainingEnvironment:
         with self._physics_lock:
             try:
                 for dead_agent in dead_agents:
-                                    # Agents handle their own networks - no extraction needed
+                    # Agents handle their own networks - no extraction needed
                     
                     # CRITICAL: Return dead agent to memory pool IMMEDIATELY so it can be reused
                     if self.robot_memory_pool:
@@ -1426,36 +1447,53 @@ class TrainingEnvironment:
             except Exception as e:
                 print(f"❌ Error replacing dead agents: {e}")
     
+    def _get_current_spawn_position(self):
+        """Get the current spawn position near the leftmost (beginning) boundary of the world."""
+        try:
+            # Check if we have a dynamic world manager to track current boundaries
+            if hasattr(self, 'dynamic_world_manager') and self.dynamic_world_manager:
+                # Get current leftmost boundary from dynamic world
+                leftmost_boundary = self.dynamic_world_manager.left_wall_position
+                
+                # Spawn robots a safe distance from the left wall (10-30m to the right)
+                spawn_x = leftmost_boundary + random.uniform(10.0, 30.0)
+                spawn_y = random.uniform(4.0, 8.0)  # Slight height variation
+                
+                print(f"🌍 Dynamic world spawn: left wall at {leftmost_boundary:.1f}m, spawning at x={spawn_x:.1f}m")
+                return (spawn_x, spawn_y)
+            else:
+                # Fallback: Use traditional central spawn area if no dynamic world
+                spawn_x = random.uniform(-30.0, 30.0)
+                spawn_y = random.uniform(4.0, 8.0)
+                
+                print(f"🏠 Static world spawn: spawning at x={spawn_x:.1f}m (no dynamic world)")
+                return (spawn_x, spawn_y)
+                
+        except Exception as e:
+            print(f"⚠️ Error getting spawn position: {e}, using fallback")
+            # Safe fallback position
+            return (0.0, 5.0)
+    
     def _create_replacement_agent(self):
         """Create a new agent to replace a dead one using memory pool if available."""
         try:
-            # Find a good spawn position (spread them out)
-            existing_positions = []
-            for agent in self.agents:
-                if not getattr(agent, '_destroyed', False) and agent.body:
-                    existing_positions.append(agent.body.position.x)
+            # 🌍 DYNAMIC WORLD: Spawn near current leftmost (beginning) position
+            spawn_position = self._get_current_spawn_position()
             
-            # Find gaps in the population or place at edges
-            if existing_positions:
-                min_x = min(existing_positions) - 20
-                max_x = max(existing_positions) + 20
-                spawn_x = random.uniform(min_x, max_x)
-            else:
-                spawn_x = random.uniform(-50, 50)
-            
-            spawn_position = (spawn_x, 5.0)  # Spawn slightly above ground
+            print(f"🐣 Respawning dead agent at current world beginning: ({spawn_position[0]:.1f}, {spawn_position[1]:.1f})")
             
             # Create random physical parameters (fresh genetics)
             from src.agents.physical_parameters import PhysicalParameters
             random_params = PhysicalParameters.random_parameters()
             
-            # Use memory pool if available for efficient reuse
+            # Use memory pool if available for efficient reuse with size mutations
             if self.robot_memory_pool:
                 new_agent = self.robot_memory_pool.acquire_robot(
                     position=spawn_position,
-                    physical_params=random_params
+                    physical_params=random_params,
+                    apply_size_mutations=True  # Enable size mutations during respawning
                 )
-                logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool")
+                logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
             else:
                 # Fallback: Create new agent directly
                 new_agent = CrawlingAgent(
@@ -1890,14 +1928,8 @@ class TrainingEnvironment:
         
         step_count = 0
         
-        # CRITICAL SAFEGUARD: Emergency shutdown conditions
-        emergency_shutdown = {
-            'max_consecutive_slow_frames': 10,
-            'consecutive_slow_frames': 0,
-            'max_physics_bodies': 1000,
-            'max_memory_mb': 2000,
-            'last_emergency_check': last_time
-        }
+        # CRITICAL SAFEGUARD: Use instance emergency shutdown state
+        self._emergency_shutdown_state['last_emergency_check'] = last_time
 
         while self.is_running:
             frame_start_time = time.time()
@@ -1909,7 +1941,7 @@ class TrainingEnvironment:
             accumulator += frame_time
             
             # CRITICAL SAFEGUARD: Emergency shutdown detection
-            if current_time - emergency_shutdown['last_emergency_check'] >= 5.0:  # Check every 5 seconds
+            if current_time - self._emergency_shutdown_state['last_emergency_check'] >= 5.0:  # Check every 5 seconds
                 try:
                     import psutil
                     import os
@@ -1936,23 +1968,23 @@ class TrainingEnvironment:
                     # Check emergency conditions
                     emergency_triggered = False
                     
-                    if memory_mb > emergency_shutdown['max_memory_mb']:
-                        print(f"🚨 EMERGENCY: Memory usage {memory_mb:.1f}MB exceeds limit {emergency_shutdown['max_memory_mb']}MB")
+                    if memory_mb > self._emergency_shutdown_state['max_memory_mb']:
+                        print(f"🚨 EMERGENCY: Memory usage {memory_mb:.1f}MB exceeds limit {self._emergency_shutdown_state['max_memory_mb']}MB")
                         emergency_triggered = True
                     
-                    if physics_body_count > emergency_shutdown['max_physics_bodies']:
-                        print(f"🚨 EMERGENCY: Physics bodies {physics_body_count} exceeds limit {emergency_shutdown['max_physics_bodies']}")
+                    if physics_body_count > self._emergency_shutdown_state['max_physics_bodies']:
+                        print(f"🚨 EMERGENCY: Physics bodies {physics_body_count} exceeds limit {self._emergency_shutdown_state['max_physics_bodies']}")
                         emergency_triggered = True
                     
                     if frame_time > 0.5:  # Frame took more than 500ms
-                        emergency_shutdown['consecutive_slow_frames'] += 1
-                        print(f"🐌 SLOW FRAME: {frame_time:.2f}s ({emergency_shutdown['consecutive_slow_frames']}/{emergency_shutdown['max_consecutive_slow_frames']})")
+                        self._emergency_shutdown_state['consecutive_slow_frames'] += 1
+                        print(f"🐌 SLOW FRAME: {frame_time:.2f}s ({self._emergency_shutdown_state['consecutive_slow_frames']}/{self._emergency_shutdown_state['max_consecutive_slow_frames']})")
                         
-                        if emergency_shutdown['consecutive_slow_frames'] >= emergency_shutdown['max_consecutive_slow_frames']:
-                            print(f"🚨 EMERGENCY: {emergency_shutdown['consecutive_slow_frames']} consecutive slow frames")
+                        if self._emergency_shutdown_state['consecutive_slow_frames'] >= self._emergency_shutdown_state['max_consecutive_slow_frames']:
+                            print(f"🚨 EMERGENCY: {self._emergency_shutdown_state['consecutive_slow_frames']} consecutive slow frames")
                             emergency_triggered = True
                     else:
-                        emergency_shutdown['consecutive_slow_frames'] = 0
+                        self._emergency_shutdown_state['consecutive_slow_frames'] = 0
                     
                     if emergency_triggered:
                         print("🚨 TRIGGERING EMERGENCY SHUTDOWN TO PREVENT SYSTEM FREEZE")
@@ -1964,11 +1996,11 @@ class TrainingEnvironment:
                         self.is_running = False
                         break
                     
-                    emergency_shutdown['last_emergency_check'] = current_time
+                    self._emergency_shutdown_state['last_emergency_check'] = current_time
                     
                 except Exception as e:
                     print(f"⚠️ Error in emergency check: {e}")
-                    emergency_shutdown['last_emergency_check'] = current_time
+                    self._emergency_shutdown_state['last_emergency_check'] = current_time
             
             # Fixed-step physics updates with enhanced thread safety
             while accumulator >= self.dt:
@@ -2247,6 +2279,7 @@ class TrainingEnvironment:
                     print(f"   🍽️ Food sources: {total_food_sources}, Obstacles: {total_obstacles}")
                     print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
                     print(f"   🌿 Ecosystem events: {len(getattr(self, 'consumption_events', []))}, Death events: {len(getattr(self, 'death_events', []))}")
+                    # Ray casting logging removed for performance
                     
                     # Alert if memory is too high
                     if memory_mb > 800:
@@ -2463,62 +2496,190 @@ class TrainingEnvironment:
         return True
 
     def _print_performance_report(self):
-        """Print a detailed performance analysis report."""
+        """Print a detailed performance analysis report with enhanced debugging."""
         try:
             if not hasattr(self, 'performance_timings') or not self.performance_timings:
                 return
             
-            print(f"\n📊 === PERFORMANCE ANALYSIS REPORT ===")
+            current_time = time.time()
+            print(f"\n📊 === ENHANCED PERFORMANCE ANALYSIS REPORT ===")
+            print(f"🕐 Report Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))}")
             print(f"📏 Sample size: {len(self.performance_timings.get('total_frame_time', []))} frames")
+            print(f"🔢 Step count: {self.step_count}")
+            print(f"⚡ Simulation speed: {self.simulation_speed_multiplier}x")
             
-            # Calculate averages for each category
+            # ENHANCED: Memory and system resource tracking
+            print(f"\n🧠 === SYSTEM RESOURCES ===")
+            try:
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                memory_info = process.memory_info()
+                memory_mb = memory_info.rss / 1024 / 1024
+                cpu_percent = process.cpu_percent()
+                print(f"💾 Memory Usage: {memory_mb:.1f} MB")
+                print(f"⚙️  CPU Usage: {cpu_percent:.1f}%")
+                
+                # Memory trend analysis
+                if not hasattr(self, 'memory_history'):
+                    self.memory_history = []
+                self.memory_history.append((current_time, memory_mb))
+                
+                # Keep last 20 measurements (10 minutes of history)
+                if len(self.memory_history) > 20:
+                    self.memory_history = self.memory_history[-20:]
+                
+                if len(self.memory_history) >= 2:
+                    memory_trend = self.memory_history[-1][1] - self.memory_history[0][1]
+                    memory_rate = memory_trend / max(1, (self.memory_history[-1][0] - self.memory_history[0][0]) / 60)  # MB per minute
+                    print(f"📈 Memory Trend: {memory_trend:+.1f} MB ({memory_rate:+.1f} MB/min)")
+                    
+                    if memory_rate > 5:
+                        print(f"⚠️  WARNING: High memory growth rate detected!")
+                    elif memory_mb > 1500:
+                        print(f"⚠️  WARNING: High memory usage detected!")
+                        
+            except ImportError:
+                print(f"⚠️  psutil not available for system monitoring")
+            except Exception as e:
+                print(f"⚠️  Error getting system info: {e}")
+            
+            # ENHANCED: Agent and simulation health metrics
+            print(f"\n🤖 === SIMULATION HEALTH ===")
+            active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
+            print(f"👥 Active Agents: {active_agents}")
+            print(f"🌍 Physics Bodies: {len(self.world.bodies)}")
+            print(f"🔗 Physics Joints: {len(self.world.joints)}")
+            
+            if hasattr(self, 'ecosystem_dynamics'):
+                food_sources = len(self.ecosystem_dynamics.food_sources)
+                print(f"🍽️ Food Sources: {food_sources}")
+            
+            if hasattr(self, 'slow_frame_count'):
+                print(f"🐌 Slow Frames: {self.slow_frame_count}/10")
+                if self.slow_frame_count >= 7:
+                    print(f"🚨 CRITICAL: Approaching emergency shutdown threshold!")
+            
+            # ENHANCED: Performance timing analysis with percentiles
+            print(f"\n⏱️  === DETAILED TIMING ANALYSIS ===")
             for category, timings in self.performance_timings.items():
                 if timings:
+                    sorted_times = sorted(timings)
                     avg_time = sum(timings) / len(timings) * 1000  # Convert to milliseconds
                     max_time = max(timings) * 1000
                     min_time = min(timings) * 1000
+                    p50_time = sorted_times[len(sorted_times)//2] * 1000  # Median
+                    p95_time = sorted_times[int(len(sorted_times)*0.95)] * 1000  # 95th percentile
+                    p99_time = sorted_times[int(len(sorted_times)*0.99)] * 1000  # 99th percentile
                     
                     # Calculate percentage of total frame time
                     if category != 'total_frame_time' and self.performance_timings.get('total_frame_time'):
                         total_avg = sum(self.performance_timings['total_frame_time']) / len(self.performance_timings['total_frame_time'])
                         percentage = (avg_time / 1000) / total_avg * 100 if total_avg > 0 else 0
-                        print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg ({percentage:.1f}% of frame), {min_time:.2f}-{max_time:.2f}ms range")
+                        print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg ({percentage:.1f}% of frame)")
+                        print(f"    📊 Distribution: min={min_time:.1f}ms p50={p50_time:.1f}ms p95={p95_time:.1f}ms p99={p99_time:.1f}ms max={max_time:.1f}ms")
+                        
+                        # Performance warnings
+                        if p99_time > 100:  # 99th percentile over 100ms
+                            print(f"    ⚠️  99th percentile shows occasional severe delays!")
+                        elif p95_time > 50:  # 95th percentile over 50ms
+                            print(f"    ⚠️  95th percentile shows regular delays")
                     else:
                         print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg, {min_time:.2f}-{max_time:.2f}ms range")
+                        
+                        # Total frame time analysis
+                        if category == 'total_frame_time':
+                            slow_frames = sum(1 for t in timings if t > 1.0)  # Frames over 1 second
+                            very_slow_frames = sum(1 for t in timings if t > 5.0)  # Frames over 5 seconds
+                            print(f"    🐌 Slow frames (>1s): {slow_frames}/{len(timings)} ({slow_frames/len(timings)*100:.1f}%)")
+                            print(f"    🚨 Very slow frames (>5s): {very_slow_frames}/{len(timings)} ({very_slow_frames/len(timings)*100:.1f}%)")
             
-            # Identify the bottleneck
+            # ENHANCED: Bottleneck analysis with severity assessment
+            print(f"\n🚩 === BOTTLENECK ANALYSIS ===")
             bottlenecks = []
             for category, timings in self.performance_timings.items():
                 if category != 'total_frame_time' and timings:
                     avg_time = sum(timings) / len(timings)
-                    bottlenecks.append((category, avg_time))
+                    max_time = max(timings)
+                    bottlenecks.append((category, avg_time, max_time))
             
             if bottlenecks:
                 bottlenecks.sort(key=lambda x: x[1], reverse=True)
-                print(f"🚩 Primary bottleneck: {bottlenecks[0][0].replace('_', ' ').title()} ({bottlenecks[0][1]*1000:.2f}ms)")
+                print(f"🚩 Primary bottleneck: {bottlenecks[0][0].replace('_', ' ').title()}")
+                print(f"   Average: {bottlenecks[0][1]*1000:.2f}ms, Peak: {bottlenecks[0][2]*1000:.2f}ms")
                 
-                # Recommendations
-                if bottlenecks[0][0] == 'physics_simulation':
-                    print(f"💡 Recommendation: Physics simulation is the bottleneck - consider reducing simulation frequency or agent count")
-                elif bottlenecks[0][0] == 'agent_ai_processing':
-                    print(f"💡 Recommendation: AI processing is the bottleneck - consider optimizing learning algorithms or reducing update frequency")
-                elif bottlenecks[0][0] == 'ecosystem_updates':
+                # Severity assessment
+                severity = "LOW"
+                if bottlenecks[0][1] > 0.050:  # > 50ms average
+                    severity = "HIGH"
+                elif bottlenecks[0][1] > 0.020:  # > 20ms average
+                    severity = "MEDIUM"
+                    
+                print(f"   Severity: {severity}")
+                
+                # Enhanced recommendations with specific thresholds
+                category = bottlenecks[0][0]
+                avg_ms = bottlenecks[0][1] * 1000
+                if category == 'physics_simulation':
+                    if avg_ms > 10:
+                        print(f"💡 URGENT: Physics simulation averaging {avg_ms:.1f}ms - reduce agent count or simulation complexity")
+                    else:
+                        print(f"💡 Recommendation: Physics simulation is the bottleneck - consider reducing simulation frequency or agent count")
+                elif category == 'agent_ai_processing':
+                    if avg_ms > 20:
+                        print(f"💡 URGENT: AI processing averaging {avg_ms:.1f}ms - enable AI optimization or reduce learning frequency")
+                    else:
+                        print(f"💡 Recommendation: AI processing is the bottleneck - consider optimizing learning algorithms or reducing update frequency")
+                elif category == 'ecosystem_updates':
                     print(f"💡 Recommendation: Ecosystem updates are the bottleneck - consider reducing update frequency or optimizing ecosystem calculations")
-                elif bottlenecks[0][0] == 'statistics_updates':
+                elif category == 'statistics_updates':
                     print(f"💡 Recommendation: Statistics updates are the bottleneck - consider reducing statistics calculation frequency")
             
-            # Frame rate analysis
+            # ENHANCED: Frame rate analysis with performance grade
+            print(f"\n🎯 === FRAME RATE ANALYSIS ===")
             if self.performance_timings.get('total_frame_time'):
                 total_times = self.performance_timings['total_frame_time']
                 target_frame_time = 1.0 / 60.0  # 60 FPS
-                frames_meeting_target = sum(1 for t in total_times if t <= target_frame_time)
-                performance_percentage = frames_meeting_target / len(total_times) * 100
-                print(f"🎯 Performance: {performance_percentage:.1f}% of frames meet 60 FPS target")
                 
-                if performance_percentage < 80:
+                frames_60fps = sum(1 for t in total_times if t <= target_frame_time)
+                frames_30fps = sum(1 for t in total_times if t <= 1.0/30.0)
+                frames_15fps = sum(1 for t in total_times if t <= 1.0/15.0)
+                frames_1fps = sum(1 for t in total_times if t <= 1.0)
+                
+                perf_60 = frames_60fps / len(total_times) * 100
+                perf_30 = frames_30fps / len(total_times) * 100
+                perf_15 = frames_15fps / len(total_times) * 100
+                perf_1 = frames_1fps / len(total_times) * 100
+                
+                print(f"🎯 60 FPS target: {perf_60:.1f}% of frames")
+                print(f"🎯 30 FPS target: {perf_30:.1f}% of frames") 
+                print(f"🎯 15 FPS target: {perf_15:.1f}% of frames")
+                print(f"🎯 1 FPS minimum: {perf_1:.1f}% of frames")
+                
+                # Performance grade
+                if perf_60 >= 95:
+                    grade = "A+ (Excellent)"
+                elif perf_60 >= 80:
+                    grade = "A (Good)"
+                elif perf_30 >= 90:
+                    grade = "B (Acceptable)"
+                elif perf_15 >= 80:
+                    grade = "C (Poor)"
+                else:
+                    grade = "F (Critical)"
+                    
+                print(f"📊 Performance Grade: {grade}")
+                
+                # Critical warnings
+                if perf_1 < 90:
+                    print(f"🚨 CRITICAL: {100-perf_1:.1f}% of frames are slower than 1 FPS!")
+                elif perf_15 < 80:
+                    print(f"⚠️  WARNING: {100-perf_15:.1f}% of frames are slower than 15 FPS!")
+                elif perf_60 < 80:
                     print(f"⚠️  Performance Warning: Less than 80% of frames meet the 60 FPS target!")
             
-            # AI Optimization effectiveness
+            # ENHANCED: AI Optimization with efficiency metrics
+            print(f"\n🧠 === AI OPTIMIZATION ANALYSIS ===")
             if hasattr(self, 'ai_optimization_stats') and self.ai_optimization_stats.get('ai_optimization_ratio'):
                 avg_optimization_ratio = sum(self.ai_optimization_stats['ai_optimization_ratio']) / len(self.ai_optimization_stats['ai_optimization_ratio'])
                 avg_ai_updated = sum(self.ai_optimization_stats['ai_updated_agents']) / len(self.ai_optimization_stats['ai_updated_agents'])
@@ -2527,17 +2688,66 @@ class TrainingEnvironment:
                 print(f"🧠 AI Optimization: {avg_optimization_ratio:.1%} AI processing reduction")
                 print(f"🔄 AI Updates: {avg_ai_updated:.1f}/{avg_total_agents:.1f} agents per frame ({(avg_ai_updated/avg_total_agents):.1%})")
                 
-                if avg_optimization_ratio > 0.5:
+                # Efficiency assessment
+                if avg_optimization_ratio > 0.7:
+                    print(f"✅ AI optimization is highly effective - over 70% reduction in AI processing!")
+                elif avg_optimization_ratio > 0.5:
                     print(f"✅ AI optimization is highly effective - over 50% reduction in AI processing!")
                 elif avg_optimization_ratio > 0.2:
                     print(f"👍 AI optimization is working - {avg_optimization_ratio:.0%} reduction achieved")
                 else:
                     print(f"⚠️  AI optimization is minimal - consider adjusting ai_batch_percentage or ai_spatial_culling_distance")
+                    
+                # Specific recommendations based on efficiency
+                efficiency = avg_ai_updated / avg_total_agents
+                if efficiency > 0.8:
+                    print(f"💡 Consider reducing ai_batch_percentage to improve efficiency")
+                elif efficiency < 0.1:
+                    print(f"💡 AI optimization may be too aggressive - consider increasing ai_batch_percentage")
+            else:
+                print(f"⚠️  AI optimization statistics not available")
             
-            print(f"📊 === END PERFORMANCE REPORT ===\n")
+            # ENHANCED: Emergency shutdown proximity warning
+            print(f"\n🚨 === STABILITY MONITORING ===")
+            if hasattr(self, 'slow_frame_count'):
+                emergency_proximity = self.slow_frame_count / 10.0 * 100
+                print(f"🐌 Slow frame count: {self.slow_frame_count}/10 ({emergency_proximity:.0f}% to emergency shutdown)")
+                
+                if self.slow_frame_count >= 8:
+                    print(f"🚨 CRITICAL: Very close to emergency shutdown! System will stop at 10 slow frames.")
+                elif self.slow_frame_count >= 5:
+                    print(f"⚠️  WARNING: Multiple slow frames detected. Monitor system closely.")
+                elif self.slow_frame_count >= 3:
+                    print(f"⚠️  CAUTION: Some slow frames detected. Performance degrading.")
+                else:
+                    print(f"✅ Stability: System running normally")
+            
+            # Performance trend analysis
+            if len(self.performance_timings.get('total_frame_time', [])) >= 50:
+                recent_frames = self.performance_timings['total_frame_time'][-20:]  # Last 20 frames
+                older_frames = self.performance_timings['total_frame_time'][-50:-30]  # 30-50 frames ago
+                
+                recent_avg = sum(recent_frames) / len(recent_frames) * 1000
+                older_avg = sum(older_frames) / len(older_frames) * 1000
+                trend = recent_avg - older_avg
+                
+                print(f"📈 Performance Trend: Recent frames {recent_avg:.1f}ms vs older {older_avg:.1f}ms ({trend:+.1f}ms change)")
+                
+                if trend > 10:
+                    print(f"📉 DEGRADING: Performance is getting worse over time!")
+                elif trend > 5:
+                    print(f"⚠️  DECLINING: Performance showing degradation")
+                elif trend < -5:
+                    print(f"📈 IMPROVING: Performance is getting better")
+                else:
+                    print(f"✅ STABLE: Performance is stable")
+            
+            print(f"📊 === END ENHANCED PERFORMANCE REPORT ===\n")
             
         except Exception as e:
-            print(f"⚠️ Error generating performance report: {e}")
+            print(f"⚠️ Error generating enhanced performance report: {e}")
+            import traceback
+            traceback.print_exc()
 
     def get_status(self, canvas_width=1200, canvas_height=800, viewport_culling=True, camera_x=0.0, camera_y=0.0):
         """
@@ -2577,21 +2787,22 @@ class TrainingEnvironment:
                 
                 # Store viewport culling statistics for monitoring
                 zoom_used = getattr(self, 'user_zoom_level', 1.0)
-                viewport_stats = {
-                    'enabled': viewport_culling,
-                    'total_agents': len(current_agents),
-                    'visible_agents': len(viewport_agents),
-                    'culled_agents': len(current_agents) - len(viewport_agents),
-                    'culling_ratio': (len(current_agents) - len(viewport_agents)) / max(1, len(current_agents)),
-                    'viewport_bounds': viewport_bounds,
-                    'zoom_level': zoom_used,
-                    'camera_position': self.camera_position,
-                    'canvas_size': [canvas_width, canvas_height],
-                    'performance_note': 'Viewport culling only affects frontend rendering - backend simulation still processes all agents'
-                }
+                
                 
                 # Log viewport culling effectiveness occasionally for monitoring
-                if viewport_culling and self.step_count % 300 == 0:  # Every 5 seconds
+                if viewport_culling and self.step_count % 10000 == 0:  # Every 5 seconds
+                    viewport_stats = {
+                        'enabled': viewport_culling,
+                        'total_agents': len(current_agents),
+                        'visible_agents': len(viewport_agents),
+                        'culled_agents': len(current_agents) - len(viewport_agents),
+                        'culling_ratio': (len(current_agents) - len(viewport_agents)) / max(1, len(current_agents)),
+                        'viewport_bounds': viewport_bounds,
+                        'zoom_level': zoom_used,
+                        'camera_position': self.camera_position,
+                        'canvas_size': [canvas_width, canvas_height],
+                        'performance_note': 'Viewport culling only affects frontend rendering - backend simulation still processes all agents'
+                    }
                     if viewport_stats['culled_agents'] > 0:
                         print(f"🔍 Viewport culling active: {viewport_stats['visible_agents']}/{viewport_stats['total_agents']} agents visible ({viewport_stats['culling_ratio']:.1%} culled)")
                         print(f"   📐 Zoom: {zoom_used:.2f}x, Camera: ({self.camera_position[0]:.1f}, {self.camera_position[1]:.1f})")
@@ -2778,16 +2989,20 @@ class TrainingEnvironment:
                             }
                         
                         # Add ecosystem data
-                        basic_agent_data.update({
-                            # Basic ecosystem data for rendering
-                            'ecosystem': {
-                                'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
-                                'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                        ecosystem_data = {
+                            'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
+                            'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                            'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
+                        }
+                        
+                        # PERFORMANCE OPTIMIZATION: Only include health data if health bars are enabled
+                        if self.show_health_bars:
+                            ecosystem_data.update({
                                 'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
-                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
-                                'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
-                            }
-                        })
+                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy'])
+                            })
+                        
+                        basic_agent_data.update({'ecosystem': ecosystem_data})
                         agents_data.append(basic_agent_data)
                         
                         # Add detailed data for focused agent
@@ -2829,6 +3044,19 @@ class TrainingEnvironment:
                         is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
                         
                         # Basic data for all agents
+                        ecosystem_data_all = {
+                            'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
+                            'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                            'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
+                        }
+                        
+                        # PERFORMANCE OPTIMIZATION: Only include health data if health bars are enabled
+                        if self.show_health_bars:
+                            ecosystem_data_all.update({
+                                'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
+                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy'])
+                            })
+                        
                         basic_all_agent_data = {
                             'id': agent.id,
                             'body': {
@@ -2841,13 +3069,7 @@ class TrainingEnvironment:
                             },
                             'total_reward': float(agent.total_reward),
                             # Basic ecosystem data
-                            'ecosystem': {
-                                'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
-                                'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
-                                'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
-                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
-                                'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
-                            }
+                            'ecosystem': ecosystem_data_all
                         }
                         
                         # CRITICAL FIX: Add detailed info for focused agent even if outside viewport
@@ -2920,15 +3142,21 @@ class TrainingEnvironment:
                     visible_food_sources = all_food_sources
                     visible_obstacles = all_obstacles
                 
-                # Update viewport statistics with all object types
-                viewport_stats.update({
+                # Calculate viewport culling statistics for frontend debugging
+                viewport_culling_stats = {
+                    'enabled': viewport_culling,
+                    'total_agents': len(current_agents),
+                    'visible_agents': len(viewport_agents),
+                    'culled_agents': len(current_agents) - len(viewport_agents),
+                    'culling_ratio': (len(current_agents) - len(viewport_agents)) / max(1, len(current_agents)),
                     'total_food_sources': len(all_food_sources),
                     'visible_food_sources': len(visible_food_sources),
                     'culled_food_sources': len(all_food_sources) - len(visible_food_sources),
                     'total_obstacles': len(all_obstacles),
                     'visible_obstacles': len(visible_obstacles),
-                    'culled_obstacles': len(all_obstacles) - len(visible_obstacles)
-                })
+                    'culled_obstacles': len(all_obstacles) - len(visible_obstacles),
+                    'viewport_bounds': viewport_bounds if viewport_culling else None
+                }
                 
                 # 8. Get recent predation events for visualization
                 recent_predation_events = [
@@ -2989,6 +3217,7 @@ class TrainingEnvironment:
                             }
                             for c in self.consumption_events  # Include all active consumption events
                         ],
+                        # ray_casting_events removed for performance
                         'survival_stats': {
                             'total_deaths': self.survival_stats['total_deaths'],
                             'deaths_by_starvation': self.survival_stats['deaths_by_starvation'],
@@ -3001,9 +3230,10 @@ class TrainingEnvironment:
                         'status': environmental_status,
                         'obstacles': visible_obstacles
                     },
+                    'viewport_culling': viewport_culling_stats,
                     'physics_fps': getattr(self, 'current_physics_fps', 0),
                     'simulation_speed': self.simulation_speed_multiplier,
-                    'viewport_culling': viewport_stats
+                    'show_health_bars': self.show_health_bars  # PERFORMANCE: Tell frontend if health data is included
                 }
                 
                 # Track data serialization time for performance analysis
@@ -4162,14 +4392,14 @@ class TrainingEnvironment:
                             )
                             attention_networks_cleaned += 1
                     
-                    # Aggressively clean experience replay buffer
+                    # ULTRA AGGRESSIVE: Clean experience replay buffer for performance
                     if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
                         buffer_size = len(learning_system.memory.buffer)
-                        if buffer_size > 1000:  # Much more aggressive - clean at 1k (was 10k)
-                            # Keep only most recent 1k experiences
+                        if buffer_size > 500:  # PERFORMANCE FIX: Clean at 500 entries (was 1000)
+                            # Keep only most recent 500 experiences
                             learning_system.memory.buffer = deque(
-                                list(learning_system.memory.buffer)[-1000:],
-                                maxlen=3000  # Reduced from 25000
+                                list(learning_system.memory.buffer)[-500:],
+                                maxlen=1000  # PERFORMANCE FIX: Reduced max from 3000 to 1000
                             )
             
             if attention_networks_cleaned > 0:
@@ -4509,6 +4739,24 @@ def ai_optimization_settings():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+@app.route('/toggle_health_bars', methods=['POST'])
+def toggle_health_bars():
+    """Toggle health bar rendering on/off for performance optimization."""
+    try:
+        data = request.get_json() or {}
+        enable = data.get('enable', not env.show_health_bars)  # Toggle if not specified
+        
+        env.show_health_bars = bool(enable)
+        
+        message = f"Health bars {'enabled' if env.show_health_bars else 'disabled'}"
+        return jsonify({
+            'status': 'success',
+            'message': message,
+            'show_health_bars': env.show_health_bars
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 # WebGL routes removed - WebGL is now the only rendering mode
 
 @app.route('/elite_robots', methods=['GET', 'POST'])
@@ -4571,6 +4819,8 @@ def elite_robots():
                 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# Ray casting visualization endpoint removed for performance
 
 def main():
     # Set a different port for the web server to avoid conflicts

@@ -144,6 +144,12 @@ class CrawlingAgent(BaseAgent):
         
         # Optional training environment reference (for food info)
         self._training_env = None
+        
+        # Ray casting system for forward perception
+        self.ray_sensor_range = 8.0  # 8 meter max range
+        self.num_rays = 5  # 5 forward-facing rays
+        self.ray_angles = self._calculate_ray_angles()  # Pre-calculate ray directions
+        self.last_ray_results = []  # Cache last ray cast results
     
     def _initialize_learning_system(self):
         """
@@ -160,7 +166,7 @@ class CrawlingAgent(BaseAgent):
             from .attention_deep_q_learning import AttentionDeepQLearning
             
             # FIXED PARAMETERS: No dynamic calculation to avoid inconsistencies
-            state_size = 19  # Fixed - matches get_state_representation()
+            state_size = 29  # Fixed - matches get_state_representation() with ray sensing
             action_size = 15  # Fixed - matches locomotion action combinations
             
             self._learning_system = AttentionDeepQLearning(
@@ -175,9 +181,9 @@ class CrawlingAgent(BaseAgent):
     
     def _calculate_state_size(self) -> int:
         """
-        Calculate state size for enhanced robot representation.
+        Calculate state size for enhanced robot representation with ray sensing.
         
-        ENHANCED STATE SPACE (19 dimensions total):
+        ENHANCED STATE SPACE (29 dimensions total):
         ===========================================
         - Joint angles and velocities: 4 values 
           * shoulder_angle, elbow_angle, shoulder_velocity, elbow_velocity
@@ -189,13 +195,14 @@ class CrawlingAgent(BaseAgent):
           * ground_contact, arm_contact, stability_measure
         - Temporal context: 2 values
           * recent_shoulder_action, recent_elbow_action
+        - Ray sensing data: 10 values (5 rays × 2 values each)
+          * ray1_distance, ray1_object_type, ray2_distance, ray2_object_type, ...
         
-        TOTAL: 4 + 6 + 4 + 3 + 2 = 19 dimensions
+        TOTAL: 4 + 6 + 4 + 3 + 2 + 10 = 29 dimensions
         
-        This matches the neural network architecture in AttentionDeepQLearning.
-        All robots use this consistent state representation for proper learning.
+        Ray sensing provides forward-facing environmental awareness for navigation.
         """
-        return 19  # Fixed size for consistent neural network architecture
+        return 29  # Updated size including ray sensing data
     
     def _generate_locomotion_action_combinations(self) -> List[Tuple[float, float]]:
         """Generate enhanced action combinations optimized for crawling locomotion."""
@@ -223,6 +230,133 @@ class CrawlingAgent(BaseAgent):
     def _generate_action_combinations(self) -> List[Tuple[float, float]]:
         """Backward compatibility - delegate to locomotion action generator."""
         return self._generate_locomotion_action_combinations()
+    
+    def _calculate_ray_angles(self) -> List[float]:
+        """Calculate 5 ray angles for forward-right sensing."""
+        # 5 rays spread in a 90-degree cone facing forward-right
+        # Center ray points forward-right (45 degrees), others spread ±45 degrees
+        center_angle = np.pi / 4  # 45 degrees to the right
+        spread = np.pi / 4  # ±45 degrees spread
+        
+        angles = []
+        for i in range(self.num_rays):
+            # Spread rays evenly across the cone
+            angle_offset = (i - 2) * (spread / 2)  # -2, -1, 0, 1, 2 gives even spread
+            angles.append(center_angle + angle_offset)
+        
+        return angles
+    
+    def _cast_ray(self, start_pos: Tuple[float, float], angle: float) -> Tuple[float, int]:
+        """
+        Cast a single ray and return distance and object type.
+        Only considers ground/terrain and obstacle bodies, ignoring other robots.
+        
+        Returns:
+            Tuple of (distance, object_type_code)
+            object_type_code: 0=clear, 1=obstacle, 2=terrain
+        """
+        # Calculate ray endpoint
+        end_x = start_pos[0] + np.cos(angle) * self.ray_sensor_range
+        end_y = start_pos[1] + np.sin(angle) * self.ray_sensor_range
+        
+        class RayCallback(b2.b2RayCastCallback):
+            def __init__(self, robot_instance, ray_range):
+                super().__init__()
+                self.hit_distance = ray_range  # Start with max range
+                self.object_type = 0  # Default: clear
+                self.robot_instance = robot_instance
+                self.ray_range = ray_range
+                
+            def ReportFixture(self, fixture, point, normal, fraction):
+                # Skip the robot's own body parts
+                robot_bodies = []
+                if self.robot_instance.body:
+                    robot_bodies.append(self.robot_instance.body)
+                if self.robot_instance.upper_arm:
+                    robot_bodies.append(self.robot_instance.upper_arm)
+                if self.robot_instance.lower_arm:
+                    robot_bodies.append(self.robot_instance.lower_arm)
+                if hasattr(self.robot_instance, 'wheels') and self.robot_instance.wheels:
+                    robot_bodies.extend(self.robot_instance.wheels)
+                
+                if fixture.body in robot_bodies:
+                    return -1  # Ignore robot's own body parts
+                
+                # Check if this is something we should ignore
+                if fixture.body.userData:
+                    body_data = fixture.body.userData
+                    if isinstance(body_data, dict):
+                        obj_type = body_data.get('type')
+                        # Skip other robots and food
+                        if obj_type == 'robot' or obj_type == 'food':
+                            return -1  # Ignore
+                
+                # Calculate distance to hit point
+                distance = fraction * self.ray_range
+                
+                # Only update if this is closer than previous hits
+                if distance < self.hit_distance:
+                    self.hit_distance = distance
+                    
+                    # Determine object type - only obstacles and terrain
+                    if fixture.body.userData:
+                        body_data = fixture.body.userData
+                        if isinstance(body_data, dict):
+                            if body_data.get('type') == 'obstacle':
+                                self.object_type = 1  # Obstacle
+                            elif body_data.get('type') == 'terrain' or body_data.get('type') == 'ground':
+                                self.object_type = 2  # Terrain/Ground
+                            else:
+                                self.object_type = 1  # Unknown static object treated as obstacle
+                        else:
+                            self.object_type = 1  # Generic obstacle
+                    else:
+                        # No userData - assume it's ground/terrain if it's static
+                        if fixture.body.type == b2.b2_staticBody:
+                            self.object_type = 2  # Static body = terrain
+                        else:
+                            self.object_type = 1  # Dynamic body = obstacle
+                
+                # Return fraction to clip ray to closest hit so far
+                return fraction
+        
+        # Cast the ray
+        callback = RayCallback(self, self.ray_sensor_range)
+        try:
+            self.world.RayCast(callback, start_pos, (end_x, end_y))
+        except:
+            # If ray casting fails, return max range and clear
+            return self.ray_sensor_range, 0
+        
+        # Return results
+        if callback.hit_distance < self.ray_sensor_range:
+            return callback.hit_distance, callback.object_type
+        else:
+            return self.ray_sensor_range, 0  # No hit - clear path
+    
+    def _perform_ray_scan(self) -> List[Tuple[float, int]]:
+        """Perform a complete ray scan and return results for all 5 rays."""
+        if not self.body:
+            # Return default values if no body
+            return [(self.ray_sensor_range, 0)] * self.num_rays
+        
+        # Get robot position and orientation
+        robot_pos = (self.body.position.x, self.body.position.y)
+        robot_angle = self.body.angle
+        
+        results = []
+        for ray_angle in self.ray_angles:
+            # Convert relative ray angle to world angle
+            world_angle = robot_angle + ray_angle
+            distance, obj_type = self._cast_ray(robot_pos, world_angle)
+            results.append((distance, obj_type))
+            
+            # Ray visualization removed for performance
+        
+        self.last_ray_results = results
+        return results
+    
+
     
     def _create_physics_bodies(self):
         """Create Box2D physics bodies based on physical parameters."""
@@ -357,17 +491,17 @@ class CrawlingAgent(BaseAgent):
     
     def get_state_representation(self) -> np.ndarray:
         """
-        Get enhanced state representation for neural network training.
+        Get enhanced state representation for neural network training with ray sensing.
         
-        Returns exactly 19 dimensions as documented in _calculate_state_size().
+        Returns exactly 29 dimensions as documented in _calculate_state_size().
         This ensures consistent input to the neural network architecture.
         """
         try:
-            state_array = np.zeros(19, dtype=np.float32)  # Fixed size for consistency
+            state_array = np.zeros(29, dtype=np.float32)  # Fixed size for consistency
             
             # DEBUG: Minimal state generation confirmation (only once per agent)
             if not hasattr(self, '_state_gen_confirmed'):
-                print(f"✅ Agent {str(self.id)[:8]}: Using 19D state representation")
+                print(f"✅ Agent {str(self.id)[:8]}: Using 29D state representation with ray sensing")
                 self._state_gen_confirmed = True
             
             # 1. Joint angles and velocities (4 values)
@@ -461,6 +595,17 @@ class CrawlingAgent(BaseAgent):
             else:
                 state_array[17:19] = 0.0
             
+            # 6. Ray sensing data (10 values) - 5 rays × 2 values each
+            ray_results = self._perform_ray_scan()
+            for i, (distance, obj_type) in enumerate(ray_results):
+                base_idx = 19 + (i * 2)  # Start at index 19, 2 values per ray
+                if base_idx < 29:  # Safety check
+                    # Normalize distance to [0, 1] range
+                    state_array[base_idx] = min(distance / self.ray_sensor_range, 1.0)
+                    # Object type as categorical value [0-2] normalized to [0, 1] 
+                    # 0=clear, 1=obstacle, 2=terrain
+                    state_array[base_idx + 1] = obj_type / 2.0
+            
             # Ensure no NaN values
             state_array = np.nan_to_num(state_array, nan=0.0, posinf=1.0, neginf=-1.0)
             
@@ -468,7 +613,7 @@ class CrawlingAgent(BaseAgent):
             
         except Exception as e:
             print(f"⚠️ Error getting expanded state for agent {self.id}: {e}")
-            return np.zeros(19, dtype=np.float32)  # Return fixed size on error
+            return np.zeros(29, dtype=np.float32)  # Return fixed size on error
     
     def _get_legacy_state_representation(self, expected_size: int) -> np.ndarray:
         """Generate legacy state representation for backward compatibility."""
