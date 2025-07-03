@@ -359,6 +359,7 @@ class TrainingEnvironment:
         
         # Health bar rendering toggle (PERFORMANCE OPTIMIZATION)
         self.show_health_bars = False  # Default: enabled, can be toggled off for performance
+        self.enable_visualization = True  # Default: show robot visualization, can be disabled for max speed
         
         # Simulation speed control
         self.simulation_speed_multiplier = 10.0  # 10x speed by default for faster training
@@ -769,9 +770,10 @@ class TrainingEnvironment:
             # Create static body for terrain
             terrain_body = self.world.CreateStaticBody(position=position)
             
-            # Create terrain as a box (representing elevated ground)
+            # Create terrain as a box (representing elevated ground) - ROBOT-SCALE: Limit height
+            limited_height = min(height, 1.2)  # ROBOT-SCALE: Max 1.2m tall terrain
             fixture = terrain_body.CreateFixture(
-                shape=b2.b2PolygonShape(box=(size/2, height/2)),
+                shape=b2.b2PolygonShape(box=(size/2, limited_height/2)),
                 density=0.0,  # Static body
                 friction=friction,
                 restitution=0.1,  # Slight bounce for natural feel
@@ -2767,6 +2769,26 @@ class TrainingEnvironment:
         if not self.is_running:
             return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'all_agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
+        # 🚀 PERFORMANCE OPTIMIZATION: Return minimal data when visualization is disabled
+        if not self.enable_visualization:
+            return {
+                'shapes': {},
+                'leaderboard': [], 
+                'robots': [], 
+                'agents': [], 
+                'all_agents': [],
+                'statistics': {'total_agents': len([a for a in self.agents if not getattr(a, '_destroyed', False)])},
+                'camera': self.get_camera_state(),
+                'focused_agent_id': None,
+                'ecosystem': {'status': 'visualization_disabled'},
+                'environment': {'status': 'visualization_disabled', 'obstacles': []},
+                'viewport_culling': {'enabled': False, 'status': 'visualization_disabled'},
+                'physics_fps': getattr(self, 'current_physics_fps', 0),
+                'simulation_speed': self.simulation_speed_multiplier,
+                'show_health_bars': self.show_health_bars,
+                'enable_visualization': self.enable_visualization
+            }
+
         # Use a read lock to safely access agents
         with self._physics_lock:
             try:
@@ -3233,7 +3255,8 @@ class TrainingEnvironment:
                     'viewport_culling': viewport_culling_stats,
                     'physics_fps': getattr(self, 'current_physics_fps', 0),
                     'simulation_speed': self.simulation_speed_multiplier,
-                    'show_health_bars': self.show_health_bars  # PERFORMANCE: Tell frontend if health data is included
+                    'show_health_bars': self.show_health_bars,  # PERFORMANCE: Tell frontend if health data is included
+                    'enable_visualization': self.enable_visualization  # PERFORMANCE: Tell frontend if visualization is enabled
                 }
                 
                 # Track data serialization time for performance analysis
@@ -4017,9 +4040,9 @@ class TrainingEnvironment:
             
             # Choose shape based on obstacle type
             if obstacle_type in ['boulder', 'wall']:
-                # Rectangular obstacles
-                width = size if obstacle_type == 'boulder' else min(size, 1.0)  # Walls are thinner
-                height = size if obstacle_type == 'boulder' else max(size, 3.0)  # Walls are taller
+                # ROBOT-SCALE: Smaller rectangular obstacles
+                width = size if obstacle_type == 'boulder' else min(size, 0.5)  # Thinner walls (was 1.0)
+                height = min(size, 1.0) if obstacle_type == 'boulder' else min(size, 1.2)  # LOWER: Max 1.0-1.2m tall (was 3.0m)
                 
                 fixture = obstacle_body.CreateFixture(
                     shape=b2.b2PolygonShape(box=(width/2, height/2)),
@@ -4753,6 +4776,26 @@ def toggle_health_bars():
             'status': 'success',
             'message': message,
             'show_health_bars': env.show_health_bars
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/toggle_visualization', methods=['POST'])
+def toggle_visualization():
+    """Toggle robot visualization on/off for maximum performance optimization."""
+    try:
+        data = request.get_json() or {}
+        enable = data.get('enable', not env.enable_visualization)  # Toggle if not specified
+        
+        env.enable_visualization = bool(enable)
+        
+        message = f"Robot visualization {'enabled' if env.enable_visualization else 'disabled'}"
+        status_message = message + (" (maximum speed mode)" if not env.enable_visualization else " (normal mode)")
+        
+        return jsonify({
+            'status': 'success',
+            'message': status_message,
+            'enable_visualization': env.enable_visualization
         })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500

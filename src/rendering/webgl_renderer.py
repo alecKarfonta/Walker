@@ -184,6 +184,7 @@ WEBGL_HTML_TEMPLATE = """
             <canvas id="simulation-canvas"></canvas>
             <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
             <button id="toggleHealthBars" onclick="toggleHealthBars()" style="position:absolute; top:40px; left:120px; z-index:50; background:#E91E63; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Health Bars: OFF</button>
+            <button id="toggleVisualization" onclick="toggleVisualization()" style="position:absolute; top:70px; left:120px; z-index:50; background:#FF9800; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer; font-weight:bold;">🚀 Max Speed Mode</button>
             
             <div id="speed-controls" style="position:absolute; top:90px; right:10px; z-index:50; background:rgba(0,0,0,0.8); color:white; padding:8px 12px; border-radius:6px; border:1px solid #3498db;">
                 <div style="margin-bottom: 6px; font-size: 11px; color: #bdc3c7;">
@@ -743,6 +744,33 @@ WEBGL_HTML_TEMPLATE = """
             // Update camera
             renderer.updateCamera(cameraPosition.x, cameraPosition.y, cameraZoom * scale);
             
+            // Check if visualization is disabled (max speed mode)
+            if (!enableVisualization) {
+                // Show max speed mode message
+                const ctx = canvas.getContext('2d');
+                if (ctx) {
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    ctx.fillStyle = '#4CAF50';
+                    ctx.font = 'bold 48px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('💨 MAX SPEED MODE', canvas.width/2, canvas.height/2 - 40);
+                    
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = '24px Arial';
+                    ctx.fillText('Robot visualization disabled for maximum performance', canvas.width/2, canvas.height/2 + 20);
+                    
+                    ctx.fillStyle = '#FFAA00';
+                    ctx.font = '18px Arial';
+                    ctx.fillText('Click "Max Speed ON" button to re-enable visualization', canvas.width/2, canvas.height/2 + 60);
+                    
+                    ctx.restore();
+                }
+                return;
+            }
+            
             // Draw ground
             if (data.shapes && data.shapes.ground) {
                 data.shapes.ground.forEach(shape => {
@@ -997,6 +1025,41 @@ WEBGL_HTML_TEMPLATE = """
             });
         }
         
+        // Global state for visualization toggle
+        let enableVisualization = true;
+        
+        function toggleVisualization() {
+            enableVisualization = !enableVisualization;
+            const button = document.getElementById('toggleVisualization');
+            
+            // Call backend to toggle visualization
+            fetch('./toggle_visualization', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enable: enableVisualization })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Update button based on actual backend state
+                    enableVisualization = data.enable_visualization;
+                    if (enableVisualization) {
+                        button.textContent = '🚀 Max Speed Mode';
+                        button.style.background = '#FF9800';
+                    } else {
+                        button.textContent = '💨 Max Speed ON';
+                        button.style.background = '#4CAF50';
+                    }
+                    console.log(`🚀 Robot visualization ${enableVisualization ? 'enabled - normal mode' : 'disabled - maximum speed mode'}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error toggling visualization:', error);
+                // Revert button state on error
+                enableVisualization = !enableVisualization;
+            });
+        }
+        
 
         
         function setSimulationSpeed(speed) {
@@ -1233,6 +1296,21 @@ WEBGL_HTML_TEMPLATE = """
                             } else {
                                 button.textContent = 'Health Bars: OFF';
                                 button.style.background = '#E91E63';
+                            }
+                        }
+                    }
+                    
+                    // Update visualization toggle state from server
+                    if (data.enable_visualization !== undefined) {
+                        enableVisualization = data.enable_visualization;
+                        const button = document.getElementById('toggleVisualization');
+                        if (button) {
+                            if (enableVisualization) {
+                                button.textContent = '🚀 Max Speed Mode';
+                                button.style.background = '#FF9800';
+                            } else {
+                                button.textContent = '💨 Max Speed ON';
+                                button.style.background = '#4CAF50';
                             }
                         }
                     }

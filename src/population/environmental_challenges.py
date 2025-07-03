@@ -267,16 +267,16 @@ class EnvironmentalChallengeSystem:
         x = random.uniform(self.world_bounds[0] - 20, self.world_bounds[2] + 20)
         y = random.uniform(self.world_bounds[1], self.world_bounds[3])
         
-        # Size based on obstacle type
+        # Size based on obstacle type - ROBOT-SCALE: Much smaller for 1.5m robots
         size_ranges = {
-            ObstacleType.BOULDER: (2, 8),
-            ObstacleType.PIT: (3, 12),
-            ObstacleType.WALL: (1, 20),
-            ObstacleType.MOVING_PLATFORM: (4, 10),
-            ObstacleType.SPIKE_TRAP: (2, 5),
-            ObstacleType.QUICKSAND: (5, 15),
-            ObstacleType.ICE_PATCH: (3, 10),
-            ObstacleType.FIRE_HAZARD: (2, 6)
+            ObstacleType.BOULDER: (0.5, 2.0),        # SMALLER: Was (2, 8)
+            ObstacleType.PIT: (1.0, 3.0),            # SMALLER: Was (3, 12)
+            ObstacleType.WALL: (0.3, 1.5),           # SHORTER: Was (1, 20) - height not width
+            ObstacleType.MOVING_PLATFORM: (1.5, 3.0), # SMALLER: Was (4, 10)
+            ObstacleType.SPIKE_TRAP: (0.5, 1.5),     # SMALLER: Was (2, 5)
+            ObstacleType.QUICKSAND: (2.0, 4.0),      # SMALLER: Was (5, 15)
+            ObstacleType.ICE_PATCH: (1.0, 3.0),      # SMALLER: Was (3, 10)
+            ObstacleType.FIRE_HAZARD: (0.5, 2.0)     # SMALLER: Was (2, 6)
         }
         
         size_range = size_ranges.get(obstacle_type, (2, 8))

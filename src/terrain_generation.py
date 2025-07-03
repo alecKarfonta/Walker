@@ -354,8 +354,8 @@ class RobotScaleTerrainGenerator:
             features.append(RobotScaleFeature(
                 type=TerrainType.OBSTACLE,
                 center=(random.uniform(x_min, x_max), random.uniform(y_min, y_max)),
-                size=random.uniform(1.0, 2.5),        # 1-2.5m wide
-                height=random.uniform(0.8, 1.8),      # 0.8-1.8m tall - challenging but passable
+                size=random.uniform(0.8, 1.5),        # SMALLER: 0.8-1.5m wide (was 1.0-2.5m)
+                height=random.uniform(0.3, 0.8),      # PASSABLE: 0.3-0.8m tall (was 0.8-1.8m)
                 friction=0.7,
                 roughness=0.3
             ))
@@ -405,8 +405,8 @@ class RobotScaleTerrainGenerator:
             features.append(RobotScaleFeature(
                 type=TerrainType.OBSTACLE,
                 center=(random.uniform(x_min, x_max), random.uniform(y_min, y_max)),
-                size=random.uniform(0.8, 2.0),        # Small obstacles
-                height=random.uniform(1.2, 2.5),      # 1.2-2.5m tall - meaningful obstacles for 1.5m robots
+                size=random.uniform(0.5, 1.2),        # SMALLER: Small obstacles (was 0.8-2.0m)
+                height=random.uniform(0.3, 0.9),      # PASSABLE: 0.3-0.9m tall (was 1.2-2.5m)
                 friction=random.uniform(0.5, 0.8),
                 roughness=random.uniform(0.4, 0.7)
             ))
@@ -417,8 +417,8 @@ class RobotScaleTerrainGenerator:
             features.append(RobotScaleFeature(
                 type=random.choice([TerrainType.SMALL_HILL, TerrainType.OBSTACLE]),
                 center=(random.uniform(x_min, x_max), random.uniform(y_min, y_max)),
-                size=random.uniform(2.0, 4.0),
-                height=random.uniform(1.0, 2.0),      # Challenging obstacles for 1.5m robots
+                size=random.uniform(1.5, 3.0),        # SMALLER: Medium obstacles (was 2.0-4.0m)
+                height=random.uniform(0.4, 1.0),      # PASSABLE: 0.4-1.0m tall (was 1.0-2.0m)
                 friction=0.6,
                 roughness=0.5
             ))
@@ -481,7 +481,7 @@ class RobotScaleTerrainGenerator:
                 type=TerrainType.ROUGH_PATCH,
                 center=(random.uniform(x_min, x_max), random.uniform(y_min, y_max)),
                 size=random.uniform(1.5, 3.5),
-                height=random.uniform(0.5, 1.8),      # Meaningful elevation changes for robot navigation
+                height=random.uniform(0.2, 0.8),      # PASSABLE: Small elevation changes (was 0.5-1.8m)
                 friction=random.uniform(0.4, 0.7),
                 roughness=random.uniform(0.6, 0.9)
             ))
@@ -505,14 +505,14 @@ class RobotScaleTerrainGenerator:
         features = []
         x_min, y_min, x_max, y_max = self.bounds
         
-        # Mix of all terrain types
+        # Mix of all terrain types  
         terrain_types = [
-            (TerrainType.SMALL_HILL, 0.3, 1.2),
-            (TerrainType.GENTLE_SLOPE, 0.2, 0.8),
-            (TerrainType.OBSTACLE, 0.4, 0.7),
-            (TerrainType.RAMP, 0.5, 1.0),
-            (TerrainType.ROUGH_PATCH, 0.1, 0.3),
-            (TerrainType.DEPRESSION, -0.2, -0.1)
+            (TerrainType.SMALL_HILL, 0.3, 1.0),      # LOWER: Hills (was 0.3-1.2m)
+            (TerrainType.GENTLE_SLOPE, 0.2, 0.6),    # LOWER: Slopes (was 0.2-0.8m)
+            (TerrainType.OBSTACLE, 0.3, 0.8),        # LOWER: Obstacles (was 0.4-0.7m but made taller range)
+            (TerrainType.RAMP, 0.4, 0.8),            # LOWER: Ramps (was 0.5-1.0m)
+            (TerrainType.ROUGH_PATCH, 0.1, 0.3),     # Same: Rough patches
+            (TerrainType.DEPRESSION, -0.2, -0.1)     # Same: Depressions
         ]
         
         for terrain_type, min_height, max_height in terrain_types:
@@ -545,7 +545,7 @@ class RobotScaleTerrainGenerator:
                 type=TerrainType.SMALL_HILL,
                 center=(random.uniform(x_min, x_max), random.uniform(y_min, y_max)),
                 size=random.uniform(3.0, 5.0),
-                height=random.uniform(1.5, 2.5),      # Meaningful mixed terrain hills
+                height=random.uniform(0.5, 1.2),      # PASSABLE: Small hills (was 1.5-2.5m)
                 friction=0.7,
                 roughness=0.4
             ))
@@ -556,8 +556,8 @@ class RobotScaleTerrainGenerator:
             features.append(RobotScaleFeature(
                 type=TerrainType.OBSTACLE,
                 center=(random.uniform(x_min, x_max), random.uniform(y_min, y_max)),
-                size=random.uniform(1.5, 3.0),
-                height=random.uniform(1.2, 2.2),      # Meaningful obstacles for 1.5m robots
+                size=random.uniform(1.0, 2.0),        # SMALLER: Moderate obstacles (was 1.5-3.0m)
+                height=random.uniform(0.4, 1.0),      # PASSABLE: 0.4-1.0m tall (was 1.2-2.2m)
                 friction=0.6,
                 roughness=0.5
             ))
