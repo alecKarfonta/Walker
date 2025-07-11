@@ -126,7 +126,11 @@ class EvolutionaryCrawlingAgent:
         self._ensure_limb_references()
         
         # CRITICAL FIX: Initialize learning system (was missing!)
-        self._initialize_learning_system()
+        # BUT ONLY if no network was preserved from Robot Memory Pool
+        if not hasattr(self, '_learning_system') or self._learning_system is None:
+            self._initialize_learning_system()
+        else:
+            print(f"🔄 Agent {self.id}: Preserved network from Robot Memory Pool (action_size: {self.action_size})")
     
     def step(self, dt: float):
         """Step the robot simulation with action persistence."""

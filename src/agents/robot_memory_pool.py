@@ -153,10 +153,27 @@ class RobotMemoryPool:
         
         # Apply size mutations to existing physical parameters if enabled
         if apply_size_mutations and hasattr(robot, 'physical_params') and robot.physical_params:
+            # CRITICAL FIX: Preserve morphology to maintain action space compatibility
+            # Store current morphology before mutations
+            original_num_arms = robot.physical_params.num_arms
+            original_segments_per_limb = robot.physical_params.segments_per_limb
+            original_action_size = robot.action_size if hasattr(robot, 'action_size') else None
+            
             # Apply size-only mutations while preserving neural network
             mutated_params = robot.physical_params.mutate_sizes_only(mutation_rate=0.12)
+            
+            # CRITICAL: Restore morphology parameters to preserve action space
+            mutated_params.num_arms = original_num_arms
+            mutated_params.segments_per_limb = original_segments_per_limb
+            
             robot.physical_params = mutated_params
-            print(f"🧬 Applied size mutations to pooled robot {robot_id}")
+            
+            # Verify action space hasn't changed (critical for network compatibility)
+            if original_action_size and hasattr(robot, 'action_size'):
+                if robot.action_size != original_action_size:
+                    print(f"⚠️ WARNING: Action space changed for pooled robot {robot_id}: {original_action_size} → {robot.action_size}")
+            
+            print(f"🧬 Applied size mutations to pooled robot {robot_id} (preserved morphology: {original_num_arms} limbs × {original_segments_per_limb} segments)")
         elif physical_params is not None:
             robot.physical_params = physical_params.validate_and_repair()
         
