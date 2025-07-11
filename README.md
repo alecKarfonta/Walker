@@ -1,69 +1,51 @@
-# Walker Python
+# Walker - An Autonomous AI Simulation
 
-A simulated environment for training populations of walking robots using reinforcement learning and evolutionary algorithms.
+A 2D physics-based simulation for training autonomous agents using reinforcement learning and evolutionary algorithms.
 
-🚀 **[Live Demo](https://mlapi.us/walker/)** - See the simulation in action!
+🚀 **Live Demo**: [https://mlapi.us/walker/](https://mlapi.us/walker/)
 
-![Walker Simulation Example](example_01.png)
+![Walker Simulation Example](docs/images/example_01.png)
 
-## Features
+## Core Features
 
-- **Physics Simulation**: Realistic 2D physics using Box2d
-- **Reinforcement Learning**: Various implementations of Q-Learning with neural networks
-- **Evolutionary Algorithm**: Population-based evolution with genetic operators
-- **Real-time Visualization**: Pygame-based rendering with interactive debugging
-- **Web Interface**: Browser-based visualization and control panel
-- **Interactive GUI**: Parameter adjustment and simulation control
-- **Performance Monitoring**: Real-time statistics and leaderboards
+*   **Physics-Based Simulation**: 2D environment powered by Box2D.
+*   **Reinforcement Learning**: Features an Attention-based Deep Q-Learning model for agent decision-making.
+*   **Evolutionary Algorithms**: Agent morphology (body structure) evolves over generations.
+*   **Dynamic Environments**: The world is procedurally generated with changing terrain, obstacles, and resources.
+*   **Efficient Agent Recycling**: A memory pool reuses agents to preserve learned knowledge.
+*   **Web-Based Visualization**: Live monitoring and interaction via a Flask and Socket.IO interface.
 
-## What is Walker?
+## Getting Started
 
-Walker is a machine learning simulation where populations of robots learn to walk through a combination of:
-- **Reinforcement Learning**: Individual robots learn through trial and error
-- **Evolutionary Algorithms**: Successful traits are passed to future generations
-- **Neural Networks**: Robots use neural networks to make movement decisions
-- **Physics Simulation**: Realistic physics constraints make walking a challenging task
+### Prerequisites
+- Docker
+- Docker Compose
 
-Watch as robots evolve from clumsy attempts to efficient walkers over many generations!
+### Installation & Running
 
-## Installation
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/alecKarfonta/Walker.git
+    cd Walker
+    ```
 
-1. Clone the repository:
-```bash
-git clone https://github.com/alecKarfonta/Walker
-cd Walker
-```
+2.  **Build and run the Docker container:**
+    ```bash
+    docker compose up -d --build
+    ```
 
-2. Build and run with Docker:
-```bash
-docker compose up -d --build
-```
-
-## Live Demo
-
-Check out the live simulation running at: **https://mlapi.us/walker/**
-
-Features available in the live demo:
-- Real-time robot population visualization
-- Performance leaderboards
-- Individual robot details and statistics
-- Speed controls (0.5x to 100x)
-- Viewport culling and debug options
+3.  **Access the web interface:**
+    Open your browser and navigate to `http://localhost:8080`.
 
 ## Project Structure
 
 ```
-walker_python/
-├── src/
-│   ├── config/          # Configuration and settings
-│   ├── physics/         # Physics engine (Pymunk)
-│   ├── agents/          # Reinforcement learning agents
-│   ├── population/      # Population management
-│   ├── rendering/       # Graphics and visualization
-│   ├── ui/             # User interface
-│   ├── utils/          # Utility functions
-│   └── assets/         # Game assets
-├── tests/              # Unit tests
-├── requirements.txt    # Python dependencies
-└── run.py             # Main entry point
+.
+├── src/                 # Main source code for the simulation
+├── scripts/             # Utility, analysis, and standalone scripts
+├── docs/                # Project documentation and reports
+├── config/              # Simulation and environment configuration
+├── tests/               # Unit and integration tests
+├── docker-compose.yml   # Docker Compose configuration
+└── train_robots_web_visual.py # Main entry point for the simulation
 ```
