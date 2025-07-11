@@ -1450,12 +1450,16 @@ class TrainingEnvironment:
                         # Initialize new agent's ecosystem data
                         self._initialize_single_agent_ecosystem(replacement_agent)
                         
-                        # CRITICAL: Assign neural network from Learning Manager (preserves knowledge)
-                        if self.learning_manager:
-                            network = self.learning_manager._acquire_attention_network(replacement_agent.id, 15, 29)
+                        # CRITICAL FIX: Only assign new network if agent doesn't already have one from Robot Memory Pool
+                        if hasattr(replacement_agent, '_learning_system') and replacement_agent._learning_system is not None:
+                            print(f"🧠 Replacement agent {replacement_agent.id} already has network from Robot Memory Pool")
+                        elif self.learning_manager:
+                            # Get action size from replacement agent's morphology
+                            action_size = getattr(replacement_agent, 'action_size', 15)
+                            network = self.learning_manager._acquire_attention_network(replacement_agent.id, action_size, 29)
                             if network:
                                 replacement_agent._learning_system = network
-                                print(f"🧠 Assigned neural network to replacement agent {replacement_agent.id}")
+                                print(f"🧠 Assigned NEW neural network to replacement agent {replacement_agent.id}")
                             else:
                                 print(f"⚠️ Failed to assign neural network to replacement agent {replacement_agent.id}")
                         else:
