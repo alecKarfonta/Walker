@@ -312,13 +312,13 @@ class AttentionDeepQLearning:
         # Copy weights to target network
         self.target_network.load_state_dict(self.q_network.state_dict())
         
-        self.attention_history = deque(maxlen=50)  # FIXED: Reduced from 5000 to 50 to prevent memory leak
+        self.attention_history = deque(maxlen=200)  # TRAINING FIX: Increased from 50 to 200 for better learning
         
-        # Deque maxlen=50 handles size automatically - no manual cleanup needed
+        # Deque maxlen=200 handles size automatically - no manual cleanup needed
         
         print(f"🦾 Arm Control Attention-based Deep Q-Learning initialized with {self.device}")
         print(f"   📊 Network parameters: {sum(p.numel() for p in self.q_network.parameters()):,}")
-        print(f"   🧹 Attention history: {self.attention_history.maxlen} records (optimized)")
+        print(f"   🧹 Attention history: {self.attention_history.maxlen} records (training optimized)")
     
     def store_experience(self, state, action, reward, next_state, done):
         """Store experience in prioritized replay memory."""
@@ -515,13 +515,12 @@ class AttentionDeepQLearning:
         }
     
     def _cleanup_attention_data(self):
-        """Clean up accumulated attention data to prevent memory growth - MINIMAL CLEANUP."""
+        """Clean up accumulated attention data to prevent memory growth - CONSERVATIVE CLEANUP."""
         try:
-            # FIXED: Don't recreate the deque! Let maxlen=50 handle size automatically
-            # Just clear old entries without changing the deque structure
+            # TRAINING FIX: Much more conservative cleanup to preserve learning
             current_time = time.time()
-            if hasattr(self, 'attention_history') and len(self.attention_history) > 40:
-                cutoff_time = current_time - 1800.0  # 30 minutes old
+            if hasattr(self, 'attention_history') and len(self.attention_history) > 150:  # TRAINING FIX: Increased from 40 to 150
+                cutoff_time = current_time - 3600.0  # TRAINING FIX: 1 hour old (was 30 minutes)
                 
                 # Simple cleanup: remove old entries manually without recreating deque
                 old_size = len(self.attention_history)
@@ -532,11 +531,11 @@ class AttentionDeepQLearning:
                 
                 # Clear and refill instead of recreating
                 self.attention_history.clear()
-                for entry in filtered_entries[-40:]:  # Keep only last 40 entries
+                for entry in filtered_entries[-150:]:  # TRAINING FIX: Keep last 150 entries (was 40)
                     self.attention_history.append(entry)
                 
                 # Only log if significant cleanup happened
-                if old_size - len(self.attention_history) > 10:
+                if old_size - len(self.attention_history) > 50:  # TRAINING FIX: Increased threshold
                     print(f"🧹 Cleaned attention data: {len(self.attention_history)} records remaining (removed {old_size - len(self.attention_history)} old entries)")
             
         except Exception as e:

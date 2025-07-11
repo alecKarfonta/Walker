@@ -28,6 +28,8 @@ from flask_socketio import SocketIO
 from typing import List
 
 # Import evaluation framework
+
+from src.agents.robot_memory_pool import RobotMemoryPool
 from src.evaluation.metrics_collector import MetricsCollector
 from src.evaluation.dashboard_exporter import DashboardExporter
 
@@ -340,16 +342,31 @@ class TrainingEnvironment:
         # All agents now handle their own learning - no learning manager needed
         print("🧠 All agents using standalone attention deep Q-learning - no learning manager required")
 
+        # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
+        try:
+            self.robot_memory_pool = RobotMemoryPool(
+                world=self.world,
+                min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
+                max_pool_size=num_agents * 2,  # 2x population as maximum pool
+                category_bits=self.AGENT_CATEGORY,
+                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
+            )
+            
+            print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
+        except Exception as e:
+            print(f"⚠️ Robot Memory Pool initialization failed: {e}")
+            self.robot_memory_pool = None
+
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
         
-        # Performance optimization tracking with AGGRESSIVE cleanup
+        # Performance optimization tracking with CONSERVATIVE cleanup
         self.last_performance_cleanup = time.time()
-        self.performance_cleanup_interval = 10.0  # MUCH more frequent - every 10 seconds
+        self.performance_cleanup_interval = 600.0  # Less frequent - every 60 seconds
         
         # Attention network specific cleanup
         self.last_attention_cleanup = time.time()
-        self.attention_cleanup_interval = 5.0  # MUCH more frequent - every 5 seconds
+        self.attention_cleanup_interval = 300.0  # Less frequent - every 30 seconds
         
         # Web interface throttling
         self.last_web_interface_update = time.time()
@@ -384,10 +401,10 @@ class TrainingEnvironment:
         
         # Emergency shutdown tracking (for performance monitoring)
         self._emergency_shutdown_state = {
-            'max_consecutive_slow_frames': 10,
+            'max_consecutive_slow_frames': 100,  # INCREASED: Much higher threshold (was 10)
             'consecutive_slow_frames': 0,
-            'max_physics_bodies': 1000,
-            'max_memory_mb': 2000,
+            'max_physics_bodies': 2000,  # INCREASED: More tolerant (was 1000)
+            'max_memory_mb': 4000,  # INCREASED: More tolerant (was 2000)
             'last_emergency_check': 0
         }
     
@@ -395,24 +412,6 @@ class TrainingEnvironment:
     def slow_frame_count(self):
         """Get current slow frame count for performance monitoring."""
         return self._emergency_shutdown_state.get('consecutive_slow_frames', 0)
-
-        # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
-        try:
-            from src.agents.robot_memory_pool import RobotMemoryPool
-            self.robot_memory_pool = RobotMemoryPool(
-                world=self.world,
-                min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
-                max_pool_size=num_agents * 2,  # 2x population as maximum pool
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
-            )
-            
-            # Agents handle their own learning - no learning manager needed
-            
-            print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
-        except Exception as e:
-            print(f"⚠️ Robot Memory Pool initialization failed: {e}")
-            self.robot_memory_pool = None
 
         # Q-learning evaluation system
         self.q_learning_evaluator = None
@@ -1180,12 +1179,12 @@ class TrainingEnvironment:
                 # Energy gain is now properly scaled in the consume_resource function
                 
                 # Apply consistent energy decay (not paused during eating) - DRASTICALLY REDUCED for much better survival
-                base_decay = 0.000005  # Reduced from 0.00005 to 0.000005 (90% reduction - 10x longer survival)
+                base_decay = 0.00005  # Reduced from 0.00005 to 0.000005 (90% reduction - 10x longer survival)
                 
                 # Minimal additional decay based on movement 
                 velocity = agent.body.linearVelocity
                 speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
-                movement_cost = speed * 0.00005  # Reduced movement cost by 90%
+                movement_cost = speed * 0.0005  # Reduced movement cost by 90%
                 
                 # Role-based energy costs (minimal differences)
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -1734,8 +1733,21 @@ class TrainingEnvironment:
                     self.robot_stats[agent_id]['reward_rate'] = getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1))
                     self.robot_stats[agent_id]['fitness_score'] = total_distance
                 
-                # Keep episode_reward for backward compatibility but mark as deprecated
-                self.robot_stats[agent_id]['episode_reward'] = getattr(agent, 'total_reward', 0.0)  # DEPRECATED
+                # 🌊 ROLLING EPISODE REWARD: Use rolling average instead of cumulative total
+                if hasattr(agent, 'get_current_performance'):
+                    performance = agent.get_current_performance()
+                    # FIXED: Use short-term average (last 100 steps) instead of medium-term (500 steps)
+                    # This makes episode reward much more responsive to recent activity
+                    self.robot_stats[agent_id]['episode_reward'] = performance.get('short_term_avg', 0.0)
+                else:
+                    # Fallback: calculate rolling average manually with much shorter window
+                    if hasattr(agent, 'recent_rewards') and agent.recent_rewards:
+                        recent_rewards = list(agent.recent_rewards)[-100:]  # FIXED: Last 100 rewards instead of 500
+                        self.robot_stats[agent_id]['episode_reward'] = sum(recent_rewards) / len(recent_rewards)
+                    else:
+                        # Final fallback: use immediate reward rate (not cumulative)
+                        immediate_reward = getattr(agent, 'immediate_reward', 0.0)
+                        self.robot_stats[agent_id]['episode_reward'] = immediate_reward
                 self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
                 
             except Exception as e:
@@ -1989,14 +2001,19 @@ class TrainingEnvironment:
                         self._emergency_shutdown_state['consecutive_slow_frames'] = 0
                     
                     if emergency_triggered:
-                        print("🚨 TRIGGERING EMERGENCY SHUTDOWN TO PREVENT SYSTEM FREEZE")
-                        if self.dynamic_world_manager:
-                            print("🧹 Cleaning up dynamic world...")
-                            self.dynamic_world_manager.cleanup_all_tiles()
-                            self.dynamic_world_manager = None
+                        print("🚨 EMERGENCY CONDITIONS DETECTED - CONTINUING WITH WARNINGS ONLY")
+                        print("⚠️ System performance degraded but allowing simulation to continue")
+                        # DISABLED: Emergency shutdown - only log warnings, don't stop system
+                        # Optionally trigger cleanup without stopping
+                        if self.dynamic_world_manager and memory_mb > 1500:  # Only cleanup if memory is very high
+                            print("🧹 High memory detected - cleaning up dynamic world...")
+                            try:
+                                self.dynamic_world_manager.cleanup_all_tiles()
+                            except Exception as e:
+                                print(f"⚠️ Error during dynamic world cleanup: {e}")
                         
-                        self.is_running = False
-                        break
+                        # Reset slow frame counter to prevent spam
+                        self._emergency_shutdown_state['consecutive_slow_frames'] = 0
                     
                     self._emergency_shutdown_state['last_emergency_check'] = current_time
                     
@@ -2284,8 +2301,8 @@ class TrainingEnvironment:
                     # Ray casting logging removed for performance
                     
                     # Alert if memory is too high
-                    if memory_mb > 800:
-                        print(f"⚠️ HIGH MEMORY USAGE: {memory_mb:.1f}MB - triggering aggressive cleanup")
+                    if memory_mb > 1200:  # TRAINING FIX: Increased threshold from 800MB to 1200MB
+                        print(f"⚠️ HIGH MEMORY USAGE: {memory_mb:.1f}MB - triggering conservative cleanup")
                         self._cleanup_performance_data()
                         self._cleanup_attention_networks()
                         
@@ -2967,6 +2984,11 @@ class TrainingEnvironment:
                         is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
                         
                         # Basic data for all agents (needed for rendering)
+                        # Get episode reward from robot_stats if available
+                        episode_reward = 0.0
+                        if agent.id in self.robot_stats:
+                            episode_reward = float(self.robot_stats[agent.id].get('episode_reward', 0.0))
+                        
                         basic_agent_data = {
                             'id': agent.id,
                             'body': {
@@ -2978,6 +3000,7 @@ class TrainingEnvironment:
                                 }
                             },
                             'total_reward': float(agent.total_reward),
+                            'episode_reward': episode_reward,
                         }
                         
                         # MULTI-LIMB DATA FIX: Include all limbs for rendering
@@ -3079,6 +3102,11 @@ class TrainingEnvironment:
                                 'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy'])
                             })
                         
+                        # Get episode reward from robot_stats if available
+                        episode_reward_all = 0.0
+                        if agent.id in self.robot_stats:
+                            episode_reward_all = float(self.robot_stats[agent.id].get('episode_reward', 0.0))
+                        
                         basic_all_agent_data = {
                             'id': agent.id,
                             'body': {
@@ -3090,6 +3118,7 @@ class TrainingEnvironment:
                                 }
                             },
                             'total_reward': float(agent.total_reward),
+                            'episode_reward': episode_reward_all,
                             # Basic ecosystem data
                             'ecosystem': ecosystem_data_all
                         }
@@ -4355,16 +4384,16 @@ class TrainingEnvironment:
                     total_attention_history += attention_size
                 
                 
-                # Clean up replay buffer if too large (FIXED: correct path)
+                # Clean up replay buffer if too large (TRAINING FIX: less aggressive)
                 if (hasattr(agent, '_learning_system') and agent._learning_system and 
                     hasattr(agent._learning_system, 'memory') and 
                     hasattr(agent._learning_system.memory, 'buffer')):
                     buffer = agent._learning_system.memory.buffer
                     buffer_capacity = getattr(agent._learning_system.memory, 'maxlen', 3000)
-                    if len(buffer) > buffer_capacity * 0.5:  # More aggressive - clean at 50%
-                        # Remove oldest 50% of experiences more aggressively
+                    if len(buffer) > buffer_capacity * 0.8:  # TRAINING FIX: Clean at 80% (was 50%)
+                        # Remove oldest 20% of experiences (was 50%)
                         old_size = len(buffer)
-                        remove_count = old_size // 2
+                        remove_count = old_size // 5  # Remove 20% instead of 50%
                         for _ in range(remove_count):
                             if buffer:
                                 buffer.popleft()
@@ -4405,24 +4434,24 @@ class TrainingEnvironment:
                 if hasattr(agent, '_learning_system') and agent._learning_system:
                     learning_system = agent._learning_system
                     
-                    # Clean attention history aggressively
+                    # Clean attention history conservatively
                     if hasattr(learning_system, 'attention_history'):
                         old_size = len(learning_system.attention_history)
-                        if old_size > 10:  # Keep only 10 most recent (was 25)
+                        if old_size > 100:  # Keep 100 most recent (was 10)
                             learning_system.attention_history = deque(
-                                list(learning_system.attention_history)[-10:], 
-                                maxlen=25  # Reduced from 50
+                                list(learning_system.attention_history)[-100:], 
+                                maxlen=200  # Increased from 25
                             )
                             attention_networks_cleaned += 1
                     
-                    # ULTRA AGGRESSIVE: Clean experience replay buffer for performance
+                    # CONSERVATIVE: Clean experience replay buffer for training effectiveness
                     if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
                         buffer_size = len(learning_system.memory.buffer)
-                        if buffer_size > 500:  # PERFORMANCE FIX: Clean at 500 entries (was 1000)
-                            # Keep only most recent 500 experiences
+                        if buffer_size > 2000:  # TRAINING FIX: Clean at 2000 entries (was 500)
+                            # Keep only most recent 2000 experiences
                             learning_system.memory.buffer = deque(
-                                list(learning_system.memory.buffer)[-500:],
-                                maxlen=1000  # PERFORMANCE FIX: Reduced max from 3000 to 1000
+                                list(learning_system.memory.buffer)[-2000:],
+                                maxlen=3000  # TRAINING FIX: Increased max from 1000 to 3000
                             )
             
             if attention_networks_cleaned > 0:

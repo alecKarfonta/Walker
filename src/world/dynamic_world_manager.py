@@ -376,10 +376,10 @@ class DynamicWorldManager:
             x = random.uniform(tile.x_start + 5, tile.x_end - 5)
             
             if feature_type == 'hill':
-                # 🤖 ROBOT-SCALE: Much smaller hills for 1.5m robots
-                y = random.uniform(1, 3)  # Lower y position
-                width = random.uniform(3, 6)  # Reduced from 8-15 to 3-6
-                height = random.uniform(1, 2.5)  # Reduced from 3-6 to 1-2.5
+                # 🤖 ROBOT-SCALE: PASSABLE hills for 1.5m robots
+                y = random.uniform(0.3, 0.8)  # MUCH LOWER: Ground level position
+                width = random.uniform(2.0, 4.0)  # SMALLER: Reduced to 2-4m width
+                height = random.uniform(0.4, 1.0)  # PASSABLE: Max 1.0m tall (was 2.5m)
                 
                 hill_body = self.world.CreateStaticBody(position=(x, y))
                 hill_fixture = hill_body.CreateFixture(
@@ -403,10 +403,10 @@ class DynamicWorldManager:
                 tile.ground_bodies.append(hill_body)
                 
             elif feature_type == 'platform':
-                # 🤖 ROBOT-SCALE: Much smaller platforms for 1.5m robots
-                y = random.uniform(3, 6)  # Reduced from 8-15 to 3-6
-                width = random.uniform(4, 8)  # Reduced from 12-25 to 4-8
-                height = random.uniform(0.5, 1.5)  # Reduced from 1-3 to 0.5-1.5
+                # 🤖 ROBOT-SCALE: PASSABLE platforms for 1.5m robots
+                y = 0  # LOWER: Accessible platform height
+                width = random.uniform(3.0, 5.0)  # SMALLER: Reduced to 3-5m width
+                height = random.uniform(0.3, 0.8)  # PASSABLE: Max 0.8m tall (was 1.5m)
                 
                 platform_body = self.world.CreateStaticBody(position=(x, y))
                 platform_fixture = platform_body.CreateFixture(
@@ -571,7 +571,7 @@ class DynamicWorldManager:
                 'min_features': 0, 'max_features': 2,  # Reduced features
                 'terrain_features': ['hill', 'platform'],
                 'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
-                'obstacle_size_min': 0.8, 'obstacle_size_max': 2.0,  # 🤖 Much smaller obstacles
+                'obstacle_size_min': 0.3, 'obstacle_size_max': 0.8,  # 🤖 PASSABLE: Very small obstacles
                 'obstacle_friction': 0.6,
                 'obstacle_types': ['rock', 'bush', 'tree'],
                 'min_food_sources': 3, 'max_food_sources': 6,
@@ -584,7 +584,7 @@ class DynamicWorldManager:
                 'min_features': 1, 'max_features': 2,  # Reduced features
                 'terrain_features': ['hill', 'platform'],
                 'min_obstacles': 1, 'max_obstacles': 3,  # Reduced obstacles
-                'obstacle_size_min': 1.0, 'obstacle_size_max': 2.5,  # 🤖 Much smaller obstacles
+                'obstacle_size_min': 0.4, 'obstacle_size_max': 1.0,  # 🤖 PASSABLE: Very small obstacles
                 'obstacle_friction': 0.8,
                 'obstacle_types': ['tree', 'log', 'boulder'],
                 'min_food_sources': 4, 'max_food_sources': 8,
@@ -597,7 +597,7 @@ class DynamicWorldManager:
                 'min_features': 0, 'max_features': 1,  # Reduced features
                 'terrain_features': ['hill'],
                 'min_obstacles': 0, 'max_obstacles': 1,  # Reduced obstacles
-                'obstacle_size_min': 0.6, 'obstacle_size_max': 1.8,  # 🤖 Much smaller obstacles
+                'obstacle_size_min': 0.3, 'obstacle_size_max': 0.7,  # 🤖 PASSABLE: Very small obstacles
                 'obstacle_friction': 0.4,
                 'obstacle_types': ['cactus', 'rock', 'dune'],
                 'min_food_sources': 1, 'max_food_sources': 3,
@@ -610,7 +610,7 @@ class DynamicWorldManager:
                 'min_features': 1, 'max_features': 3,  # Reduced features
                 'terrain_features': ['hill', 'platform'],
                 'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
-                'obstacle_size_min': 1.2, 'obstacle_size_max': 3.0,  # 🤖 Much smaller obstacles
+                'obstacle_size_min': 0.4, 'obstacle_size_max': 1.2,  # 🤖 PASSABLE: Very small obstacles
                 'obstacle_friction': 0.9,
                 'obstacle_types': ['boulder', 'cliff', 'rock'],
                 'min_food_sources': 2, 'max_food_sources': 4,
@@ -623,7 +623,7 @@ class DynamicWorldManager:
                 'min_features': 0, 'max_features': 2,  # Reduced features
                 'terrain_features': ['platform'],
                 'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
-                'obstacle_size_min': 0.8, 'obstacle_size_max': 2.2,  # 🤖 Much smaller obstacles
+                'obstacle_size_min': 0.3, 'obstacle_size_max': 0.9,  # 🤖 PASSABLE: Very small obstacles
                 'obstacle_friction': 0.3,
                 'obstacle_types': ['marsh', 'reed', 'mud'],
                 'min_food_sources': 5, 'max_food_sources': 9,
@@ -636,7 +636,7 @@ class DynamicWorldManager:
                 'min_features': 1, 'max_features': 2,  # Reduced features
                 'terrain_features': ['hill'],
                 'min_obstacles': 1, 'max_obstacles': 2,  # Reduced obstacles
-                'obstacle_size_min': 1.0, 'obstacle_size_max': 2.8,  # 🤖 Much smaller obstacles
+                'obstacle_size_min': 0.4, 'obstacle_size_max': 1.1,  # 🤖 PASSABLE: Very small obstacles
                 'obstacle_friction': 0.7,
                 'obstacle_types': ['lava_rock', 'crater', 'ash'],
                 'min_food_sources': 1, 'max_food_sources': 2,

@@ -770,8 +770,8 @@ class CrawlingAgent(BaseAgent):
         elif displacement < -0.0005:
             progress_reward = displacement * 2.0  # Stronger penalty for going backward
         else:
-            # 🎯 SMALL REWARD: Even when stationary, slight encouragement to move right
-            progress_reward = 0.01 if self.body.linearVelocity.x > 0.05 else 0.0
+            # 🚫 STRONG PENALTY FOR STANDING STILL: Much stronger to prevent exploitation
+            progress_reward = -0.01 if abs(self.body.linearVelocity.x) < 0.01 else -0.005
         
         total_reward += progress_reward
         
@@ -812,6 +812,15 @@ class CrawlingAgent(BaseAgent):
         if self.body.linearVelocity.x > 0.1:
             velocity_reward = min(0.1, self.body.linearVelocity.x * 0.1)
             total_reward += velocity_reward
+        elif abs(self.body.linearVelocity.x) < 0.01:
+            # 🚫 MUCH STRONGER PENALTY FOR STANDING STILL: Prevent exploitation
+            total_reward -= 0.02  # Increased from -0.005 to -0.02 (4x stronger)
+        
+        # NEW: Additional inactivity penalty based on recent movement history
+        if hasattr(self, 'recent_displacements') and len(self.recent_displacements) >= 5:
+            recent_avg_movement = sum(abs(d) for d in self.recent_displacements[-5:]) / 5
+            if recent_avg_movement < 0.001:  # Very little movement in last 5 steps
+                total_reward -= 0.015  # Strong penalty for sustained inactivity
         
         # NEW: Efficiency reward - penalize excessive joint movement
         if hasattr(self, 'upper_arm_joint') and hasattr(self, 'lower_arm_joint'):
@@ -1133,20 +1142,45 @@ class CrawlingAgent(BaseAgent):
         """Update rolling performance metrics from windowed rewards."""
         import numpy as np
         
+        # IMPROVED: Apply decay factor for inactivity to make metrics more responsive
+        current_velocity = abs(self.body.linearVelocity.x) if self.body else 0.0
+        is_inactive = current_velocity < 0.01  # Robot is barely moving
+        
         # Calculate rolling averages for different time scales
         if len(self.short_term_window) > 0:
-            self.short_term_avg = float(np.mean(self.short_term_window))
+            if is_inactive and len(self.short_term_window) >= 10:
+                # When inactive, give more weight to recent rewards (decay older ones faster)
+                weights = np.exp(-np.arange(len(self.short_term_window)) * 0.1)  # Exponential decay
+                weights = weights[::-1]  # Reverse so recent rewards get higher weight
+                weighted_rewards = np.array(self.short_term_window) * weights
+                self.short_term_avg = float(np.sum(weighted_rewards) / np.sum(weights))
+            else:
+                # Normal calculation when active
+                self.short_term_avg = float(np.mean(self.short_term_window))
         
         if len(self.medium_term_window) > 0:
-            self.medium_term_avg = float(np.mean(self.medium_term_window))
+            if is_inactive and len(self.medium_term_window) >= 50:
+                # Apply stronger decay for medium-term when inactive
+                weights = np.exp(-np.arange(len(self.medium_term_window)) * 0.05)  
+                weights = weights[::-1]
+                weighted_rewards = np.array(self.medium_term_window) * weights
+                self.medium_term_avg = float(np.sum(weighted_rewards) / np.sum(weights))
+            else:
+                self.medium_term_avg = float(np.mean(self.medium_term_window))
             
         if len(self.long_term_window) > 0:
             self.long_term_avg = float(np.mean(self.long_term_window))
         
-        # Calculate current reward rate (recent performance)
+        # Calculate current reward rate (recent performance) - more sensitive to inactivity
         if len(self.recent_rewards) >= 10:  # Need at least 10 samples
             recent_10 = list(self.recent_rewards)[-10:]
-            self.reward_rate = float(np.mean(recent_10))
+            if is_inactive:
+                # When inactive, weight the most recent rewards much more heavily
+                weights = np.exp(np.arange(10) * 0.2)  # Strong exponential weighting toward recent
+                weighted_recent = np.array(recent_10) * weights
+                self.reward_rate = float(np.sum(weighted_recent) / np.sum(weights))
+            else:
+                self.reward_rate = float(np.mean(recent_10))
         
         # Calculate performance trend (improvement over time)
         if len(self.medium_term_window) >= 100:
