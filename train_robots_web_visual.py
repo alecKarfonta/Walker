@@ -4984,9 +4984,13 @@ def main():
     try:
         while True:
             time.sleep(5)  # Check every 5 seconds
-            # Optional: Print periodic status
-            if hasattr(env, 'step_count') and env.step_count % 18000 == 0:  # Every 5 minutes
-                print(f"🔄 System running: Step {env.step_count}, Generation {env.evolution_engine.generation}")
+            # Optional: Print periodic status (FIXED: Prevent infinite logging at multiples of 18000)
+            if hasattr(env, 'step_count'):
+                # Only log at exact intervals, not every time we're at a multiple
+                if env.step_count > 0 and env.step_count % 18000 == 0:
+                    if not hasattr(env, '_last_logged_step') or env._last_logged_step != env.step_count:
+                        print(f"🔄 System running: Step {env.step_count}, Generation {env.evolution_engine.generation}")
+                        env._last_logged_step = env.step_count
     except KeyboardInterrupt:
         print("\n🛑 Shutting down training environment...")
         env.stop()
