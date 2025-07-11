@@ -19,6 +19,8 @@ from src.ecosystem_dynamics import EcosystemDynamics
 from src.environment_challenges import EnvironmentalSystem
 from src.persistence import EliteManager, StorageManager
 from src.agents.robot_memory_pool import RobotMemoryPool
+import logging
+logger = logging.getLogger(__name__)
 
 class TrainingEnvironment:
     """
@@ -306,6 +308,7 @@ class TrainingEnvironment:
         self.storage_manager.enable_auto_save(interval_seconds=600)  # Auto-save every 10 minutes
 
         # Learning Manager already initialized above before agent creation
+        # ONE shared Learning Manager instance for all robots
 
         # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
         try:
@@ -1429,63 +1432,59 @@ class TrainingEnvironment:
     
     def _create_replacement_agent(self):
         """Create a new agent to replace a dead one using memory pool if available."""
-        try:
-            # 🌍 DYNAMIC WORLD: Spawn near current leftmost (beginning) position
-            spawn_position = self._get_current_spawn_position()
-            
-            print(f"🐣 Respawning dead agent at current world beginning: ({spawn_position[0]:.1f}, {spawn_position[1]:.1f})")
-            
-            # Create random physical parameters (fresh genetics)
-            from src.agents.physical_parameters import PhysicalParameters
-            random_params = PhysicalParameters.random_parameters()
-            
-            # Use memory pool if available for efficient reuse with size mutations
-            if self.robot_memory_pool:
-                new_agent = self.robot_memory_pool.acquire_robot(
-                    position=spawn_position,
-                    physical_params=random_params,
-                    apply_size_mutations=True  # Enable size mutations during respawning
+        # 🌍 DYNAMIC WORLD: Spawn near current leftmost (beginning) position
+        spawn_position = self._get_current_spawn_position()
+        
+        print(f"🐣 Respawning dead agent at current world beginning: ({spawn_position[0]:.1f}, {spawn_position[1]:.1f})")
+        
+        # Create random physical parameters (fresh genetics)
+        from src.agents.physical_parameters import PhysicalParameters
+        random_params = PhysicalParameters.random_parameters()
+        
+        # Use memory pool if available for efficient reuse with size mutations
+        if self.robot_memory_pool:
+            new_agent = self.robot_memory_pool.acquire_robot(
+                position=spawn_position,
+                physical_params=random_params,
+                apply_size_mutations=True  # Enable size mutations during respawning
+            )
+            print(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
+        else:
+            # Fallback: Create new agent directly using EvolutionaryCrawlingAgent
+            from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+            new_agent = EvolutionaryCrawlingAgent(
+                world=self.world,
+                agent_id=None,  # Generate new UUID automatically
+                position=spawn_position,
+                category_bits=self.AGENT_CATEGORY,
+                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
+                physical_params=random_params
+            )
+            print(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
+        
+        # Add training environment reference and register with reward signal adapter
+        if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
+            try:
+                # Add training environment reference to agent
+                new_agent._training_env = self
+                
+                agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
+                self.reward_signal_adapter.register_agent(
+                    new_agent.id,
+                    agent_type,
+                    metadata={
+                        'physical_params': str(new_agent.physical_params) if hasattr(new_agent, 'physical_params') else None,
+                        'created_at': time.time(),
+                        'source': 'replacement'
+                    }
                 )
-                logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
-            else:
-                # Fallback: Create new agent directly using EvolutionaryCrawlingAgent
-                from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
-                new_agent = EvolutionaryCrawlingAgent(
-                    world=self.world,
-                    agent_id=None,  # Generate new UUID automatically
-                    position=spawn_position,
-                    category_bits=self.AGENT_CATEGORY,
-                    mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
-                    physical_params=random_params
-                )
-                logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
+            except Exception as e:
+                print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
+        
+        # Agents are standalone - no training environment injection needed
+        
+        return new_agent
             
-            # Add training environment reference and register with reward signal adapter
-            if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
-                try:
-                    # Add training environment reference to agent
-                    new_agent._training_env = self
-                    
-                    agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
-                    self.reward_signal_adapter.register_agent(
-                        new_agent.id,
-                        agent_type,
-                        metadata={
-                            'physical_params': str(new_agent.physical_params) if hasattr(new_agent, 'physical_params') else None,
-                            'created_at': time.time(),
-                            'source': 'replacement'
-                        }
-                    )
-                except Exception as e:
-                    print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
-            
-            # Agents are standalone - no training environment injection needed
-            
-            return new_agent
-            
-        except Exception as e:
-            print(f"❌ Error creating replacement agent: {e}")
-            return None
     
     def _initialize_single_agent_ecosystem(self, agent):
         """Initialize ecosystem data for a single new agent."""
