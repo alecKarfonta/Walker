@@ -4455,6 +4455,20 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️ Error cleaning up inactive agents from Learning Manager: {e}")
             
+            # BUFFER MAINTENANCE: Periodically maintain network buffers (every 5 minutes)
+            if not hasattr(self, 'last_buffer_maintenance'):
+                self.last_buffer_maintenance = time.time()
+            
+            if current_time - self.last_buffer_maintenance > 300.0:  # 5 minutes
+                if self.learning_manager:
+                    try:
+                        maintenance_result = self.learning_manager.maintain_buffers()
+                        if maintenance_result.get('maintenance_performed', False):
+                            print(f"🔧 Network buffer maintenance: +{maintenance_result['networks_added']} networks, {maintenance_result['total_buffered_after']} total buffered")
+                    except Exception as e:
+                        print(f"⚠️ Error during buffer maintenance: {e}")
+                self.last_buffer_maintenance = current_time
+            
             # Clean up ecosystem data
             if hasattr(self.ecosystem_dynamics, 'food_sources'):
                 # Remove depleted food sources
