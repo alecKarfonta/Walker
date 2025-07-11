@@ -316,17 +316,8 @@ class EvolutionaryCrawlingAgent:
         # MULTI-ACTION SYSTEM: Very complex robots can execute multiple actions per step
         self._set_multi_action_capability()
         
-        # Actually call the attention learning initialization
-        try:
-            self._initialize_attention_learning()
-            if self._learning_system:
-                print(f"🧠 Agent {self.id}: Successfully got learning system from Learning Manager")
-            else:
-                print(f"⚠️ Agent {self.id}: No learning system assigned - will use random actions")
-        except Exception as e:
-            print(f"❌ Agent {self.id}: Failed to get learning system: {e}")
-            print(f"⚠️ Agent {self.id}: Will use random actions until learning system is available")
-        
+        self._initialize_attention_learning()
+
         print(f"🧠 Created agent {self.id} with {self.physical_params.num_arms} limbs, {self.physical_params.segments_per_limb} segments each")
 
     def _set_morphology_aware_timing(self):

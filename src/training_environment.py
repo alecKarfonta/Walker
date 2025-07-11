@@ -1,6 +1,8 @@
 
 import sys
 import os
+
+from numpy.random import noncentral_chisquare
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
 import threading
@@ -19,6 +21,9 @@ from src.ecosystem_dynamics import EcosystemDynamics
 from src.environment_challenges import EnvironmentalSystem
 from src.persistence import EliteManager, StorageManager
 from src.agents.robot_memory_pool import RobotMemoryPool
+from src.world.dynamic_world_manager import DynamicWorldManager
+from src.evaluation.reward_signal_integration import get_reward_signal_adapter
+from src.agents.learning_manager import LearningManager
 import logging
 logger = logging.getLogger(__name__)
 
@@ -105,22 +110,15 @@ class TrainingEnvironment:
 
         # Initialize reward signal evaluation system BEFORE creating agents
         self.reward_signal_evaluator = None
-        self.reward_signal_adapter = None
-        try:
-            from src.evaluation.reward_signal_integration import get_reward_signal_adapter
-            self.reward_signal_adapter = get_reward_signal_adapter()
-            print("📊 Reward signal evaluation system initialized (before agent creation)")
-        except ImportError as e:
-            print(f"⚠️ Reward signal evaluation not available: {e}")
-        except Exception as e:
-            print(f"⚠️ Reward signal evaluation initialization failed: {e}")
+        self.reward_signal_adapter = noncentral_chisquare
+        self.reward_signal_adapter = get_reward_signal_adapter()
+        print("📊 Reward signal evaluation system initialized (before agent creation)")
 
         # CRITICAL FIX: Initialize Learning Manager BEFORE creating agents
         print("🧠 All agents using Learning Manager for neural network pooling and knowledge transfer")
         
         # Initialize Learning Manager for neural network pooling and knowledge transfer
         # CRITICAL: Learning Manager is REQUIRED - no fallback patterns
-        from src.agents.learning_manager import LearningManager
         self.learning_manager = LearningManager(max_networks_per_pool=num_agents * 3)
         
         # CRITICAL FIX: Store reference in world for agent access BEFORE creating agents
@@ -137,18 +135,15 @@ class TrainingEnvironment:
                 if not getattr(agent, '_destroyed', False):
                     agent._training_env = self
                     # Register agent with reward signal adapter
-                    try:
-                        agent_type = getattr(agent, 'learning_approach', 'evolutionary')
-                        self.reward_signal_adapter.register_agent(
-                            agent.id,
-                            agent_type,
-                            metadata={
-                                'physical_params': str(agent.physical_params) if hasattr(agent, 'physical_params') else None,
-                                'created_at': time.time()
-                            }
-                        )
-                    except Exception as e:
-                        print(f"⚠️ Failed to register agent {agent.id}: {e}")
+                    agent_type = getattr(agent, 'learning_approach', 'evolutionary')
+                    self.reward_signal_adapter.register_agent(
+                        agent.id,
+                        agent_type,
+                        metadata={
+                            'physical_params': str(agent.physical_params) if hasattr(agent, 'physical_params') else None,
+                            'created_at': time.time()
+                        }
+                    )
             print(f"🔗 Added training environment reference to {len(self.agents)} agents")
 
         # Statistics and state
@@ -238,16 +233,12 @@ class TrainingEnvironment:
         self.environmental_system = EnvironmentalSystem()
         
         # Dynamic world generation system for expanding exploration
-        try:
-            from src.world.dynamic_world_manager import DynamicWorldManager
-            self.dynamic_world_manager = DynamicWorldManager(
-                box2d_world=self.world,
-                ecosystem_dynamics=self.ecosystem_dynamics
-            )
-            print("🌍 Dynamic world generation system initialized")
-        except Exception as e:
-            print(f"⚠️ Dynamic world manager initialization failed: {e}")
-            self.dynamic_world_manager = None
+        self.dynamic_world_manager = DynamicWorldManager(
+            box2d_world=self.world,
+            ecosystem_dynamics=self.ecosystem_dynamics
+        )
+        print("🌍 Dynamic world generation system initialized")
+        self.dynamic_world_manager = None
         self.agent_health = {}  # Track agent health/energy for visualization
         self.agent_statuses = {}  # Track agent statuses (hunting, feeding, etc.)
         self.predation_events = []  # Track recent predation events for visualization
@@ -311,20 +302,16 @@ class TrainingEnvironment:
         # ONE shared Learning Manager instance for all robots
 
         # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
-        try:
-            self.robot_memory_pool = RobotMemoryPool(
-                world=self.world,
-                min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
-                max_pool_size=num_agents * 2,  # 2x population as maximum pool
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
-                learning_manager=self.learning_manager  # Pass Learning Manager for network preservation
-            )
-            
-            print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
-        except Exception as e:
-            print(f"⚠️ Robot Memory Pool initialization failed: {e}")
-            self.robot_memory_pool = None
+        self.robot_memory_pool = RobotMemoryPool(
+            world=self.world,
+            min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
+            max_pool_size=num_agents * 2,  # 2x population as maximum pool
+            category_bits=self.AGENT_CATEGORY,
+            mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
+            learning_manager=self.learning_manager  # Pass Learning Manager for network preservation
+        )
+        
+        logger.info(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
 
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
@@ -458,36 +445,6 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"⚠️ Error in periodic elite saving: {e}")
 
-    def get_morphology_aware_episode_length(self, agent) -> int:
-        """Calculate episode length based on robot morphology complexity."""
-        try:
-            # Determine robot complexity based on joint count
-            if hasattr(agent, 'physical_params'):
-                total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
-            elif hasattr(agent, 'get_actual_joint_count'):
-                total_joints = agent.get_actual_joint_count()
-            else:
-                total_joints = 2  # Default for basic robots
-            
-            # Classify complexity
-            if total_joints <= 4:
-                complexity = 'simple'
-            elif total_joints <= 8:
-                complexity = 'medium'
-            elif total_joints <= 12:
-                complexity = 'complex'
-            else:
-                complexity = 'very_complex'
-            
-            # Calculate episode length
-            multiplier = self.episode_length_multipliers[complexity]
-            episode_length = int(self.base_episode_length * multiplier)
-            
-            return episode_length
-            
-        except Exception as e:
-            print(f"⚠️ Error calculating episode length for agent {getattr(agent, 'id', 'unknown')}: {e}")
-            return self.base_episode_length
     
     def should_preserve_learning_on_reset(self, agent) -> bool:
         """Determine if agent's learning should be preserved during reset."""
@@ -519,77 +476,7 @@ class TrainingEnvironment:
             print(f"⚠️ Error checking learning preservation for agent {getattr(agent, 'id', 'unknown')}: {e}")
             return True  # Default to preserving learning when in doubt
 
-    def log_morphology_aware_learning_times(self):
-        """Log the learning time improvements for different robot complexities."""
-        try:
-            complexity_stats = {
-                'simple': {'count': 0, 'total_time': 0, 'avg_joints': 0},
-                'medium': {'count': 0, 'total_time': 0, 'avg_joints': 0},
-                'complex': {'count': 0, 'total_time': 0, 'avg_joints': 0},
-                'very_complex': {'count': 0, 'total_time': 0, 'avg_joints': 0}
-            }
-            
-            for agent in self.agents:
-                if getattr(agent, '_destroyed', False):
-                    continue
-                    
-                try:
-                    # Get joint count
-                    if hasattr(agent, 'physical_params'):
-                        total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
-                    else:
-                        total_joints = 2
-                    
-                    # Classify complexity
-                    if total_joints <= 4:
-                        complexity = 'simple'
-                    elif total_joints <= 8:
-                        complexity = 'medium'
-                    elif total_joints <= 12:
-                        complexity = 'complex'
-                    else:
-                        complexity = 'very_complex'
-                    
-                    # Get learning time
-                    episode_length = self.get_morphology_aware_episode_length(agent)
-                    learning_time_minutes = episode_length / (60 * 60)  # Convert steps to minutes
-                    
-                    # Update stats
-                    complexity_stats[complexity]['count'] += 1
-                    complexity_stats[complexity]['total_time'] += learning_time_minutes
-                    complexity_stats[complexity]['avg_joints'] += total_joints
-                    
-                except Exception as e:
-                    continue
-            
-            print(f"\n🧠 === MORPHOLOGY-AWARE LEARNING TIME REPORT ===")
-            total_robots = sum(stats['count'] for stats in complexity_stats.values())
-            print(f"📊 Population: {total_robots} robots with adaptive learning times")
-            
-            for complexity, stats in complexity_stats.items():
-                if stats['count'] > 0:
-                    avg_time = stats['total_time'] / stats['count']
-                    avg_joints = stats['avg_joints'] / stats['count']
-                    multiplier = self.episode_length_multipliers[complexity]
-                    
-                    print(f"   {complexity.upper():12} ({stats['count']:2} robots): "
-                          f"{avg_joints:.1f} joints avg, "
-                          f"{avg_time:.1f} min learning time "
-                          f"({multiplier}x multiplier)")
-            
-            # Calculate total learning capacity improvement
-            old_total_time = total_robots * (self.base_episode_length / (60 * 60))  # All robots at base time
-            new_total_time = sum(stats['total_time'] for stats in complexity_stats.values())
-            improvement_factor = new_total_time / old_total_time if old_total_time > 0 else 1.0
-            
-            print(f"📈 Learning capacity improvement: {improvement_factor:.1f}x total learning time")
-            print(f"   Previous system: {old_total_time:.1f} total robot-minutes")
-            print(f"   New system: {new_total_time:.1f} total robot-minutes")
-            print(f"🎯 Complex robots now get up to 30x more learning time!")
-            
-        except Exception as e:
-            print(f"❌ Error logging morphology-aware learning times: {e}")
- 
+    
     def _create_ground(self):
         """Creates a static ground body for the EXPANDED strategic food zone world."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
@@ -1017,29 +904,26 @@ class TrainingEnvironment:
     
     def _generate_resources_between_agents(self):
         """Generate resources strategically between agents."""
-        try:
-            # Get positions of all active agents
-            agent_positions = []
-            for agent in self.agents:
-                if not getattr(agent, '_destroyed', False) and agent.body:
-                    agent_positions.append((agent.id, (agent.body.position.x, agent.body.position.y)))
-            
-            if len(agent_positions) >= 2:
-                # Sort agents by x position for systematic resource placement
-                agent_positions.sort(key=lambda x: x[1][0])
-                
-                # Generate resources between agents using ecosystem dynamics with enhanced parameters
-                self.ecosystem_dynamics.generate_resources_between_agents(agent_positions)
-                
-                # Post-process resources to ensure they're consumable (within 3.0m of agents)
-                self._validate_resource_positions(agent_positions)
-                
-                # Only log occasionally to reduce spam
-                if len(self.ecosystem_dynamics.food_sources) % 10 == 0:  # Log every 10th resource milestone
-                    print(f"🌱 Resource generation cycle completed. Total resources: {len(self.ecosystem_dynamics.food_sources)}")
+        # Get positions of all active agents
+        agent_positions = []
+        for agent in self.agents:
+            if not getattr(agent, '_destroyed', False) and agent.body:
+                agent_positions.append((agent.id, (agent.body.position.x, agent.body.position.y)))
         
-        except Exception as e:
-            print(f"⚠️ Error generating resources: {e}")
+        if len(agent_positions) >= 2:
+            # Sort agents by x position for systematic resource placement
+            agent_positions.sort(key=lambda x: x[1][0])
+            
+            # Generate resources between agents using ecosystem dynamics with enhanced parameters
+            self.ecosystem_dynamics.generate_resources_between_agents(agent_positions)
+            
+            # Post-process resources to ensure they're consumable (within 3.0m of agents)
+            self._validate_resource_positions(agent_positions)
+            
+            # Only log occasionally to reduce spam
+            if len(self.ecosystem_dynamics.food_sources) % 10 == 0:  # Log every 10th resource milestone
+                print(f"🌱 Resource generation cycle completed. Total resources: {len(self.ecosystem_dynamics.food_sources)}")
+    
     
     def _validate_resource_positions(self, agent_positions):
         """Validate that resources maintain proper distance from agents and are at reachable heights."""
@@ -1448,7 +1332,7 @@ class TrainingEnvironment:
                 physical_params=random_params,
                 apply_size_mutations=True  # Enable size mutations during respawning
             )
-            print(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
+            logger.info(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
         else:
             # Fallback: Create new agent directly using EvolutionaryCrawlingAgent
             from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
@@ -1460,7 +1344,7 @@ class TrainingEnvironment:
                 mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
                 physical_params=random_params
             )
-            print(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
+            logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
         
         # Add training environment reference and register with reward signal adapter
         if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
