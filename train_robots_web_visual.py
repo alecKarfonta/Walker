@@ -20,7 +20,6 @@ from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
-from src.agents.crawling_agent import CrawlingAgent
 from src.agents.physical_parameters import PhysicalParameters
 from src.population.enhanced_evolution import EnhancedEvolutionEngine, EvolutionConfig, TournamentSelection
 from src.population.population_controller import PopulationController
@@ -339,8 +338,18 @@ class TrainingEnvironment:
         self.storage_manager = StorageManager("robot_storage")
         self.storage_manager.enable_auto_save(interval_seconds=600)  # Auto-save every 10 minutes
 
-        # All agents now handle their own learning - no learning manager needed
-        print("🧠 All agents using standalone attention deep Q-learning - no learning manager required")
+        # All agents now require Learning Manager for neural network pooling and knowledge transfer
+        print("🧠 All agents using Learning Manager for neural network pooling and knowledge transfer")
+
+        # Initialize Learning Manager for neural network pooling and knowledge transfer
+        # CRITICAL: Learning Manager is REQUIRED - no fallback patterns
+        from src.agents.learning_manager import LearningManager
+        self.learning_manager = LearningManager(max_networks_per_pool=num_agents * 3)
+        
+        # Store reference in world for agent access
+        self.world._training_env = self
+        
+        print(f"🧠 Learning Manager initialized: neural network pooling enabled")
 
         # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
         try:
@@ -349,7 +358,8 @@ class TrainingEnvironment:
                 min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
                 max_pool_size=num_agents * 2,  # 2x population as maximum pool
                 category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
+                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
+                learning_manager=self.learning_manager  # Pass Learning Manager for network preservation
             )
             
             print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
@@ -1440,8 +1450,17 @@ class TrainingEnvironment:
                         # Initialize new agent's ecosystem data
                         self._initialize_single_agent_ecosystem(replacement_agent)
                         
-                        # Agents create their own networks - no transfer needed
-                        self._assign_random_learning_approach_single(replacement_agent)
+                        # CRITICAL: Assign neural network from Learning Manager (preserves knowledge)
+                        if self.learning_manager:
+                            network = self.learning_manager._acquire_attention_network(replacement_agent.id, 15, 29)
+                            if network:
+                                replacement_agent._learning_system = network
+                                print(f"🧠 Assigned neural network to replacement agent {replacement_agent.id}")
+                            else:
+                                print(f"⚠️ Failed to assign neural network to replacement agent {replacement_agent.id}")
+                        else:
+                            # Fallback: assign random learning approach
+                            self._assign_random_learning_approach_single(replacement_agent)
                         
                         print(f"🐣 Spawned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
                 
@@ -1496,8 +1515,9 @@ class TrainingEnvironment:
                 )
                 logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
             else:
-                # Fallback: Create new agent directly
-                new_agent = CrawlingAgent(
+                # Fallback: Create new agent directly using EvolutionaryCrawlingAgent
+                from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+                new_agent = EvolutionaryCrawlingAgent(
                     world=self.world,
                     agent_id=None,  # Generate new UUID automatically
                     position=spawn_position,
@@ -1851,6 +1871,17 @@ class TrainingEnvironment:
                     print(f"⚠️ Failed to return agent {agent.id} to memory pool: {e}")
                     # Fall through to manual destruction
             
+            # CRITICAL FIX: Release neural network back to Learning Manager before manual destruction
+            if self.learning_manager and hasattr(agent, 'id'):
+                try:
+                    # Calculate basic performance score
+                    performance_score = max(0.0, getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1)))
+                    # Release network back to pool for reuse
+                    self.learning_manager.release_agent_network(agent.id, performance_score)
+                    print(f"🧠 Released network from manually destroyed agent {agent.id} (performance: {performance_score:.3f})")
+                except Exception as e:
+                    print(f"⚠️ Failed to release network from agent {agent.id}: {e}")
+            
             # Manual destruction (fallback when no memory pool)
             # Mark as destroyed first to prevent further operations
             agent._destroyed = True
@@ -2105,6 +2136,14 @@ class TrainingEnvironment:
                                     
                                     # AI OPTIMIZATION: Use different step modes based on AI update schedule
                                     if should_update_ai:
+                                        # CRITICAL FIX: Add missing action selection call
+                                        # Get current state and choose action using neural network
+                                        current_state = agent.get_state_representation()
+                                        action_index = agent.choose_action(current_state)
+                                        
+                                        # Apply the chosen action
+                                        agent.apply_action(action_index)
+                                        
                                         # Full AI update with learning
                                         agent.step(self.dt)
                                     else:
@@ -3563,7 +3602,8 @@ class TrainingEnvironment:
         # Create random physical parameters for diversity
         random_params = PhysicalParameters.random_parameters()
         
-        new_agent = CrawlingAgent(
+        from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+        new_agent = EvolutionaryCrawlingAgent(
             world=self.world,
             agent_id=None,  # Generate new UUID automatically
             position=position,
@@ -4403,6 +4443,13 @@ class TrainingEnvironment:
             old_stats_keys = [k for k in self.robot_stats.keys() if k not in active_agent_ids]
             for old_key in old_stats_keys[:10]:  # Remove up to 10 old entries at a time
                 del self.robot_stats[old_key]
+            
+            # CRITICAL FIX: Clean up inactive agents from Learning Manager tracking
+            if self.learning_manager:
+                try:
+                    self.learning_manager.cleanup_inactive_agents(list(active_agent_ids))
+                except Exception as e:
+                    print(f"⚠️ Error cleaning up inactive agents from Learning Manager: {e}")
             
             # Clean up ecosystem data
             if hasattr(self.ecosystem_dynamics, 'food_sources'):

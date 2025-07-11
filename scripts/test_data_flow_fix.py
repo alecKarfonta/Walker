@@ -15,12 +15,9 @@ def test_corrected_data_flow():
     """Test that the data flow now works correctly without fallback values."""
     print("🧪 Testing corrected data flow...")
     
-    try:
-        from src.agents.learning_manager import LearningManager
-        from src.agents.attention_deep_q_learning import AttentionDeepQLearning
-    except ImportError as e:
-        print(f"❌ Import error (expected if PyTorch not available): {e}")
-        return
+    # CRITICAL: Learning Manager is REQUIRED - no fallback patterns
+    from src.agents.learning_manager import LearningManager
+    from src.agents.attention_deep_q_learning import AttentionDeepQLearning
     
     # Create learning manager
     learning_manager = LearningManager()
@@ -156,11 +153,8 @@ def test_failure_scenarios():
     """Test that failures are now explicit rather than silent fallbacks."""
     print("\n🧪 Testing failure scenarios (should fail explicitly)...")
     
-    try:
-        from src.agents.learning_manager import LearningManager
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        return
+    # CRITICAL: Learning Manager is REQUIRED - no fallback patterns
+    from src.agents.learning_manager import LearningManager
     
     learning_manager = LearningManager()
     

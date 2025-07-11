@@ -11,7 +11,6 @@ from typing import Dict, Any, Optional, Tuple
 from collections import deque
 import Box2D as b2
 
-from .crawling_agent import CrawlingAgent
 from .physical_parameters import PhysicalParameters
 
 
@@ -22,16 +21,17 @@ class RobotMemoryPool:
     """
     
     def __init__(self, world: b2.b2World, min_pool_size: int = 10, max_pool_size: int = 100,
-                 category_bits: int = 0x0002, mask_bits: int = 0x0001):
+                 category_bits: int = 0x0002, mask_bits: int = 0x0001, learning_manager=None):
         """Initialize the robot memory pool."""
         self.world = world
         self.min_pool_size = min_pool_size
         self.max_pool_size = max_pool_size
         self.category_bits = category_bits
         self.mask_bits = mask_bits
+        self.learning_manager = learning_manager
         
         # Active robots currently in use  
-        self.active_robots: Dict[str, CrawlingAgent] = {}
+        self.active_robots: Dict[str, Any] = {}
         
         # Available robots ready for reuse
         self.available_robots: deque = deque()
@@ -58,10 +58,11 @@ class RobotMemoryPool:
             self.available_robots.append(robot)
             self.pool_stats['created_count'] += 1
     
-    def _create_new_robot(self, position: Tuple[float, float] = (0, 10)) -> CrawlingAgent:
+    def _create_new_robot(self, position: Tuple[float, float] = (0, 10)):
         """Create a new robot instance."""
+        from .evolutionary_crawling_agent import EvolutionaryCrawlingAgent
         random_params = PhysicalParameters.random_parameters()
-        return CrawlingAgent(
+        return EvolutionaryCrawlingAgent(
             world=self.world,
             agent_id=None,  # Generate new UUID
             position=position,
@@ -73,7 +74,7 @@ class RobotMemoryPool:
     def acquire_robot(self, 
                      position: Tuple[float, float] = (0, 10),
                      physical_params: Optional[PhysicalParameters] = None,
-                     apply_size_mutations: bool = True) -> CrawlingAgent:
+                     apply_size_mutations: bool = True):
         """Acquire a robot from the pool with optional size mutations."""
         try:
             # Try to reuse an existing robot
@@ -87,7 +88,8 @@ class RobotMemoryPool:
                 if physical_params is None:
                     physical_params = PhysicalParameters.random_parameters()
                 
-                robot = CrawlingAgent(
+                from .evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+                robot = EvolutionaryCrawlingAgent(
                     world=self.world,
                     agent_id=None,
                     position=position,
@@ -111,8 +113,8 @@ class RobotMemoryPool:
             # Fallback: create new robot
             return self._create_new_robot(position)
     
-    def return_robot(self, robot: CrawlingAgent):
-        """Return a robot to the pool for reuse."""
+    def return_robot(self, robot):
+        """Return a robot to the pool for reuse, preserving ALL state including neural networks."""
         try:
             robot_id = robot.id
             
@@ -120,13 +122,19 @@ class RobotMemoryPool:
             if robot_id in self.active_robots:
                 del self.active_robots[robot_id]
             
-            # Add to available robots if pool not full
+            # Add to available robots if pool not full - KEEP NETWORK INTACT
             if len(self.available_robots) < self.max_pool_size:
-                # Mark as available for reuse
-                robot._destroyed = False  # Reset destruction flag
+                # Mark as available for reuse (keep neural network and all learned state)
+                setattr(robot, '_destroyed', False)  # Reset destruction flag
                 self.available_robots.append(robot)
                 self.pool_stats['returned_count'] += 1
-                print(f"🔄 Returned robot {robot_id} to pool ({len(self.available_robots)} available)")
+                
+                # Log what type of learning state is being preserved
+                network_info = "no network"
+                if hasattr(robot, '_learning_system') and robot._learning_system:
+                    network_info = "with learned network"
+                
+                print(f"🔄 Returned robot {robot_id} to pool ({network_info}) - {len(self.available_robots)} available")
             else:
                 # Pool is full, actually destroy the robot
                 self._destroy_robot_permanently(robot)
@@ -136,30 +144,29 @@ class RobotMemoryPool:
         except Exception as e:
             print(f"❌ Error returning robot {robot_id}: {e}")
 
-    def _reset_robot(self, robot: CrawlingAgent, 
+    def _reset_robot(self, robot, 
                     position: Tuple[float, float],
                     physical_params: Optional[PhysicalParameters] = None,
                     apply_size_mutations: bool = True):
-        """Reset a robot for reuse with optional size mutations."""
-        # Generate new ID for the reused robot
-        robot.id = str(uuid.uuid4())[:8]
+        """Reset a robot for reuse - PRESERVE neural network and identity for proper memory pool semantics."""
+        robot_id = robot.id  # KEEP the same ID to preserve learning continuity
         
         # Apply size mutations to existing physical parameters if enabled
         if apply_size_mutations and hasattr(robot, 'physical_params') and robot.physical_params:
-            # Apply size-only mutations while preserving Q-network weights
+            # Apply size-only mutations while preserving neural network
             mutated_params = robot.physical_params.mutate_sizes_only(mutation_rate=0.12)
             robot.physical_params = mutated_params
-            print(f"🧬 Applied size mutations to respawned robot {robot.id}")
+            print(f"🧬 Applied size mutations to pooled robot {robot_id}")
         elif physical_params is not None:
             robot.physical_params = physical_params.validate_and_repair()
         
-        # Reset basic state
+        # Reset ONLY basic state - PRESERVE neural network and learning
         robot.total_reward = 0.0
         robot.steps = 0
-        robot._destroyed = False
+        setattr(robot, '_destroyed', False)
         robot.initial_position = position
         
-        # Reset position
+        # Reset position and physics
         if robot.body:
             robot.body.position = position
             robot.body.angle = 0
@@ -167,12 +174,43 @@ class RobotMemoryPool:
             robot.body.angularVelocity = 0
             robot.body.awake = True
         
-        print(f"🔄 Reset robot {robot.id} at position ({position[0]:.1f}, {position[1]:.1f})")
+        # Log what learning state is being preserved
+        network_info = "no network"
+        if hasattr(robot, '_learning_system') and robot._learning_system:
+            network_info = "preserving learned network"
+        
+        print(f"🔄 Reset pooled robot {robot_id} at ({position[0]:.1f}, {position[1]:.1f}) - {network_info}")
     
-    def _destroy_robot_permanently(self, robot: CrawlingAgent):
+    def _calculate_performance_score(self, robot) -> float:
+        """Calculate performance score for neural network preservation."""
+        try:
+            # Basic performance metrics
+            reward_score = max(0.0, robot.total_reward / max(1, robot.steps * 0.1))  # Reward per step
+            survival_score = min(1.0, robot.steps / 1000.0)  # Survival bonus
+            
+            # Normalize to 0-1 range
+            performance_score = (reward_score * 0.7 + survival_score * 0.3)
+            return min(1.0, max(0.0, performance_score))
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating performance score: {e}")
+            return 0.0
+    
+    def _destroy_robot_permanently(self, robot):
         """Permanently destroy a robot's physics body."""
         try:
-            robot._destroyed = True
+            setattr(robot, '_destroyed', True)
+            
+            # CRITICAL FIX: Release neural network back to Learning Manager before destroying robot
+            if self.learning_manager and hasattr(robot, 'id'):
+                try:
+                    # Calculate performance score for network quality assessment
+                    performance_score = self._calculate_performance_score(robot)
+                    # Release network back to pool for reuse
+                    self.learning_manager.release_agent_network(robot.id, performance_score)
+                    print(f"🧠 Released network from destroyed robot {robot.id} (performance: {performance_score:.3f})")
+                except Exception as e:
+                    print(f"⚠️ Failed to release network from robot {robot.id}: {e}")
             
             # Destroy physics bodies (simplified)
             if hasattr(robot, 'body') and robot.body:
