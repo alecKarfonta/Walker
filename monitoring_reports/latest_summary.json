@@ -1,0 +1,17 @@
+{
+    "last_check": "Wed Jul  2 05:18:34 PM EDT 2025",
+    "check_number": 12,
+    "total_checks": 12,
+    "api_status": "200",
+    "health_status": "HEALTHY",
+    "report_file": "monitoring_reports/system_monitor_20250702_162251.log",
+    "csv_file": "monitoring_reports/performance_data_20250702_162251.csv",
+    "progress_percent": 100.0,
+    "current_metrics": {
+        "agent_count": 0,
+        "physics_fps": 0,
+        "top_reward": 0,
+        "avg_reward": 0,
+        "api_response_time_ms": 10
+    }
+}

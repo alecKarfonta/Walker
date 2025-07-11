@@ -94,24 +94,28 @@ class QLearningIntegrationAdapter:
             
             # Store current state and action for later use
             try:
-                if hasattr(agent, 'get_discretized_state'):
-                    agent.current_state = agent.get_discretized_state()
-                elif hasattr(agent, 'get_state'):
-                    state = agent.get_state()
-                    # Convert to discretized if needed
-                    if hasattr(state, '__iter__') and len(state) > 0:
-                        agent.current_state = tuple(int(x) if isinstance(x, (int, float)) else x for x in state[:3])
-                    else:
-                        agent.current_state = (0, 0, 0)
+                # STRICT: Only use get_state_representation() for 19D states - NO FALLBACKS
+                if hasattr(agent, 'get_state_representation'):
+                    state = agent.get_state_representation()
+                    # Verify it's actually 19D - FAIL FAST if not
+                    if hasattr(state, '__len__') and len(state) != 19:
+                        raise ValueError(f"Agent {getattr(agent, 'id', 'unknown')} get_state_representation() returned {len(state)}D state, expected 19D!")
+                    agent.current_state = state
+                    # Minimal logging: only log once per agent
+                    if not hasattr(agent, '_qlearn_state_confirmed'):
+                        agent_id = str(getattr(agent, 'id', 'unknown'))[:8]
+                        print(f"✅ Q-Learning: Agent {agent_id} using 19D states")
+                        agent._qlearn_state_confirmed = True
                 else:
-                    agent.current_state = (0, 0, 0)
+                    # NO FALLBACKS - If agent doesn't have get_state_representation(), that's an ERROR
+                    raise AttributeError(f"Agent {getattr(agent, 'id', 'unknown')} missing get_state_representation() method - cannot integrate with Q-learning!")
                 
                 agent.current_action = action
                 agent.last_action_time = time.time()
             except Exception as e:
-                # Handle any state extraction errors
-                agent.current_state = (0, 0, 0)
-                agent.current_action = action
+                # NO FALLBACK PADDING - Let the error bubble up so we can fix the root cause
+                print(f"🚨 Q-Learning Integration Error for agent {getattr(agent, 'id', 'unknown')}: {e}")
+                raise  # Re-raise the exception instead of hiding it
             
             return action
         

@@ -88,15 +88,15 @@ class DeepQLearningConfig:
     epsilon_end: float = 0.01
     epsilon_decay: int = 150000
     
-    # Experience replay
-    buffer_size: int = 25000
-    batch_size: int = 32
-    target_update_freq: int = 2000
+    # Experience replay - PERFORMANCE OPTIMIZED
+    buffer_size: int = 5000   # REDUCED: 25000 → 5000 for better performance
+    batch_size: int = 16      # REDUCED: 32 → 16 for faster processing
+    target_update_freq: int = 4000  # INCREASED: 2000 → 4000 for less frequent updates
     
-    # Training frequency (to balance performance)
-    experience_collection_freq: int = 10
-    training_freq: int = 15000
-    min_buffer_size: int = 5000
+    # Training frequency (to balance performance) - PERFORMANCE OPTIMIZED
+    experience_collection_freq: int = 15  # INCREASED: 10 → 15 for less frequent collection
+    training_freq: int = 25000  # INCREASED: 18750 → 25000 for less frequent training
+    min_buffer_size: int = 1000  # REDUCED: 5000 → 1000 for faster startup
     
     def __post_init__(self):
         if self.hidden_dims is None:

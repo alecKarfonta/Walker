@@ -1,49 +1,51 @@
-# Walker Python
+# Walker - An Autonomous AI Simulation
 
-A Python recreation of the Walker project - a simulated environment for training populations of based robots using reinforcement learning evolutionary algorithms.
+A 2D physics-based simulation for training autonomous agents using reinforcement learning and evolutionary algorithms.
 
-## Features
+🚀 **Live Demo**: [https://mlapi.us/walker/](https://mlapi.us/walker/)
 
-- **Physics Simulation**: Realistic 2D physics using Box2d
-- **Reinforcement Learning**: Various implementations of Q-Learning
-- **Evolutionary Algorithm**: Population-based evolution with genetic operators
-- **Real-time Visualization**: Pygame-based rendering and debugging
-- **Interactive GUI**: Parameter adjustment and simulation control
+![Walker Simulation Example](docs/images/example_01.png)
 
-## Installation
+## Core Features
 
-1. Clone the repository:
-```bash
-git clone https://github.com/alecKarfonta/Walker
-cd Walker
-```
+*   **Physics-Based Simulation**: 2D environment powered by Box2D.
+*   **Reinforcement Learning**: Features an Attention-based Deep Q-Learning model for agent decision-making.
+*   **Evolutionary Algorithms**: Agent morphology (body structure) evolves over generations.
+*   **Dynamic Environments**: The world is procedurally generated with changing terrain, obstacles, and resources.
+*   **Efficient Agent Recycling**: A memory pool reuses agents to preserve learned knowledge.
+*   **Web-Based Visualization**: Live monitoring and interaction via a Flask and Socket.IO interface.
 
-2. Build
-```bash
-docker compose up -d --build
-```
+## Getting Started
 
-## Usage
+### Prerequisites
+- Docker
+- Docker Compose
 
-Run the physics simulation test:
-```bash
-python run.py
-```
+### Installation & Running
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/alecKarfonta/Walker.git
+    cd Walker
+    ```
+
+2.  **Build and run the Docker container:**
+    ```bash
+    docker compose up -d --build
+    ```
+
+3.  **Access the web interface:**
+    Open your browser and navigate to `http://localhost:8080`.
 
 ## Project Structure
 
 ```
-walker_python/
-├── src/
-│   ├── config/          # Configuration and settings
-│   ├── physics/         # Physics engine (Pymunk)
-│   ├── agents/          # Reinforcement learning agents
-│   ├── population/      # Population management
-│   ├── rendering/       # Graphics and visualization
-│   ├── ui/             # User interface
-│   ├── utils/          # Utility functions
-│   └── assets/         # Game assets
-├── tests/              # Unit tests
-├── requirements.txt    # Python dependencies
-└── run.py             # Main entry point
+.
+├── src/                 # Main source code for the simulation
+├── scripts/             # Utility, analysis, and standalone scripts
+├── docs/                # Project documentation and reports
+├── config/              # Simulation and environment configuration
+├── tests/               # Unit and integration tests
+├── docker-compose.yml   # Docker Compose configuration
+└── train_robots_web_visual.py # Main entry point for the simulation
 ```

@@ -18,7 +18,7 @@ import time
 import logging
 
 from src.agents.base_agent import BaseAgent
-from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.crawling_agent import CrawlingAgent
 from src.agents.physical_parameters import PhysicalParameters, PhysicalParameterSpace
 from src.population.population_controller import PopulationController, AgentRecord
 # from src.physics.world import WorldController  # Avoid import issues
@@ -130,8 +130,8 @@ class SelectionStrategy(ABC):
     """Abstract base class for selection strategies."""
     
     @abstractmethod
-    def select(self, population: List[EvolutionaryCrawlingAgent], 
-              num_parents: int, config: EvolutionConfig) -> List[EvolutionaryCrawlingAgent]:
+    def select(self, population: List[CrawlingAgent], 
+              num_parents: int, config: EvolutionConfig) -> List[CrawlingAgent]:
         """Select parents for reproduction."""
         pass
 
@@ -139,8 +139,8 @@ class SelectionStrategy(ABC):
 class TournamentSelection(SelectionStrategy):
     """Tournament selection with optional diversity consideration."""
     
-    def select(self, population: List[EvolutionaryCrawlingAgent], 
-              num_parents: int, config: EvolutionConfig) -> List[EvolutionaryCrawlingAgent]:
+    def select(self, population: List[CrawlingAgent], 
+              num_parents: int, config: EvolutionConfig) -> List[CrawlingAgent]:
         """Select parents using tournament selection."""
         parents = []
         
@@ -161,9 +161,9 @@ class TournamentSelection(SelectionStrategy):
         
         return parents
     
-    def _select_with_diversity(self, tournament: List[EvolutionaryCrawlingAgent],
-                             full_population: List[EvolutionaryCrawlingAgent],
-                             config: EvolutionConfig) -> EvolutionaryCrawlingAgent:
+    def _select_with_diversity(self, tournament: List[CrawlingAgent],
+                             full_population: List[CrawlingAgent],
+                             config: EvolutionConfig) -> CrawlingAgent:
         """Select considering both fitness and diversity."""
         best_score = -float('inf')
         best_agent = tournament[0]
@@ -181,8 +181,8 @@ class TournamentSelection(SelectionStrategy):
         
         return best_agent
     
-    def _calculate_diversity_score(self, agent: EvolutionaryCrawlingAgent,
-                                 population: List[EvolutionaryCrawlingAgent]) -> float:
+    def _calculate_diversity_score(self, agent: CrawlingAgent,
+                                 population: List[CrawlingAgent]) -> float:
         """Calculate diversity score for an agent relative to population."""
         agent_metrics = agent.get_diversity_metrics()
         
@@ -209,8 +209,8 @@ class TournamentSelection(SelectionStrategy):
 class FitnessProportionateSelection(SelectionStrategy):
     """Roulette wheel selection based on fitness."""
     
-    def select(self, population: List[EvolutionaryCrawlingAgent], 
-              num_parents: int, config: EvolutionConfig) -> List[EvolutionaryCrawlingAgent]:
+    def select(self, population: List[CrawlingAgent], 
+              num_parents: int, config: EvolutionConfig) -> List[CrawlingAgent]:
         """Select parents using fitness-proportionate selection."""
         # Get fitness values
         fitnesses = [agent.get_evolutionary_fitness() for agent in population]
@@ -240,8 +240,8 @@ class FitnessProportionateSelection(SelectionStrategy):
 class RankSelection(SelectionStrategy):
     """Rank-based selection to avoid dominance by super-fit individuals."""
     
-    def select(self, population: List[EvolutionaryCrawlingAgent], 
-              num_parents: int, config: EvolutionConfig) -> List[EvolutionaryCrawlingAgent]:
+    def select(self, population: List[CrawlingAgent], 
+              num_parents: int, config: EvolutionConfig) -> List[CrawlingAgent]:
         """Select parents using rank-based selection."""
         # Sort population by fitness
         sorted_pop = sorted(population, key=lambda agent: agent.get_evolutionary_fitness())
@@ -268,8 +268,8 @@ class RankSelection(SelectionStrategy):
 class StochasticUniversalSampling(SelectionStrategy):
     """Stochastic Universal Sampling for fair selection."""
     
-    def select(self, population: List[EvolutionaryCrawlingAgent], 
-              num_parents: int, config: EvolutionConfig) -> List[EvolutionaryCrawlingAgent]:
+    def select(self, population: List[CrawlingAgent], 
+              num_parents: int, config: EvolutionConfig) -> List[CrawlingAgent]:
         """Select parents using stochastic universal sampling."""
         # For now, use fitness proportionate as fallback
         fallback = FitnessProportionateSelection()
@@ -281,11 +281,11 @@ class SpeciationManager:
     
     def __init__(self, config: EvolutionConfig):
         self.config = config
-        self.species: List[List[EvolutionaryCrawlingAgent]] = []
-        self.species_representatives: List[EvolutionaryCrawlingAgent] = []
+        self.species: List[List[CrawlingAgent]] = []
+        self.species_representatives: List[CrawlingAgent] = []
         self.species_fitness_history: List[List[float]] = []
     
-    def organize_species(self, population: List[EvolutionaryCrawlingAgent]) -> List[List[EvolutionaryCrawlingAgent]]:
+    def organize_species(self, population: List[CrawlingAgent]) -> List[List[CrawlingAgent]]:
         """Organize population into species based on similarity."""
         self.species = []
         self.species_representatives = []
@@ -310,8 +310,8 @@ class SpeciationManager:
         
         return self.species
     
-    def _are_compatible(self, agent1: EvolutionaryCrawlingAgent, 
-                       agent2: EvolutionaryCrawlingAgent) -> bool:
+    def _are_compatible(self, agent1: CrawlingAgent, 
+                       agent2: CrawlingAgent) -> bool:
         """Check if two agents are compatible (same species)."""
         metrics1 = agent1.get_diversity_metrics()
         metrics2 = agent2.get_diversity_metrics()
@@ -386,15 +386,15 @@ class HallOfFame:
     
     def __init__(self, max_size: int):
         self.max_size = max_size
-        self.members: List[EvolutionaryCrawlingAgent] = []
+        self.members: List[CrawlingAgent] = []
         self.fitness_history: List[float] = []
     
-    def update(self, population: List[EvolutionaryCrawlingAgent]):
+    def update(self, population: List[CrawlingAgent]):
         """Update hall of fame with current population."""
         for agent in population:
             self._consider_agent(agent)
     
-    def _consider_agent(self, agent: EvolutionaryCrawlingAgent):
+    def _consider_agent(self, agent: CrawlingAgent):
         """Consider adding an agent to the hall of fame."""
         fitness = agent.get_evolutionary_fitness()
         
@@ -409,7 +409,7 @@ class HallOfFame:
                 self.members[worst_idx] = agent
                 self.fitness_history[worst_idx] = fitness
     
-    def get_best(self) -> Optional[EvolutionaryCrawlingAgent]:
+    def get_best(self) -> Optional[CrawlingAgent]:
         """Get the best agent from hall of fame."""
         if not self.members:
             return None
@@ -417,7 +417,7 @@ class HallOfFame:
         best_idx = np.argmax(self.fitness_history)
         return self.members[best_idx]
     
-    def get_diverse_representatives(self, count: int) -> List[EvolutionaryCrawlingAgent]:
+    def get_diverse_representatives(self, count: int) -> List[CrawlingAgent]:
         """Get diverse representatives from hall of fame."""
         if len(self.members) <= count:
             return self.members.copy()
@@ -443,8 +443,8 @@ class HallOfFame:
         
         return selected
     
-    def _calculate_diversity_from_set(self, agent: EvolutionaryCrawlingAgent,
-                                    agent_set: List[EvolutionaryCrawlingAgent]) -> float:
+    def _calculate_diversity_from_set(self, agent: CrawlingAgent,
+                                    agent_set: List[CrawlingAgent]) -> float:
         """Calculate average diversity of agent from a set of agents."""
         if not agent_set:
             return 0.0
@@ -487,7 +487,7 @@ class EnhancedEvolutionEngine:
         
         # Core evolutionary state
         self.generation = 0
-        self.population: List[EvolutionaryCrawlingAgent] = []
+        self.population: List[CrawlingAgent] = []
         self.species: List[Any] = []  # Species objects
         self.hall_of_fame: Any = None  # HallOfFame object
         
@@ -495,7 +495,9 @@ class EnhancedEvolutionEngine:
         self.used_positions: Set[Tuple[int, int]] = set()  # Track occupied grid positions
         self.min_spacing = 12  # Minimum spacing between robots (increased from 8)
         self.spawn_height = 8  # Height above ground for spawning
-        self.spawn_area_width = max(800, self.config.population_size * self.min_spacing * 1.5)  # Dynamic spawn area
+        # STRATEGIC FOOD ZONES: Match ecosystem world bounds (-200 to +200)
+        self.spawn_area_width = 300  # Span from -150 to +150 (safe margin within food zone bounds)
+        self.spawn_center_x = 0.0  # Center spawn area around x=0
         
         # Fitness tracking
         self.fitness_history: List[float] = []
@@ -531,7 +533,7 @@ class EnhancedEvolutionEngine:
         self.weather_condition = "normal"  # normal, windy, icy, hot
         
         # Multi-objective evolution
-        self.pareto_front: List[EvolutionaryCrawlingAgent] = []
+        self.pareto_front: List[CrawlingAgent] = []
         self.objective_history: Dict[str, List[float]] = {}
         
         # Seasonal evolution
@@ -692,7 +694,7 @@ class EnhancedEvolutionEngine:
                 'relationships': len(self.teaching_relationships)
             })
     
-    def _transfer_knowledge(self, teacher: EvolutionaryCrawlingAgent, student: EvolutionaryCrawlingAgent):
+    def _transfer_knowledge(self, teacher: CrawlingAgent, student: CrawlingAgent):
         """Transfer knowledge from teacher to student."""
         # Transfer some Q-table values (if using Q-learning)
         if hasattr(teacher, 'q_table') and hasattr(student, 'q_table'):
@@ -919,7 +921,7 @@ class EnhancedEvolutionEngine:
                 'repopulated': self.config.population_size - len(survivors)
             })
     
-    def _calculate_multi_objective_fitness(self, agent: EvolutionaryCrawlingAgent) -> Dict[str, float]:
+    def _calculate_multi_objective_fitness(self, agent: CrawlingAgent) -> Dict[str, float]:
         """Calculate fitness for multiple objectives."""
         objectives = {}
         
@@ -1059,7 +1061,7 @@ class EnhancedEvolutionEngine:
         
         return status
     
-    def initialize_population(self) -> List[EvolutionaryCrawlingAgent]:
+    def initialize_population(self) -> List[CrawlingAgent]:
         """Create initial population with diverse physical parameters and safe positioning."""
         population = []
         
@@ -1069,17 +1071,35 @@ class EnhancedEvolutionEngine:
         self._clear_position_tracking()
         
         for i in range(self.config.population_size):
-            # Create random physical parameters for diversity
-            if i < 5:  # First few agents use default parameters
-                physical_params = PhysicalParameters()
-            else:
-                # Create diverse variants
-                physical_params = PhysicalParameters.random_parameters()
+            # SIMPLIFIED: All robots have identical morphology to prevent dimension mismatches
+            physical_params = PhysicalParameters()
+            
+            # FORCE IDENTICAL MORPHOLOGY: All robots have exactly 1 arm, 2 segments
+            physical_params.num_arms = 1  # Single arm only
+            physical_params.segments_per_limb = 2  # Fixed 2 segments
+            
+            # Ensure arrays match the fixed segment count
+            segments = 2  # Always 2 segments
+            physical_params.segment_length_ratios = [1.0, 1.0]  # Fixed ratios
+            physical_params.segment_width_ratios = [0.8, 0.8]  # Fixed ratios
+            physical_params.joint_torques = [150.0, 150.0]  # Fixed torques
+            physical_params.joint_speeds = [3.0, 3.0]  # Fixed speeds
+            physical_params.joint_lower_limits = [-1.0, -1.0]  # Fixed limits
+            physical_params.joint_upper_limits = [1.0, 1.0]  # Fixed limits
+            physical_params.joint_priority_weights = [1.0, 1.0]  # Fixed weights
+            
+            # Allow minor variation in other parameters for some diversity
+            physical_params.body_width = 1.0 + random.uniform(-0.1, 0.1)
+            physical_params.body_height = 0.5 + random.uniform(-0.05, 0.05)
+            physical_params.motor_torque = 100.0 + random.uniform(-10, 10)
+            physical_params.motor_speed = 5.0 + random.uniform(-0.5, 0.5)
+            
+            print(f"🤖 Agent {i}: Creating IDENTICAL 1-limb robot with 2 segments (state/action consistency)")
             
             # Get safe spawn position to avoid overlaps
             position = self._get_safe_spawn_position(position_index=i)
             
-            agent = EvolutionaryCrawlingAgent(
+            agent = CrawlingAgent(
                 world=self.world,
                 agent_id=i,
                 position=position,
@@ -1093,11 +1113,18 @@ class EnhancedEvolutionEngine:
         self.population = population
         self._update_evolution_stats()
         
+        # Log limb diversity stats
+        limb_counts = {}
+        for agent in population:
+            limbs = agent.physical_params.num_arms
+            limb_counts[limbs] = limb_counts.get(limbs, 0) + 1
+        
         print(f"✅ Initial population created with diversity score: {self.diversity_history[-1]:.3f}")
+        print(f"🦕 Limb diversity: {dict(sorted(limb_counts.items()))}")
         print(f"📍 Population spawned across {self.spawn_area_width:.0f} units with {self.min_spacing} unit spacing")
         return population
     
-    def evolve_generation(self) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
+    def evolve_generation(self) -> Tuple[List[CrawlingAgent], List[CrawlingAgent]]:
         """Evolve one generation of the population with advanced dynamics.
         
         Returns:
@@ -1173,7 +1200,7 @@ class EnhancedEvolutionEngine:
         
         return self.population, agents_to_destroy
     
-    def _create_next_generation(self, species: Optional[List[List[EvolutionaryCrawlingAgent]]]) -> List[EvolutionaryCrawlingAgent]:
+    def _create_next_generation(self, species: Optional[List[List[CrawlingAgent]]]) -> List[CrawlingAgent]:
         """Create the next generation through selection and reproduction."""
         new_population = []
         
@@ -1220,7 +1247,7 @@ class EnhancedEvolutionEngine:
         
         return new_population
     
-    def _create_offspring(self, population: List[EvolutionaryCrawlingAgent]) -> Optional[EvolutionaryCrawlingAgent]:
+    def _create_offspring(self, population: List[CrawlingAgent]) -> Optional[CrawlingAgent]:
         """Create a single offspring through selection and reproduction."""
         if len(population) < 2:
             return None
@@ -1248,7 +1275,7 @@ class EnhancedEvolutionEngine:
         
         return None
     
-    def _select_elite(self) -> List[EvolutionaryCrawlingAgent]:
+    def _select_elite(self) -> List[CrawlingAgent]:
         """Select elite individuals to preserve."""
         sorted_pop = sorted(self.population, 
                           key=lambda agent: agent.get_evolutionary_fitness(), 
@@ -1262,7 +1289,7 @@ class EnhancedEvolutionEngine:
         
         return elite
     
-    def _maintain_diversity(self, population: List[EvolutionaryCrawlingAgent]) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
+    def _maintain_diversity(self, population: List[CrawlingAgent]) -> Tuple[List[CrawlingAgent], List[CrawlingAgent]]:
         """Maintain population diversity.
         
         Returns:
@@ -1283,7 +1310,7 @@ class EnhancedEvolutionEngine:
         for i, (agent, new_params) in enumerate(zip(population, enhanced_params)):
             if new_params != agent.physical_params:
                 # Create new agent with diverse parameters
-                diverse_agent = EvolutionaryCrawlingAgent(
+                diverse_agent = CrawlingAgent(
                     world=self.world,
                     agent_id=None,  # Let agent generate its own UUID
                     position=agent.initial_position,
@@ -1301,7 +1328,7 @@ class EnhancedEvolutionEngine:
         
         return population, agents_to_destroy
     
-    def _apply_immigration(self, population: List[EvolutionaryCrawlingAgent]) -> Tuple[List[EvolutionaryCrawlingAgent], List[EvolutionaryCrawlingAgent]]:
+    def _apply_immigration(self, population: List[CrawlingAgent]) -> Tuple[List[CrawlingAgent], List[CrawlingAgent]]:
         """Introduce random individuals to maintain diversity.
         
         Returns:
@@ -1341,12 +1368,13 @@ class EnhancedEvolutionEngine:
         
         for attempt in range(max_attempts):
             if position_index is not None and attempt == 0:
-                # First try: use deterministic positioning based on index
-                x = position_index * self.min_spacing
+                # First try: use deterministic positioning based on index (CENTERED)
+                spacing_offset = (position_index - self.config.population_size / 2) * self.min_spacing
+                x = self.spawn_center_x + spacing_offset
                 y = self.spawn_height
             else:
-                # Random positioning with improved distribution
-                x = random.uniform(0, self.spawn_area_width)
+                # Random positioning centered around x=0 to match strategic food zones
+                x = self.spawn_center_x + random.uniform(-self.spawn_area_width/2, self.spawn_area_width/2)
                 y = self.spawn_height + random.uniform(-2, 4)  # Small height variation
             
             # Convert to grid coordinates for collision checking
@@ -1366,8 +1394,9 @@ class EnhancedEvolutionEngine:
                 print(f"🎯 Safe spawn position found: ({x:.1f}, {y:.1f}) after {attempt + 1} attempts")
                 return (x, y)
         
-        # Fallback: use the current population size to spread out
-        fallback_x = len(self.population) * self.min_spacing * 1.2
+        # Fallback: use centered positioning within strategic food zone bounds
+        fallback_offset = (len(self.population) % 20 - 10) * self.min_spacing  # Keep within bounds
+        fallback_x = self.spawn_center_x + fallback_offset
         fallback_y = self.spawn_height
         
         print(f"⚠️  Using fallback position after {max_attempts} attempts: ({fallback_x:.1f}, {fallback_y:.1f})")
@@ -1402,14 +1431,14 @@ class EnhancedEvolutionEngine:
         self.used_positions.clear()
         print(f"🧹 Cleared position tracking for new population spawn")
     
-    def _create_random_agent(self, position_index: Optional[int] = None) -> EvolutionaryCrawlingAgent:
+    def _create_random_agent(self, position_index: Optional[int] = None) -> CrawlingAgent:
         """Create a random agent with diverse parameters and safe positioning."""
         random_params = PhysicalParameters.random_parameters()
         
         # Get safe spawn position (improved from original problematic logic)
         position = self._get_safe_spawn_position(position_index)
         
-        return EvolutionaryCrawlingAgent(
+        return CrawlingAgent(
             world=self.world,
             agent_id=None,  # Let agent generate its own UUID
             position=position,
@@ -1539,7 +1568,7 @@ class EnhancedEvolutionEngine:
         print(f"   🔄 Current Mutation Rate: {self.get_current_mutation_rate():.4f}")
         print()
     
-    def _cleanup_agents(self, agents: List[EvolutionaryCrawlingAgent]):
+    def _cleanup_agents(self, agents: List[CrawlingAgent]):
         """DEPRECATED: Clean up Box2D bodies from old agents.
         
         This method is deprecated. Agents should be queued for destruction
@@ -1563,14 +1592,14 @@ class EnhancedEvolutionEngine:
             'species_count': len(self.speciation_manager.species) if self.speciation_manager else 1,
         }
     
-    def get_best_agent(self) -> Optional[EvolutionaryCrawlingAgent]:
+    def get_best_agent(self) -> Optional[CrawlingAgent]:
         """Get the best agent from current population."""
         if not self.population:
             return None
         
         return max(self.population, key=lambda agent: agent.get_evolutionary_fitness())
     
-    def get_diverse_representatives(self, count: int = 5) -> List[EvolutionaryCrawlingAgent]:
+    def get_diverse_representatives(self, count: int = 5) -> List[CrawlingAgent]:
         """Get diverse representatives from the population."""
         if len(self.population) <= count:
             return self.population.copy()
@@ -1597,8 +1626,8 @@ class EnhancedEvolutionEngine:
         
         return selected
     
-    def _calculate_agent_diversity_from_set(self, agent: EvolutionaryCrawlingAgent,
-                                          agent_set: List[EvolutionaryCrawlingAgent]) -> float:
+    def _calculate_agent_diversity_from_set(self, agent: CrawlingAgent,
+                                          agent_set: List[CrawlingAgent]) -> float:
         """Calculate diversity of agent from a set of agents."""
         if not agent_set:
             return 0.0

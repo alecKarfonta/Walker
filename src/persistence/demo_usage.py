@@ -11,7 +11,7 @@ from pathlib import Path
 
 # Import persistence system
 from src.persistence import RobotStorage, StorageManager
-from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.crawling_agent import CrawlingAgent
 from src.agents.physical_parameters import PhysicalParameters
 
 

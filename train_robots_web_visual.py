@@ -15,11 +15,12 @@ import json
 import logging
 import random
 import math
+from collections import deque
 from typing import Dict, Any, List, Optional
 from flask import Flask, render_template_string, jsonify, request
 import numpy as np
 import Box2D as b2
-from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+from src.agents.crawling_agent import CrawlingAgent
 from src.agents.physical_parameters import PhysicalParameters
 from src.population.enhanced_evolution import EnhancedEvolutionEngine, EvolutionConfig, TournamentSelection
 from src.population.population_controller import PopulationController
@@ -27,6 +28,8 @@ from flask_socketio import SocketIO
 from typing import List
 
 # Import evaluation framework
+
+from src.agents.robot_memory_pool import RobotMemoryPool
 from src.evaluation.metrics_collector import MetricsCollector
 from src.evaluation.dashboard_exporter import DashboardExporter
 
@@ -35,15 +38,19 @@ from src.ecosystem_dynamics import EcosystemDynamics, EcosystemRole
 from src.environment_challenges import EnvironmentalSystem
 
 # Import survival Q-learning integration
-from src.agents.ecosystem_interface import EcosystemInterface
-from src.agents.survival_q_integration_patch import upgrade_agent_to_survival_learning
-from src.agents.learning_manager import LearningManager, LearningApproach
+# EcosystemInterface removed - was part of learning manager system
+# Learning manager removed - agents handle their own learning
 
 # Import elite robot management
-from src.persistence import EliteManager
+from src.persistence import EliteManager, StorageManager
 
 # Import realistic terrain generation
 from src.terrain_generation import generate_robot_scale_terrain
+
+# Import WebGL renderer
+from src.rendering.webgl_renderer import get_webgl_template
+
+# WebGL is the only rendering mode - high performance rendering always enabled
 
 # Configure logging - set debug level for Deep Q-Learning GPU training logs
 logging.basicConfig(
@@ -60,1743 +67,22 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 # Create logger for this module
 logger = logging.getLogger(__name__)
 
-# HTML template with Canvas rendering
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Walker Training Visualizer (Box2D)</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body, html {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background: #1a1a2e;
-            color: #e8e8e8;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-
-        #app-container {
-            display: flex;
-            flex-direction: column;
-            width: 100%;
-            height: 100%;
-        }
-        
-        #canvas-wrapper {
-            flex-grow: 1; /* Canvas takes up all available space */
-            position: relative;
-        }
-
-        canvas { 
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
-        
-        /* The new RTS-style bottom bar */
-        #bottom-bar {
-            flex-shrink: 0; /* Prevent the bar from shrinking */
-            height: 280px; /* Increased height for better visibility */
-            background: rgba(15, 20, 35, 0.95);
-            border-top: 2px solid #e74c3c;
-            box-shadow: 0 -5px 20px rgba(0,0,0,0.3);
-            display: flex;
-            padding: 12px; /* Increased padding */
-            gap: 12px;   /* Increased gap */
-            z-index: 100;
-            overflow: hidden;
-        }
-
-        /* Sections within the bottom bar */
-        .bottom-bar-section {
-            background: rgba(26, 26, 46, 0.8);
-            border-radius: 8px;
-            border: 1px solid #3498db;
-            padding: 10px; /* Reduced padding */
-            display: flex;
-            flex-direction: column;
-            overflow-y: auto;
-        }
-
-        #leaderboard-panel {
-            flex: 2; /* More space for leaderboard */
-        }
-        
-        #robot-details-panel {
-            flex: 1.5;
-            min-width: 200px;
-        }
-
-        #summary-and-controls-panel {
-            flex: 3;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            background: transparent;
-            border: none;
-            padding: 0;
-        }
-
-        #summary-panel {
-            flex-shrink: 0;
-        }
-
-        #controls-panel {
-            flex-grow: 1; 
-            display: flex;
-            gap: 8px;
-            padding: 0;
-            border: none;
-            background: transparent;
-        }
-        
-        .control-column {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .panel-title {
-            color: #3498db;
-            font-size: 14px; /* Smaller font */
-            font-weight: 600;
-            margin-bottom: 8px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px; /* Tighter spacing */
-        }
-
-        .stat-row { 
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 4px 0; /* Tighter padding */
-            border-bottom: 1px solid rgba(52, 152, 219, 0.15);
-            font-size: 13px; /* Smaller font */
-        }
-
-        .robot-stat-row { 
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px; /* More padding for button-like feel */
-            border-bottom: 1px solid rgba(52, 152, 219, 0.15);
-            font-size: 13px;
-            cursor: pointer; /* Show it's clickable */
-            transition: all 0.2s ease;
-            border-radius: 6px;
-            margin: 2px 0;
-            background: rgba(52, 152, 219, 0.1);
-            border-left: 3px solid transparent;
-            user-select: none; /* Prevent text selection */
-            position: relative;
-        }
-
-        .robot-stat-row:hover {
-            background: rgba(52, 152, 219, 0.3);
-            transform: translateX(3px);
-            border-left: 3px solid #3498db;
-            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
-        }
-
-        .robot-stat-row:active {
-            background: rgba(52, 152, 219, 0.4);
-            transform: translateX(1px);
-            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-        }
-
-        .robot-stat-row.focused {
-            background: rgba(231, 76, 60, 0.8);
-            border-left: 3px solid #c0392b;
-            color: white;
-        }
-
-        .robot-stat-row.focused:hover {
-            background: rgba(192, 57, 43, 0.9);
-            border-left: 3px solid #a93226;
-        }
-
-        .stat-label, .robot-stat-label { color: #bdc3c7; }
-        .stat-value, .robot-stat-value {
-            color: #ecf0f1;
-            font-weight: 700;
-            background: #34495e;
-            padding: 3px 8px;
-            border-radius: 4px;
-        }
-
-        .robot-stat-row.focused .robot-stat-label,
-        .robot-stat-row.focused .robot-stat-value {
-            color: #fff;
-        }
-
-        .robot-stat-row.focused .robot-stat-value {
-            background: rgba(255, 255, 255, 0.2);
-        }
-
-        /* Collapsible control panels */
-        .control-panel {
-            background: rgba(30, 40, 60, 0.9);
-            border-radius: 8px;
-            border: 1px solid #2980b9;
-            padding: 10px;
-            flex-grow: 1;
-        }
-
-        .control-panel-title {
-            color: #3498db;
-            font-weight: 600;
-            cursor: pointer;
-            user-select: none;
-        }
-        
-        .control-panel-title::before {
-            content: '▶ ';
-            display: inline-block;
-            transition: transform 0.2s ease-in-out;
-        }
-        
-        .control-panel.open .control-panel-title::before {
-            transform: rotate(90deg);
-        }
-        
-        .control-panel-content {
-            padding-top: 10px;
-            display: none;
-        }
-        
-        .control-panel.open .control-panel-content {
-            display: block;
-        }
-        
-        /* Scrollbar styling for panels */
-        .bottom-bar-section::-webkit-scrollbar { width: 6px; }
-        .bottom-bar-section::-webkit-scrollbar-track { background: transparent; }
-        .bottom-bar-section::-webkit-scrollbar-thumb { background: #3498db; border-radius: 3px; }
-
-        .robot-details-title {
-            font-size: 12px;
-            font-weight: bold;
-            color: #3498db;
-            margin-bottom: 8px;
-            border-bottom: 1px solid #3498db;
-            padding-bottom: 4px;
-        }
-
-        .robot-details-content {
-            font-size: 10px;
-            line-height: 1.3;
-        }
-
-        .detail-section {
-            margin-bottom: 8px;
-            padding: 6px;
-            background: rgba(52, 152, 219, 0.1);
-            border-radius: 4px;
-            border-left: 2px solid #3498db;
-        }
-
-        .detail-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 3px;
-        }
-
-        .detail-row:last-child {
-            margin-bottom: 0;
-        }
-
-        .detail-label {
-            color: #bdc3c7;
-            font-weight: 500;
-        }
-
-        .detail-value {
-            color: #ecf0f1;
-            font-weight: bold;
-        }
-
-        /* Control panel styling */
-
-    </style>
-</head>
-<body>
-    <div id="app-container">
-        <div id="canvas-wrapper">
-            <canvas id="simulation-canvas"></canvas>
-            <button id="resetView" style="position:absolute; top:10px; left:10px; z-index:50;">Reset View</button>
-            <button id="toggleFoodLines" onclick="toggleFoodLines()" style="position:absolute; top:10px; left:120px; z-index:50; background:#4CAF50; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Show Food Lines</button>
-            <button id="testCarnivoreFeeding" onclick="testCarnivoreFeeding()" style="position:absolute; top:10px; left:250px; z-index:50; background:#FF4444; color:white; border:none; padding:5px 10px; border-radius:3px; cursor:pointer;">Test Carnivore</button>
-            <div id="focus-indicator" style="display:none; position:absolute; top:1%; left:50%; transform:translate(-50%, -50%); z-index:50; background:rgba(231, 76, 60, 0.95); color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 20px rgba(0,0,0,0.3); border:2px solid rgba(255,255,255,0.2);">
-                🎯 Focused on Agent: <span id="focused-agent-id">-</span>
-            </div>
-        </div>
-
-        <div id="bottom-bar">
-            <!-- Section 1: Leaderboard -->
-            <div id="leaderboard-panel" class="bottom-bar-section">
-                <div class="panel-title">🏆 Leaderboard (Food)</div>
-                <div id="leaderboard-content"></div>
-            </div>
-
-            <!-- Section 2: Focused Robot Details -->
-            <div id="robot-details-panel" class="bottom-bar-section">
-                <div class="panel-title">🤖 Robot Details</div>
-                <div id="robot-details-content">
-                    <div class="placeholder">Select a robot to see details.</div>
-                </div>
-            </div>
-
-            <!-- Section 3: Summary and Controls -->
-            <div id="summary-and-controls-panel">
-                <div id="summary-panel" class="bottom-bar-section">
-                    <div class="panel-title">📊 Population Summary</div>
-                    <div id="population-summary-content"></div>
-                </div>
-
-                <div id="controls-panel">
-                    <div class="control-column">
-                        <div class="control-panel" id="learning-panel">
-                            <div class="control-panel-title">Learning</div>
-                            <div class="control-panel-content"></div>
-                        </div>
-                    </div>
-                    <div class="control-column">
-                        <div class="control-panel" id="physical-panel">
-                            <div class="control-panel-title">Physical</div>
-                            <div class="control-panel-content"></div>
-                        </div>
-                    </div>
-                    <div class="control-column">
-                         <div class="control-panel" id="evolution-panel">
-                            <div class="control-panel-title">Evolution</div>
-                            <div class="control-panel-content"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const canvas = document.getElementById('simulation-canvas');
-        const ctx = canvas.getContext('2d');
-        let scale = 15; // pixels per meter
-        let offsetX = 0;
-        let offsetY = 0;
-        let isDragging = false;
-        let isDraggingRobot = false;
-        let draggedRobotId = null;
-        let lastMouseX, lastMouseY;
-        let focusedAgentId = null;
-        let cameraPosition = { x: 0, y: 0 };
-        let cameraZoom = 1.0;
-        let userHasManuallyPanned = false; // track manual camera pan
-        let mouseDownTime = 0;
-        let mouseDownX = 0;
-        let mouseDownY = 0;
-        let mouseDownRobotId = null;
-        let lastLeaderboardHtml = ''; // Variable to store the last state of the leaderboard HTML
-        let showFoodLines = false; // Food lines disabled by default for performance
-        let showFpsCounters = true; // FPS counters enabled by default
-        
-        // FPS Tracking
-        let uiFpsCounter = 0;
-        let uiFpsStartTime = Date.now();
-        let lastUiFpsUpdate = Date.now();
-        let currentUiFps = 0;
-        let physicsStepsCounter = 0;
-        let physicsStepsStartTime = Date.now();
-        let lastPhysicsFpsUpdate = Date.now();
-        let currentPhysicsFps = 0;
-        
-        // Missing constants that were causing errors
-        const CLICK_THRESHOLD = 5; // pixels
-        const CLICK_TIME_THRESHOLD = 200; // milliseconds
-        
-        // Enhanced visualization constants
-        const ECOSYSTEM_COLORS = {
-            'carnivore': '#FF4444',    // Red for predators
-            'herbivore': '#44AA44',    // Green for prey
-            'omnivore': '#FF8844',     // Orange for omnivores
-            'scavenger': '#8844AA',    // Purple for scavengers
-            'symbiont': '#4488FF'      // Blue for symbionts
-        };
-        
-        const STATUS_COLORS = {
-            'hunting': '#FF0000',      // Bright red
-            'feeding': '#00FF00',      // Bright green
-            'fleeing': '#FFFF00',      // Yellow
-            'territorial': '#FF8800',  // Orange
-            'idle': '#CCCCCC',         // Gray
-            'moving': '#FFFFFF',       // White
-            'active': '#88DDFF'        // Light blue
-        };
-        
-        // Visualization state
-        let ecosystemData = null;
-        let environmentData = null;
-        let predationEvents = [];
-        // Animation trails disabled for performance optimization
-
-        function resizeCanvas() {
-            const wrapper = document.getElementById('canvas-wrapper');
-            if (!wrapper) return;
-            canvas.width = wrapper.clientWidth;
-            canvas.height = wrapper.clientHeight;
-        }
-        
-        // Initialize canvas immediately
-        resizeCanvas();
-        window.addEventListener('resize', resizeCanvas);
-
-        const leaderboardPanel = document.getElementById('leaderboard-panel');
-        leaderboardPanel.addEventListener('click', function(e) {
-            const robotRow = e.target.closest('.robot-stat-row');
-            if (robotRow && robotRow.dataset.agentId) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const agentId = robotRow.dataset.agentId;  // Keep as string, don't parseInt
-                console.log(`🎯 CLIENT: Leaderboard button clicked for agent: ${agentId}`);
-
-                // Send the click to the server to select the agent
-                fetch('./click', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ agent_id: agentId })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'success') {
-                        focusedAgentId = data.agent_id;
-                        if (data.agent_id !== null) {
-                            // Re-enable camera tracking when selecting from leaderboard
-                            userHasManuallyPanned = false;
-                            console.log(`✅ Agent ${data.agent_id} selected from leaderboard! Camera tracking enabled.`);
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('❌ Error during leaderboard click fetch:', error);
-                });
-            }
-        });
-
-        canvas.addEventListener('mousedown', (e) => {
-            mouseDownTime = Date.now();
-            mouseDownX = e.clientX;
-            mouseDownY = e.clientY;
-            isDragging = false;
-            isDraggingRobot = false;
-            draggedRobotId = null;
-            lastMouseX = e.clientX;
-            lastMouseY = e.clientY;
-            
-            // Check if we clicked on a robot
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            
-            // Convert screen coordinates to world coordinates using the new camera system
-            const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
-            const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
-            
-            console.log(`🎯 Mouse down at screen (${x}, ${y}) -> world (${worldX.toFixed(2)}, ${worldY.toFixed(2)})`);
-            console.log(`🎯 Canvas rect: ${rect.left}, ${rect.top}, ${rect.width}, ${rect.height}`);
-            console.log(`🎯 Camera: pos(${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}), zoom: ${cameraZoom}`);
-            
-            // Find robot at click position
-            fetch('./get_agent_at_position', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    x: worldX,
-                    y: worldY
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success' && data.agent_id !== null) {
-                    mouseDownRobotId = data.agent_id;
-                    console.log(`🤖 Mouse down on robot ${data.agent_id}`);
-                } else {
-                    mouseDownRobotId = null;
-                    console.log(`🖱️ Mouse down on empty space`);
-                }
-            })
-            .catch(error => {
-                console.error('Error checking robot at position:', error);
-                mouseDownRobotId = null;
-            });
-        });
-        
-        canvas.addEventListener('mousemove', (e) => {
-            if (mouseDownTime > 0) {
-                const distance = Math.sqrt((e.clientX - mouseDownX) ** 2 + (e.clientY - mouseDownY) ** 2);
-                
-                if (distance > CLICK_THRESHOLD) {
-                    if (mouseDownRobotId !== null) {
-                        // Dragging a robot
-                        if (!isDraggingRobot) {
-                            isDraggingRobot = true;
-                            draggedRobotId = mouseDownRobotId;
-                            console.log(`🤖 Started dragging robot ${draggedRobotId}`);
-                        }
-                        
-                        // Move robot to cursor position
-                        const rect = canvas.getBoundingClientRect();
-                        const x = e.clientX - rect.left;
-                        const y = e.clientY - rect.top;
-                        const worldX = (x - canvas.width / 2) / cameraZoom + cameraPosition.x;
-                        const worldY = (canvas.height / 2 - y) / cameraZoom + cameraPosition.y;
-                        
-                        fetch('./move_agent', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify({
-                                agent_id: draggedRobotId,
-                                x: worldX,
-                                y: worldY
-                            })
-                        })
-                        .catch(error => {
-                            console.error('Error moving robot:', error);
-                        });
-                    } else {
-                        // Dragging camera
-                        isDragging = true;
-                        userHasManuallyPanned = true; // flag manual pan
-                        cameraPosition.x -= (e.clientX - lastMouseX) / cameraZoom;
-                        cameraPosition.y += (e.clientY - lastMouseY) / cameraZoom;
-                        lastMouseX = e.clientX;
-                        lastMouseY = e.clientY;
-                    }
-                }
-            }
-        });
-        
-        canvas.addEventListener('mouseup', (e) => {
-            const timeDiff = Date.now() - mouseDownTime;
-            const distance = Math.sqrt((e.clientX - mouseDownX)**2 + (e.clientY - mouseDownY)**2);
-
-            if (!isDragging && !isDraggingRobot && timeDiff < CLICK_TIME_THRESHOLD && distance < CLICK_THRESHOLD) {
-                // This is a click, not a drag. We use the robot ID found during mousedown.
-                fetch('./click', {
-                     method: 'POST',
-                     headers: { 'Content-Type': 'application/json' },
-                     body: JSON.stringify({ agent_id: mouseDownRobotId }) // Send ID directly
-                 })
-                 .then(response => response.json())
-                 .then(data => {
-                     if (data.status === 'success') {
-                         focusedAgentId = data.agent_id;
-                         if (data.agent_id !== null) {
-                             // Re-enable camera tracking when focusing on a robot
-                             userHasManuallyPanned = false;
-                             console.log(`✅ Agent ${data.agent_id} selected! Camera tracking enabled.`);
-                         } else {
-                             console.log(`✅ Camera focus cleared`);
-                         }
-                     }
-                 });
-            }
-
-            if (isDraggingRobot) {
-                console.log(`🤖 Finished dragging robot ${draggedRobotId}`);
-            }
-            isDragging = false;
-            isDraggingRobot = false;
-            draggedRobotId = null;
-            mouseDownTime = 0;
-            mouseDownRobotId = null;
-        });
-        
-        canvas.addEventListener('mouseleave', () => {
-            isDragging = false;
-            isDraggingRobot = false;
-            draggedRobotId = null;
-            mouseDownTime = 0;
-            mouseDownRobotId = null;
-        });
-
-        canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomFactor = 1.1;
-            const newScale = e.deltaY < 0 ? cameraZoom * zoomFactor : cameraZoom / zoomFactor;
-            cameraZoom = Math.max(0.01, Math.min(20, newScale));
-            
-            // Send zoom update to backend (backend will track that user manually zoomed)
-            fetch('./update_zoom', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ zoom: cameraZoom })
-            })
-            .catch(error => {
-                console.error('Error updating zoom:', error);
-            });
-        });
-
-        document.getElementById('resetView').addEventListener('click', () => {
-            focusedAgentId = null;
-            userHasManuallyPanned = false; // Reset manual pan flag
-            
-            // Reset camera to default view
-            cameraPosition = { x: 0, y: 0 };
-            cameraZoom = 1.0;
-
-            // Tell backend to reset zoom preferences and focus
-            fetch('./reset_view', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .catch(error => {
-                console.error('Error resetting view:', error);
-            });
-
-            // Also reset legacy offset and scale if they are used elsewhere
-            scale = 15;
-            offsetX = canvas.width / 2;
-            offsetY = canvas.height * 0.8;
-            
-            // Hide focus indicator
-            const focusIndicator = document.getElementById('focus-indicator');
-            if(focusIndicator) {
-                focusIndicator.style.display = 'none';
-            }
-        });
-
-        function getRewardColor(reward) {
-            // Define threshold for "close to zero"
-            const threshold = 0.1;
-            
-            if (Math.abs(reward) < threshold) {
-                return '#f39c12'; // Yellow for values close to zero
-            } else if (reward > 0) {
-                return '#27ae60'; // Green for positive values
-            } else {
-                return '#e74c3c'; // Red for negative values
-            }
-        }
-
-        function getActionHistoryString(actionHistory) {
-            if (!actionHistory || actionHistory.length === 0) {
-                return "No actions yet";
-            }
-            
-            // Map action indices to readable names
-            const actionNames = {
-                0: "None", 1: "S-Fwd", 2: "E-Fwd", 3: "Both-Fwd", 
-                4: "S-Back", 5: "E-Back", 6: "S-Back", 7: "E-Back"
-            };
-            
-            // Get the last 5 actions for display
-            const recentActions = actionHistory.slice(-5);
-            const actionStrings = recentActions.map(idx => actionNames[idx] || `A${idx}`);
-            
-            return actionStrings.join(" → ");
-        }
-
-        function updateStats(data) {
-            if (!data) return;
-
-            // Update global focused agent ID from backend
-            if (data.focused_agent_id !== undefined) {
-                focusedAgentId = data.focused_agent_id;
-            }
-
-            // Update camera from backend if available and user isn't manually controlling camera
-            if (data.camera && !isDragging && !userHasManuallyPanned) {
-                // Always update camera position when not dragging
-                if (data.camera.position && Array.isArray(data.camera.position) && data.camera.position.length === 2) {
-                    cameraPosition.x = data.camera.position[0];
-                    cameraPosition.y = data.camera.position[1];
-                }
-            }
-            
-            // Handle zoom override separately (can happen even during manual pan)
-            if (data.camera && data.camera.zoom_override !== undefined && data.camera.zoom_override !== null) {
-                cameraZoom = data.camera.zoom_override;
-                
-                // Tell backend we've applied the zoom override
-                fetch('./clear_zoom_override', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                })
-                .catch(error => {
-                    console.error('Error clearing zoom override:', error);
-                });
-            }
-
-            // Update leaderboard only if it has changed to prevent re-rendering
-            const leaderboardContent = document.getElementById('leaderboard-content');
-            if (leaderboardContent && data.leaderboard) {
-                const newLeaderboardHtml = data.leaderboard.map((robot, index) => {
-                    const isFocused = robot.id === data.focused_agent_id;
-                    const focusedClass = isFocused ? ' focused' : '';
-                    return `
-                        <div class="robot-stat-row${focusedClass}" data-agent-id="${robot.id}" title="Click to focus on Robot ${robot.id}">
-                            <span class="robot-stat-label">${robot.name}${isFocused ? ' 🎯' : ''}</span>
-                            <span class="robot-stat-value">🍽️ ${robot.food_consumed.toFixed(2)}</span>
-                        </div>
-                    `;
-                }).join('');
-                
-                // Only update the DOM if the content has actually changed.
-                if (newLeaderboardHtml !== lastLeaderboardHtml) {
-                    leaderboardContent.innerHTML = newLeaderboardHtml;
-                    lastLeaderboardHtml = newLeaderboardHtml;
-                }
-            }
-
-            // Update population summary
-            const populationSummaryContent = document.getElementById('population-summary-content');
-            if (populationSummaryContent && data.statistics) {
-                // Calculate role distribution
-                const roleDistribution = {};
-                let totalAgents = 0;
-                
-                if (data.agents) {
-                    data.agents.forEach(agent => {
-                        const role = agent.ecosystem?.role || 'omnivore';
-                        roleDistribution[role] = (roleDistribution[role] || 0) + 1;
-                        totalAgents++;
-                    });
-                }
-                
-                // Role icons
-                const roleIcons = {
-                    'carnivore': '🦁',
-                    'herbivore': '🐰', 
-                    'omnivore': '🐻',
-                    'scavenger': '🦅',
-                    'symbiont': '🐠'
-                };
-                
-                // Create role distribution display
-                let roleHtml = '';
-                Object.entries(roleDistribution).forEach(([role, count]) => {
-                    const icon = roleIcons[role] || '🤖';
-                    const percentage = totalAgents > 0 ? ((count / totalAgents) * 100).toFixed(0) : 0;
-                    roleHtml += `
-                        <div class="stat-row">
-                            <span class="stat-label">${icon} ${role.charAt(0).toUpperCase() + role.slice(1)}:</span>
-                            <span class="stat-value">${count} (${percentage}%)</span>
-                        </div>
-                    `;
-                });
-                
-                 populationSummaryContent.innerHTML = `
-                    <div class="stat-row">
-                        <span class="stat-label">Generation:</span>
-                        <span class="stat-value">${data.statistics.generation || 1}</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Population:</span>
-                        <span class="stat-value">${totalAgents} agents</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Avg Distance:</span>
-                        <span class="stat-value">${(data.statistics.average_distance || 0).toFixed(2)}m</span>
-                    </div>
-                    <div class="stat-row">
-                        <span class="stat-label">Total Food Consumed:</span>
-                        <span class="stat-value">🍽️ ${(data.statistics.total_food_consumed || 0).toFixed(1)}</span>
-                    </div>
-                    ${roleHtml}
-                 `;
-            }
-
-            // Update robot details panel
-            updateRobotDetails(data);
-            
-            // Update focus indicator
-            updateFocusIndicator();
-        }
-
-        function updateRobotDetails(data) {
-            const robotDetailsPanel = document.getElementById('robot-details-panel');
-            const focusedAgentId = data.focused_agent_id;
-            
-            if (focusedAgentId === null) {
-                robotDetailsPanel.innerHTML = '<div class="robot-details-title">🤖 Robot Details</div><div class="robot-details-content">Click on a robot to view details</div>';
-                return;
-            }
-            
-            // Find the focused agent
-            const agent = data.agents.find(a => a.id === focusedAgentId);
-            if (!agent) {
-                robotDetailsPanel.innerHTML = '<div class="robot-details-title">🤖 Robot Details</div><div class="robot-details-content">Robot not found</div>';
-                return;
-            }
-            
-            // Calculate arm angles from positions
-            const shoulderAngle = Math.atan2(agent.upper_arm.y - agent.body.y, agent.upper_arm.x - agent.body.x);
-            const elbowAngle = Math.atan2(agent.lower_arm.y - agent.upper_arm.y, agent.lower_arm.x - agent.upper_arm.x);
-            
-            // Get ecosystem data
-            const ecosystem = agent.ecosystem || {};
-            const role = ecosystem.role || 'omnivore';
-            const status = ecosystem.status || 'idle';
-            const health = ecosystem.health || 1.0;
-            const energy = ecosystem.energy || 1.0;
-            const speed = ecosystem.speed || 0.0;
-            const alliances = ecosystem.alliances || [];
-            const territories = ecosystem.territories || [];
-            
-            // Role symbols and colors
-            const roleSymbols = {
-                'carnivore': '🦁',
-                'herbivore': '🐰',
-                'omnivore': '🐻',
-                'scavenger': '🦅',
-                'symbiont': '🐠'
-            };
-            
-            const statusSymbols = {
-                'hunting': '🎯',
-                'feeding': '🍃',
-                'fleeing': '💨',
-                'territorial': '🛡️',
-                'idle': '😴',
-                'moving': '➡️',
-                'active': '⚡'
-            };
-            
-            // Format the details
-            const details = `
-                <div class="robot-details-title">🤖 Robot ${agent.id}</div>
-                <div class="robot-details-content">
-                    <div class="detail-section">
-                        <div class="detail-row">
-                            <span class="detail-label">Ecosystem Role:</span>
-                            <span class="detail-value" style="color: ${ECOSYSTEM_COLORS[role] || '#888888'};">${roleSymbols[role] || '🤖'} ${role.charAt(0).toUpperCase() + role.slice(1)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Status:</span>
-                            <span class="detail-value" style="color: ${STATUS_COLORS[status] || '#FFFFFF'};">${statusSymbols[status] || '●'} ${status.charAt(0).toUpperCase() + status.slice(1)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Health:</span>
-                            <span class="detail-value" style="color: ${health > 0.5 ? '#4CAF50' : health > 0.25 ? '#FF9800' : '#F44336'};">${(health * 100).toFixed(1)}%</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Energy:</span>
-                            <span class="detail-value" style="color: ${energy > 0.5 ? '#2196F3' : energy > 0.25 ? '#FF9800' : '#F44336'};">${(energy * 100).toFixed(1)}%</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Speed:</span>
-                            <span class="detail-value">${speed.toFixed(2)} m/s</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Alliances:</span>
-                            <span class="detail-value">${alliances.length > 0 ? alliances.length + ' allies' : 'None'}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Territories:</span>
-                            <span class="detail-value">${territories.length > 0 ? territories.length + ' claimed' : 'None'}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Closest Food:</span>
-                            <span class="detail-value" style="color: ${ecosystem.closest_food_distance >= 999999 || ecosystem.closest_food_distance > 50 ? '#FF8844' : ecosystem.closest_food_distance < 5 ? '#4CAF50' : '#FFF'};">
-                                ${ecosystem.closest_food_distance >= 999999 ? 'None available' : ecosystem.closest_food_distance.toFixed(1) + 'm'}
-                            </span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">X-Axis Distance:</span>
-                            <span class="detail-value" style="color: ${ecosystem.closest_food_signed_x_distance === undefined ? '#888' : ecosystem.closest_food_signed_x_distance > 0 ? '#4CAF50' : '#FF9800'};">
-                                ${ecosystem.closest_food_signed_x_distance === undefined ? 'N/A' : (ecosystem.closest_food_signed_x_distance > 0 ? '+' : '') + ecosystem.closest_food_signed_x_distance.toFixed(1) + 'm ' + (ecosystem.closest_food_signed_x_distance > 0 ? '→' : '←')}
-                            </span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Food Type:</span>
-                            <span class="detail-value" style="color: ${ecosystem.closest_food_source === 'prey' ? '#FF6B6B' : '#4CAF50'};">
-                                ${ecosystem.closest_food_type || 'Unknown'}
-                                ${ecosystem.closest_food_source === 'prey' ? ' 🎯' : ecosystem.closest_food_source === 'environment' ? ' 🌿' : ''}
-                            </span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Food Source:</span>
-                            <span class="detail-value" style="color: ${ecosystem.closest_food_source === 'prey' ? '#FF6B6B' : '#4CAF50'};">
-                                ${ecosystem.closest_food_source || 'Unknown'}
-                            </span>
-                        </div>
-                        ${energy < 0.4 ? `
-                        <div class="detail-row" style="color: #FF8844; font-weight: bold; background: rgba(255, 136, 68, 0.1); padding: 4px; border-radius: 3px;">
-                            <span class="detail-label">🍽️ Hungry:</span>
-                            <span class="detail-value">Looking for food sources</span>
-                        </div>` : ''}
-                        ${energy < 0.2 ? `
-                        <div class="detail-row" style="color: #FF4444; font-weight: bold; background: rgba(255, 68, 68, 0.1); padding: 4px; border-radius: 3px;">
-                            <span class="detail-label">⚠️ Warning:</span>
-                            <span class="detail-value">Low Energy - Risk of Starvation!</span>
-                        </div>` : ''}
-                        ${energy < 0.05 ? `
-                        <div class="detail-row" style="color: #FF0000; font-weight: bold; background: rgba(255, 0, 0, 0.2); padding: 4px; border-radius: 3px; animation: blink 1s infinite;">
-                            <span class="detail-label">💀 CRITICAL:</span>
-                            <span class="detail-value">DYING - Find food immediately!</span>
-                        </div>` : ''}
-                        ${status === 'dying' ? `
-                        <div class="detail-row" style="color: #8B0000; font-weight: bold; background: rgba(139, 0, 0, 0.3); padding: 4px; border-radius: 3px; animation: pulse 0.5s infinite;">
-                            <span class="detail-label">⚰️ STATUS:</span>
-                            <span class="detail-value">STARVING TO DEATH</span>
-                        </div>` : ''}
-                    </div>
-                    
-                    <div class="detail-section">
-                        <div class="detail-row">
-                            <span class="detail-label">Position:</span>
-                            <span class="detail-value">(${agent.body.x.toFixed(2)}, ${agent.body.y.toFixed(2)})</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Velocity:</span>
-                            <span class="detail-value">(${agent.body.velocity.x.toFixed(2)}, ${agent.body.velocity.y.toFixed(2)})</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Episode Reward:</span>
-                            <span class="detail-value">${agent.total_reward.toFixed(2)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Best Reward:</span>
-                            <span class="detail-value" style="color: #27ae60;">${(agent.best_reward || 0).toFixed(4)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Worst Reward:</span>
-                            <span class="detail-value" style="color: #e74c3c;">${(agent.worst_reward || 0).toFixed(4)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Steps:</span>
-                            <span class="detail-value">${agent.steps || 0}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="detail-section">
-                        <div class="detail-row">
-                            <span class="detail-label">Shoulder Angle:</span>
-                            <span class="detail-value">${(shoulderAngle * 180 / Math.PI).toFixed(1)}°</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Elbow Angle:</span>
-                            <span class="detail-value">${(elbowAngle * 180 / Math.PI).toFixed(1)}°</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Current Action:</span>
-                            <span class="detail-value">(${agent.current_action[0]}, ${agent.current_action[1]})</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">State (Discretized):</span>
-                            <span class="detail-value">S-bin:${agent.state[0] || 'N/A'}, E-bin:${agent.state[1] || 'N/A'}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">State (Angles):</span>
-                            <span class="detail-value">S:${agent.state[0] ? ((agent.state[0] * 10) - 180).toFixed(0) + '°' : 'N/A'}, E:${agent.state[1] ? ((agent.state[1] * 10) - 180).toFixed(0) + '°' : 'N/A'}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="detail-section">
-                        <div class="detail-row">
-                            <span class="detail-label">Q-Table Size:</span>
-                            <span class="detail-value">${Object.keys(agent.q_table || {}).length}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Action History:</span>
-                            <span class="detail-value">${getActionHistoryString(agent.action_history)}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Total Actions:</span>
-                            <span class="detail-value">${(agent.action_history || []).length}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">Awake:</span>
-                            <span class="detail-value">${agent.awake ? 'Yes' : 'No'}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="detail-section">
-                        <div style="margin-bottom: 6px; font-weight: bold; color: #3498db;">Learning Approach Controls</div>
-                        <div style="display: flex; flex-direction: column; gap: 3px;">
-                            <button onclick="switchLearningApproach('${agent.id}', 'basic_q_learning')" 
-                                    style="background: #27ae60; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Basic Q-Learning
-                            </button>
-                            <button onclick="switchLearningApproach('${agent.id}', 'enhanced_survival_q')" 
-                                    style="background: #e74c3c; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Enhanced Survival Q
-                            </button>
-                            <button onclick="switchLearningApproach('${agent.id}', 'deep_survival_q')" 
-                                    style="background: #8e44ad; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Deep Survival Q (GPU)
-                            </button>
-                            <button onclick="switchLearningApproach('${agent.id}', 'auto_advanced')" 
-                                    style="background: #f39c12; color: white; border: none; padding: 3px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">
-                                Auto Advanced Learning
-                            </button>
-                        </div>
-                        <div style="font-size: 9px; color: #95a5a6; margin-top: 4px;">
-                            Current: ${agent.learning_approach || 'basic_q_learning'}
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            robotDetailsPanel.innerHTML = details;
-        }
-
-        function drawWorld(data) {
-            if (!ctx) return;
-
-            // Store ecosystem and environment data for enhanced rendering
-            if (data.ecosystem) ecosystemData = data.ecosystem;
-            if (data.environment) environmentData = data.environment;
-            if (data.ecosystem && data.ecosystem.predation_events) {
-                predationEvents = data.ecosystem.predation_events;
-            }
-
-            // Update UI FPS counter
-            uiFpsCounter++;
-            const now = Date.now();
-            if (now - lastUiFpsUpdate >= 1000) { // Update every second
-                currentUiFps = Math.round(uiFpsCounter * 1000 / (now - uiFpsStartTime));
-                uiFpsCounter = 0;
-                uiFpsStartTime = now;
-                lastUiFpsUpdate = now;
-            }
-            
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-            // Apply camera transformations
-            ctx.save();
-            ctx.translate(canvas.width / 2, canvas.height / 2); // Center of canvas
-            ctx.scale(cameraZoom, -cameraZoom); // Zoom and flip Y-axis
-            ctx.translate(-cameraPosition.x, -cameraPosition.y); // Pan
-
-            // Draw environmental elements first (background layer)
-            drawEnvironmentalElements(data);
-            
-            // Draw ecosystem elements
-            drawEcosystemElements(data);
-
-            // Draw ground
-            if (data.shapes && data.shapes.ground) {
-                ctx.strokeStyle = '#8e8e8e';
-                ctx.lineWidth = 0.1;
-                data.shapes.ground.forEach(shape => {
-                    if (shape.type === 'polygon' && shape.vertices.length > 1) {
-                        ctx.beginPath();
-                        ctx.moveTo(shape.vertices[0][0], shape.vertices[0][1]);
-                        for (let i = 1; i < shape.vertices.length; i++) {
-                            ctx.lineTo(shape.vertices[i][0], shape.vertices[i][1]);
-                        }
-                        ctx.closePath();
-                        ctx.stroke();
-                    }
-                });
-            }
-
-            // Draw enhanced robots with ecosystem roles
-            drawEnhancedRobots(data);
-            
-            // Draw food lines if enabled
-            if (showFoodLines) {
-                drawFoodLines(data);
-            }
-            
-            // All animation events disabled for maximum performance
-
-            ctx.restore(); // Restore to pre-camera transform state
-            
-            // Draw FPS counters (overlay, not affected by camera transform)
-            if (showFpsCounters) {
-                drawFpsCounters(data);
-            }
-        }
-        
-        function drawEnvironmentalElements(data) {
-            if (!environmentData || !environmentData.obstacles) return;
-            
-            // Draw environmental obstacles
-            environmentData.obstacles.forEach(obstacle => {
-                const dangerLevel = obstacle.danger_level || 0;
-                const [x, y] = obstacle.position;
-                const size = obstacle.size;
-                
-                // Color based on danger level
-                const red = Math.floor(100 + (dangerLevel * 155));
-                const green = Math.floor(150 - (dangerLevel * 100));
-                const blue = Math.floor(100 - (dangerLevel * 50));
-                
-                ctx.fillStyle = `rgba(${red}, ${green}, ${blue}, 0.6)`;
-                ctx.strokeStyle = `rgb(${red}, ${green}, ${blue})`;
-                ctx.lineWidth = 0.1;
-                
-                // Draw obstacle based on type
-                ctx.beginPath();
-                if (obstacle.type === 'boulder' || obstacle.type === 'wall') {
-                    ctx.rect(x - size/2, y - size/2, size, size);
-                } else {
-                    ctx.arc(x, y, size/2, 0, 2 * Math.PI);
-                }
-                ctx.fill();
-                ctx.stroke();
-                
-                // Add danger indicator for high-danger obstacles - fix text flipping
-                if (dangerLevel > 0.5) {
-                    ctx.save();
-                    ctx.scale(1, -1); // Counter the Y-axis flip for text
-                    ctx.fillStyle = '#FF0000';
-                    ctx.font = `${size/3}px Arial`;
-                    ctx.textAlign = 'center';
-                    ctx.fillText('⚠', x, -(y + size/6));
-                    ctx.restore();
-                }
-            });
-        }
-        
-        function drawEcosystemElements(data) {
-            if (!ecosystemData) return;
-            
-            // Draw territories
-            if (ecosystemData.territories) {
-                ecosystemData.territories.forEach(territory => {
-                    const [x, y] = territory.position;
-                    const size = territory.size;
-                    const contested = territory.contested;
-                    
-                    // Territory color based on type and resource value
-                    const alpha = Math.min(0.3, territory.resource_value * 0.2);
-                    let territoryColor = '#4CAF50'; // Default green
-                    
-                    switch (territory.type) {
-                        case 'feeding_ground': territoryColor = '#8BC34A'; break;
-                        case 'nesting_area': territoryColor = '#FF9800'; break;
-                        case 'water_source': territoryColor = '#2196F3'; break;
-                        case 'shelter': territoryColor = '#9C27B0'; break;
-                    }
-                    
-                    ctx.strokeStyle = contested ? '#FF0000' : territoryColor;
-                    ctx.lineWidth = contested ? 0.3 : 0.15;
-                    // Simplified territory boundary - no dashed lines for performance
-                    ctx.beginPath();
-                    ctx.arc(x, y, size/2, 0, 2 * Math.PI);
-                    ctx.stroke();
-                });
-            }
-            
-            // Draw food sources
-            if (ecosystemData.food_sources) {
-                ecosystemData.food_sources.forEach(food => {
-                    const [x, y] = food.position;
-                    const amount = food.amount;
-                    const maxCapacity = food.max_capacity;
-                    const ratio = amount / maxCapacity;
-                    
-                    // Food color based on type
-                    let foodColor = '#4CAF50'; // Default green for plants
-                    switch (food.type) {
-                        case 'plants': foodColor = '#4CAF50'; break;
-                        // meat removed - carnivores hunt robots instead
-                        case 'insects': foodColor = '#795548'; break;
-                        case 'seeds': foodColor = '#FF9800'; break;
-                    }
-                    
-                    const baseRadius = 0.8;
-                    const radius = baseRadius + (ratio * 1.2); // Size based on remaining amount
-                    const alpha = 0.5 + (ratio * 0.5); // Transparency based on amount
-                    
-                    // Draw resource base
-                    ctx.fillStyle = foodColor + Math.floor(alpha * 255).toString(16).padStart(2, '0');
-                    ctx.strokeStyle = foodColor;
-                    ctx.lineWidth = 0.1;
-                    
-                    ctx.beginPath();
-                    ctx.arc(x, y, radius, 0, 2 * Math.PI);
-                    ctx.fill();
-                    ctx.stroke();
-                    
-                    // Draw resource type icon - fix text flipping
-                    ctx.save();
-                    ctx.scale(1, -1); // Counter the Y-axis flip for text
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.font = '0.8px Arial';
-                    ctx.textAlign = 'center';
-                    const typeIcons = {
-                        'plants': '🌿',
-                        // meat removed - carnivores hunt robots instead
-                        'insects': '🐛',
-                        'seeds': '🌰'
-                    };
-                    ctx.fillText(typeIcons[food.type] || '🍃', x, -(y + 0.3));
-                    ctx.restore();
-                    
-                    // Depletion warning animations disabled for performance
-                    
-                    // Draw resource amount bar
-                    const barWidth = radius * 2;
-                    const barHeight = 0.2;
-                    const barY = y - radius - 0.5;
-                    
-                    // Background bar
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-                    ctx.fillRect(x - barWidth/2, barY, barWidth, barHeight);
-                    
-                    // Amount bar
-                    ctx.fillStyle = ratio > 0.5 ? '#4CAF50' : ratio > 0.2 ? '#FF9800' : '#F44336';
-                    ctx.fillRect(x - barWidth/2, barY, barWidth * ratio, barHeight);
-                    
-                    // Amount text - fix text flipping
-                    ctx.save();
-                    ctx.scale(1, -1); // Counter the Y-axis flip for text
-                    ctx.fillStyle = '#FFFFFF';
-                    ctx.font = '0.4px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`${amount.toFixed(0)}/${maxCapacity.toFixed(0)}`, x, -(barY - 0.2));
-                    ctx.restore();
-                });
-            }
-        }
-        
-        function drawEnhancedRobots(data) {
-            if (!data.shapes || !data.shapes.robots || !data.agents) return;
-            
-            data.shapes.robots.forEach(robot => {
-                // Find corresponding agent data for ecosystem info
-                const agent = data.agents.find(a => a.id === robot.id);
-                if (!agent) return;
-                
-                const isFocused = (robot.id === focusedAgentId);
-                const ecosystem = agent.ecosystem || {};
-                const role = ecosystem.role || 'omnivore';
-                const status = ecosystem.status || 'idle';
-                const health = ecosystem.health || 1.0;
-                const energy = ecosystem.energy || 1.0;
-                const speed = ecosystem.speed || 0.0;
-                
-                // Get role-based color
-                const baseColor = ECOSYSTEM_COLORS[role] || '#888888';
-                const statusColor = STATUS_COLORS[status] || baseColor;
-                
-                // Apply focus highlighting
-                const strokeColor = isFocused ? '#FFD700' : baseColor; // Gold for focused
-                const fillColor = isFocused ? `${baseColor}88` : `${baseColor}66`; // More transparent
-                
-                ctx.strokeStyle = strokeColor;
-                ctx.fillStyle = fillColor;
-                ctx.lineWidth = isFocused ? 0.25 : 0.15;
-                
-                // Draw agent body parts
-                robot.body_parts.forEach(part => {
-                    ctx.beginPath();
-                    if (part.type === 'polygon' && part.vertices.length > 1) {
-                        ctx.moveTo(part.vertices[0][0], part.vertices[0][1]);
-                        for (let i = 1; i < part.vertices.length; i++) {
-                            ctx.lineTo(part.vertices[i][0], part.vertices[i][1]);
-                        }
-                        ctx.closePath();
-                    } else if (part.type === 'circle') {
-                        ctx.arc(part.center[0], part.center[1], part.radius, 0, 2 * Math.PI);
-                    }
-                    ctx.fill();
-                    ctx.stroke();
-                });
-                
-                // Draw status indicators above agent
-                const agentPos = [agent.body.x, agent.body.y];
-                drawAgentStatusIndicators(agentPos, role, status, health, energy, speed, isFocused);
-                
-                // Movement trails disabled for performance optimization
-                
-                // Alliance connections disabled for performance
-            });
-            
-            // FEEDING ANIMATION: Draw consumption lines from robots to food with role-based colors
-            if (data.ecosystem && data.ecosystem.consumption_events) {
-                data.ecosystem.consumption_events.forEach(consumption => {
-                    const agentPos = [consumption.agent_position[0], consumption.agent_position[1]];
-                    const foodPos = [consumption.food_position[0], consumption.food_position[1]];
-                    
-                    // CLEAR LINE COLORS based on food type and role
-                    let lineColor = '#4CAF50'; // Default green
-                    let consumptionLineWidth = 2;
-                    
-                    // Environmental food colors
-                    if (consumption.food_type.includes('plants')) lineColor = '#4CAF50'; // Green for plants
-                    if (consumption.food_type.includes('insects')) lineColor = '#795548'; // Brown for insects  
-                    if (consumption.food_type.includes('seeds')) lineColor = '#FF9800'; // Orange for seeds
-                    
-                    // Robot consumption colors (thicker lines)
-                    if (consumption.food_type.includes('robot')) {
-                        consumptionLineWidth = 4; // Thicker line for robot consumption
-                        if (consumption.food_type.includes('carnivore')) lineColor = '#D32F2F'; // Dark red for carnivore
-                        if (consumption.food_type.includes('scavenger')) lineColor = '#7B1FA2'; // Purple for scavenger  
-                        if (consumption.food_type.includes('omnivore')) lineColor = '#F57C00'; // Dark orange for omnivore
-                    }
-                    
-                    // Animated line with pulsing effect
-                    const alpha = 0.8 - (consumption.progress * 0.5); // Fade out as animation progresses
-                    const animationLineWidth = 0.2 + (consumption.progress * 0.1); // Get slightly thicker as animation progresses
-                    
-                    ctx.strokeStyle = lineColor;
-                    ctx.globalAlpha = alpha;
-                    ctx.lineWidth = animationLineWidth;
-                    ctx.setLineDash([0.5, 0.3]); // Small dashed line
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(agentPos[0], agentPos[1]);
-                    ctx.lineTo(foodPos[0], foodPos[1]);
-                    ctx.stroke();
-                    
-                    // Reset line style
-                    ctx.setLineDash([]);
-                    ctx.globalAlpha = 1.0;
-                    
-                    // Energy gain indicator at robot position - fix text flipping
-                    ctx.save();
-                    ctx.scale(1, -1); // Counter the Y-axis flip for text
-                    ctx.fillStyle = lineColor;
-                    ctx.font = '0.6px Arial';
-                    ctx.textAlign = 'center';
-                    ctx.fillText(`+${consumption.energy_gained.toFixed(1)}`, agentPos[0], -(agentPos[1] - 1.5));
-                    ctx.restore();
-                 });
-             }
-        }
-        
-        function drawAgentStatusIndicators(position, role, status, health, energy, speed, isFocused) {
-            const [x, y] = position;
-            const barWidth = 2.0;
-            const barHeight = 0.3;
-            const barSpacing = 0.4;
-            const baseY = y + 3.0; // Position above agent
-            
-            // Health bar
-            ctx.fillStyle = '#333333';
-            ctx.fillRect(x - barWidth/2, baseY, barWidth, barHeight);
-            ctx.fillStyle = health > 0.5 ? '#4CAF50' : health > 0.25 ? '#FF9800' : '#F44336';
-            ctx.fillRect(x - barWidth/2, baseY, barWidth * health, barHeight);
-            
-            // Energy bar
-            ctx.fillStyle = '#333333';
-            ctx.fillRect(x - barWidth/2, baseY + barSpacing, barWidth, barHeight);
-            ctx.fillStyle = energy > 0.5 ? '#2196F3' : energy > 0.25 ? '#FF9800' : '#F44336';
-            ctx.fillRect(x - barWidth/2, baseY + barSpacing, barWidth * energy, barHeight);
-            
-            // Role indicator
-            const roleSymbols = {
-                'carnivore': '🦁',
-                'herbivore': '🐰',
-                'omnivore': '🐻',
-                'scavenger': '🦅',
-                'symbiont': '🐠'
-            };
-            
-            if (isFocused || speed > 0.5) {
-                // Fix text flipping by temporarily countering the Y-axis flip
-                ctx.save();
-                ctx.scale(1, -1); // Counter the Y-axis flip
-                ctx.fillStyle = '#FFFFFF';
-                ctx.font = '1px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(roleSymbols[role] || '🤖', x, -(baseY + barSpacing * 2 + 0.8));
-                ctx.restore();
-            }
-            
-            // Status indicator for active agents
-            if (status !== 'idle' && speed > 0.1) {
-                const statusSymbols = {
-                    'hunting': '🎯',
-                    'feeding': '🍃',
-                    'fleeing': '💨',
-                    'territorial': '🛡️',
-                    'moving': '➡️',
-                    'active': '⚡'
-                };
-                
-                // Fix text flipping by temporarily countering the Y-axis flip
-                ctx.save();
-                ctx.scale(1, -1); // Counter the Y-axis flip
-                ctx.fillStyle = STATUS_COLORS[status] || '#FFFFFF';
-                ctx.font = '0.8px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(statusSymbols[status] || '●', x + 1.5, -(y + 2.0));
-                ctx.restore();
-            }
-        }
-        
-        // Movement trail function removed for performance optimization
-        
-        // Alliance connections function removed for performance
-        
-        function drawFoodLines(data) {
-            if (!data.agents || !focusedAgentId) {
-                console.log("🎯 No agents or no focused agent, skipping food lines");
-                return;
-            }
-            
-            // Only draw food line for the focused robot
-            const focusedAgent = data.agents.find(agent => agent.id === focusedAgentId);
-            if (!focusedAgent) {
-                console.log(`🎯 Focused agent ${focusedAgentId} not found in agent list`);
-                return;
-            }
-            
-            const ecosystem = focusedAgent.ecosystem || {};
-            const foodPosition = ecosystem.closest_food_position;
-            const signedXDistance = ecosystem.closest_food_signed_x_distance;
-            
-            console.log(`🎯 Food data for agent ${focusedAgentId}:`, {
-                foodPosition,
-                signedXDistance,
-                ecosystemKeys: Object.keys(ecosystem)
-            });
-            
-            // Only draw line if food position is available
-            if (foodPosition && Array.isArray(foodPosition) && foodPosition.length >= 2) {
-                const robotPos = [focusedAgent.body.x, focusedAgent.body.y];
-                const [foodX, foodY] = foodPosition;
-                
-                console.log(`🎯 Drawing food line from robot ${robotPos} to food ${foodPosition}`);
-                
-                // Calculate distance for coloring
-                const distance = signedXDistance !== undefined ? Math.abs(signedXDistance) : 
-                                Math.sqrt((foodX - robotPos[0]) ** 2 + (foodY - robotPos[1]) ** 2);
-                
-                // Bright visible colors for debugging
-                const lineColor = signedXDistance !== undefined && signedXDistance > 0 ? 
-                    '#00FFFF' : '#FF6600'; // Cyan for right, orange for left
-                
-                // Thicker line for visibility
-                ctx.strokeStyle = lineColor;
-                ctx.lineWidth = 0.3;
-                
-                ctx.beginPath();
-                ctx.moveTo(robotPos[0], robotPos[1]);
-                ctx.lineTo(foodX, foodY);
-                ctx.stroke();
-                
-                // Draw arrow at food position
-                const angle = Math.atan2(foodY - robotPos[1], foodX - robotPos[0]);
-                const arrowLength = 1.0;
-                
-                ctx.strokeStyle = lineColor;
-                ctx.lineWidth = 0.2;
-                
-                ctx.beginPath();
-                ctx.moveTo(foodX, foodY);
-                ctx.lineTo(
-                    foodX - arrowLength * Math.cos(angle - 0.5),
-                    foodY - arrowLength * Math.sin(angle - 0.5)
-                );
-                ctx.lineTo(
-                    foodX - arrowLength * Math.cos(angle + 0.5),
-                    foodY - arrowLength * Math.sin(angle + 0.5)
-                );
-                ctx.lineTo(foodX, foodY);
-                ctx.stroke();
-                
-                console.log(`🎯 Food line drawn successfully`);
-            } else {
-                console.log(`🎯 No valid food position for agent ${focusedAgentId}`);
-            }
-        }
-        
-        // Predation events function removed for performance
-        
-        // Death events function removed for performance
-
-        function drawFpsCounters(data) {
-            // Get physics FPS from server data (more accurate than client-side calculation)
-            if (data && data.physics_fps !== undefined) {
-                currentPhysicsFps = data.physics_fps;
-            }
-            
-            // Save current context
-            ctx.save();
-            
-            // Reset transform for UI overlay
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            
-            // FPS counter background
-            const fpsBoxWidth = 180;
-            const fpsBoxHeight = 70;
-            const fpsBoxX = canvas.width - fpsBoxWidth - 10;
-            const fpsBoxY = 10;
-            
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-            ctx.fillRect(fpsBoxX, fpsBoxY, fpsBoxWidth, fpsBoxHeight);
-            
-            ctx.strokeStyle = '#444444';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(fpsBoxX, fpsBoxY, fpsBoxWidth, fpsBoxHeight);
-            
-            // FPS text
-            ctx.fillStyle = '#FFFFFF';
-            ctx.font = '14px monospace';
-            ctx.textAlign = 'left';
-            
-            // UI FPS
-            const uiFpsColor = currentUiFps >= 20 ? '#4CAF50' : currentUiFps >= 15 ? '#FF9800' : '#F44336';
-            ctx.fillStyle = uiFpsColor;
-            ctx.fillText(`UI FPS: ${currentUiFps}`, fpsBoxX + 10, fpsBoxY + 20);
-            
-            // Physics FPS
-            const physicsFpsColor = currentPhysicsFps >= 50 ? '#4CAF50' : currentPhysicsFps >= 30 ? '#FF9800' : '#F44336';
-            ctx.fillStyle = physicsFpsColor;
-            ctx.fillText(`Physics: ${currentPhysicsFps}`, fpsBoxX + 10, fpsBoxY + 40);
-            
-            // Performance indicator
-            ctx.fillStyle = '#BBBBBB';
-            ctx.font = '10px monospace';
-            const perfStatus = (currentUiFps >= 20 && currentPhysicsFps >= 50) ? 'OPTIMAL' : 
-                              (currentUiFps >= 15 && currentPhysicsFps >= 30) ? 'GOOD' : 'SLOW';
-            ctx.fillText(`Status: ${perfStatus}`, fpsBoxX + 10, fpsBoxY + 60);
-            
-            // Restore context
-            ctx.restore();
-        }
-
-        let lastFetchTime = 0;
-        const fetchInterval = 33; // ~30 FPS instead of 60 FPS for performance
-        
-        function fetchData() {
-            const now = Date.now();
-            if (now - lastFetchTime < fetchInterval) {
-                requestAnimationFrame(fetchData);
-                return;
-            }
-            lastFetchTime = now;
-            
-            fetch('./status')  // Use relative path
-                .then(response => response.json())
-                .then(data => {
-                    window.lastData = data; // Store latest data globally
-                    drawWorld(data);
-                    updateStats(data);
-                    requestAnimationFrame(fetchData);
-                })
-                .catch(error => {
-                    console.error('Error fetching data:', error);
-                    setTimeout(fetchData, 1000); // Try again after a second
-                });
-        }
-        
-        // Start the main loop
-        fetchData();
-
-        function updateFocusIndicator() {
-            const indicator = document.getElementById('focus-indicator');
-            const agentIdSpan = document.getElementById('focused-agent-id');
-            if (!indicator || !agentIdSpan) return;
-
-            if (focusedAgentId !== null) {
-                agentIdSpan.textContent = focusedAgentId;
-                indicator.style.display = 'block';
-            } else {
-                indicator.style.display = 'none';
-            }
-        }
-
-        function updateLeaderboardVisualFocus() {
-            // Update the visual state of leaderboard items
-            const leaderboardItems = document.querySelectorAll('.robot-stat-row[data-agent-id]');
-            leaderboardItems.forEach(item => {
-                const itemAgentId = item.dataset.agentId;  // Keep as string, don't parseInt
-                if (itemAgentId === focusedAgentId) {
-                    item.classList.add('focused');
-                } else {
-                    item.classList.remove('focused');
-                }
-            });
-        }
-
-        // --- Control Panel Interactivity ---
-        function createSlider(id, label, min, max, step, value) {
-            const container = document.createElement('div');
-            container.className = 'control-row'; // You might need to style this class
-            
-            const labelEl = document.createElement('span');
-            labelEl.className = 'control-label';
-            labelEl.textContent = label;
-            
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.id = id;
-            slider.min = min;
-            slider.max = max;
-            slider.step = step;
-            slider.value = value;
-            
-            const valueEl = document.createElement('span');
-            valueEl.className = 'control-value';
-            valueEl.textContent = parseFloat(value).toFixed(3);
-            
-            slider.addEventListener('input', () => {
-                valueEl.textContent = parseFloat(slider.value).toFixed(3);
-            });
-
-            slider.addEventListener('change', () => {
-                updateAgentParams({ [id]: parseFloat(slider.value) });
-            });
-            
-            container.appendChild(labelEl);
-            container.appendChild(slider);
-            container.appendChild(valueEl);
-            
-            return container;
-        }
-
-        const learningPanelContent = document.querySelector('#learning-panel .control-panel-content');
-        if (learningPanelContent) {
-            learningPanelContent.appendChild(createSlider('learning_rate', 'Learning Rate', 0.001, 0.1, 0.001, 0.005));
-            learningPanelContent.appendChild(createSlider('epsilon', 'Epsilon (Randomness)', 0.0, 1.0, 0.01, 0.3));
-        }
-
-        document.querySelectorAll('.control-panel-title').forEach(title => {
-            title.addEventListener('click', () => {
-                title.parentElement.classList.toggle('open');
-            });
-        });
-
-        async function updateAgentParams(params) {
-            // Include focused agent ID if available
-            if (focusedAgentId !== null) {
-                params.target_agent_id = focusedAgentId;
-            }
-            
-            try {
-                await fetch('./update_agent_params', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(params)
-                });
-                console.log('Agent parameters updated:', params);
-            } catch (err) {
-                console.error('Error updating agent parameters:', err);
-            }
-        }
-
-        // Learning approach switching function
-        async function switchLearningApproach(agentId, approach) {
-            try {
-                const response = await fetch('./switch_learning_approach', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        agent_id: agentId, 
-                        approach: approach 
-                    })
-                });
-                const result = await response.json();
-                
-                if (result.status === 'success') {
-                    console.log(`✅ Switched agent ${agentId} to ${approach} learning approach`);
-                } else {
-                    console.error(`❌ Failed to switch learning approach: ${result.message}`);
-                }
-            } catch (err) {
-                console.error('Error switching learning approach:', err);
-            }
-        }
-
-        // Toggle food lines display
-        function toggleFoodLines() {
-            showFoodLines = !showFoodLines;
-            const button = document.getElementById('toggleFoodLines');
-            if (showFoodLines) {
-                button.textContent = 'Hide Food Lines';
-                button.style.background = '#FF5722';
-            } else {
-                button.textContent = 'Show Food Lines';
-                button.style.background = '#4CAF50';
-            }
-            console.log(`🎯 Food lines ${showFoodLines ? 'enabled' : 'disabled'}`);
-        }
-
-        // Test carnivore feeding mechanics
-        function testCarnivoreFeeding() {
-            console.log('🧪 Testing carnivore feeding mechanics...');
-            fetch('./test_carnivore_feeding', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.status === 'success') {
-                    console.log('✅ Carnivore feeding test completed');
-                    alert('Carnivore feeding test completed - check console logs for results');
-                } else {
-                    console.error('❌ Carnivore feeding test failed:', data.message);
-                    alert('Carnivore feeding test failed: ' + data.message);
-                }
-            })
-            .catch(error => {
-                console.error('❌ Error during carnivore feeding test:', error);
-                alert('Error running carnivore feeding test');
-            });
-        }
-
-    </script>
-</body>
-</html>
-"""
-
-def safe_convert_numeric(value):
-    """Convert numpy numeric types to JSON-serializable types without recursion."""
-    if isinstance(value, np.integer):
-        return int(value)
-    elif isinstance(value, np.floating):
-        return float(value)
-    elif isinstance(value, np.ndarray):
-        return value.tolist()
-    elif isinstance(value, (int, float, str, bool)) or value is None:
-        return value
-    else:
-        # For other types, try to convert to float if possible, otherwise return as-is
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return value
-
-def safe_convert_list(lst):
-    """Convert a list of potentially numpy values efficiently."""
-    if not lst:
-        return lst
-    return [safe_convert_numeric(item) for item in lst]
-
-def safe_convert_position(pos):
-    """Convert a position tuple/list safely."""
-    if hasattr(pos, 'x') and hasattr(pos, 'y'):
-        # Box2D vector
-        return (float(pos.x), float(pos.y))
-    elif isinstance(pos, (tuple, list)) and len(pos) >= 2:
-        return (safe_convert_numeric(pos[0]), safe_convert_numeric(pos[1]))
-    return pos
-
 class TrainingEnvironment:
     """
     Enhanced training environment with evolutionary physical parameters.
     Manages physics simulation and evolution of diverse crawling robots.
     Enhanced with comprehensive evaluation framework.
     """
-    def __init__(self, num_agents=30, enable_evaluation=True):  # Reduced from 50 to 30 to save memory
+    def __init__(self, num_agents=30, enable_evaluation=False):  # PERFORMANCE FIX: Reduced from 60 to 30 to improve FPS
         self.num_agents = num_agents
         # CRITICAL FIX: Disable sleeping at the world level to prevent static bodies from going to sleep
         self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
         self.dt = 1.0 / 60.0  # 60 FPS
 
-        # World bounds for resetting fallen agents
-        self.world_bounds_y = -20.0
+        # EXPANDED WORLD BOUNDS: 4x larger world for strategic food zone system
+        self.world_bounds_x_min = -200.0  # Expanded from -60 to match ecosystem
+        self.world_bounds_x_max = 200.0   # Expanded from 60 to match ecosystem  
+        self.world_bounds_y = -20.0       # Keep same for fallen agents
         
         # Collision filtering setup
         self.GROUND_CATEGORY = 0x0001
@@ -1915,7 +201,22 @@ class TrainingEnvironment:
         }
         self.is_running = False
         self.thread = None
-        self.episode_length = 12000  # 200 seconds at 60 Hz - much longer to prevent constant resets
+        # MORPHOLOGY-AWARE EPISODE LENGTHS: Complex robots need more time to learn
+        # Base episode length depends on robot complexity (number of joints to coordinate)
+        self.base_episode_length = 3600  # 60 seconds for simple 2-joint robots
+        self.episode_length_multipliers = {
+            'simple': 1.0,    # 2-4 joints: 60 seconds (3600 steps)
+            'medium': 5.0,    # 5-8 joints: 5 minutes (18000 steps) 
+            'complex': 15.0,  # 9-12 joints: 15 minutes (54000 steps)
+            'very_complex': 30.0  # 13+ joints: 30 minutes (108000 steps)
+        }
+        
+        # Learning preservation settings
+        self.preserve_learning_on_reset = True  # Use reset_position() instead of full reset()
+        self.learning_progress_threshold = 0.1  # Only full reset if no learning progress
+        
+        # Backward compatibility: default episode length for simple robots
+        self.episode_length = self.base_episode_length
         
         # Enhanced thread safety for Box2D operations
         import threading
@@ -1924,14 +225,22 @@ class TrainingEnvironment:
         self._is_evolving = False  # Flag to prevent concurrent evolution
         self._agents_pending_destruction = []  # Safe destruction queue
         
+        # LIMB DISTRIBUTION TRACKING: Monitor multi-limb robot survival (FIXED: Limited size)
+        from collections import deque
+        self.limb_distribution_history = deque(maxlen=100)  # FIXED: Limit to 100 entries
+        self.last_limb_distribution_log = 0
+        self.limb_distribution_interval = 10.0  # Log every 10 seconds
+        self.agent_creation_log = {}  # Track when agents are created
+        self.agent_death_log = {}    # Track when agents die
+        
         # Statistics update timing
-        self.stats_update_interval = 1.0
+        self.stats_update_interval = 2.0
         self.last_stats_update = 0
         
-        # Evolution timing with safety
-        self.evolution_interval = 180.0  # 3 minutes between generations
+        # Evolution timing with safety (FIXED: Disabled auto-evolution for learning)
+        self.evolution_interval = 1800.0  # INCREASED: 30 minutes between generations (was 3 minutes)
         self.last_evolution_time = time.time()
-        self.auto_evolution_enabled = False
+        self.auto_evolution_enabled = False  # KEPT DISABLED: Let Q-learning work without interference
         self._evolution_requested = False  # Flag for requested evolution
         
         # Settle the world
@@ -1959,23 +268,37 @@ class TrainingEnvironment:
         # Enhanced visualization systems
         self.ecosystem_dynamics = EcosystemDynamics()
         self.environmental_system = EnvironmentalSystem()
+        
+        # Dynamic world generation system for expanding exploration
+        try:
+            from src.world.dynamic_world_manager import DynamicWorldManager
+            self.dynamic_world_manager = DynamicWorldManager(
+                box2d_world=self.world,
+                ecosystem_dynamics=self.ecosystem_dynamics
+            )
+            print("🌍 Dynamic world generation system initialized")
+        except Exception as e:
+            print(f"⚠️ Dynamic world manager initialization failed: {e}")
+            self.dynamic_world_manager = None
         self.agent_health = {}  # Track agent health/energy for visualization
         self.agent_statuses = {}  # Track agent statuses (hunting, feeding, etc.)
         self.predation_events = []  # Track recent predation events for visualization
         self.last_ecosystem_update = time.time()
         self.ecosystem_update_interval = 20.0  # Update ecosystem every 20 seconds for better responsiveness
         
-        # Resource generation system - REDUCED FREQUENCY for stability
+        # Resource generation system - BALANCED FREQUENCY for survival
         self.last_resource_generation = time.time()
-        self.resource_generation_interval = 120.0  # Generate strategic resources every 2 minutes (was 45s) for stable rewards
+        self.resource_generation_interval = 60.0  # Generate strategic resources every 1 minute for better survival balance
         self.agent_energy_levels = {}  # Track agent energy levels for resource consumption
         
-        # Death and survival system
-        self.death_events = []  # Track recent death events for visualization
+        # Death and survival system (FIXED: Limited size)
+        self.death_events = deque(maxlen=50)  # FIXED: Limit to 50 death events for visualization
         self.agents_pending_replacement = []  # Queue for dead agents needing replacement
         
-        # Food consumption animation system
-        self.consumption_events = []  # Track active food consumption for animation
+        # Food consumption animation system (FIXED: Limited size)
+        self.consumption_events = deque(maxlen=100)  # FIXED: Limit to 100 consumption events for animation
+        
+        # Ray casting visualization removed for performance
         self.survival_stats = {
             'total_deaths': 0,
             'deaths_by_starvation': 0,
@@ -1993,8 +316,9 @@ class TrainingEnvironment:
         self.terrain_collision_bodies = []  # Store terrain collision bodies
         self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
         
+        # 🌍 DISABLE static terrain generation - let dynamic world handle everything
         # Generate realistic terrain at startup
-        self._generate_realistic_terrain()
+        # self._generate_realistic_terrain()  # DISABLED: Using dynamic world biome system instead
 
         # Initialize elite robot management system
         self.elite_manager = EliteManager(
@@ -2006,29 +330,63 @@ class TrainingEnvironment:
         
         # Flag to track if we should restore elites on startup
         self.restore_elites_on_start = True
+        
+        # Auto-save elite robots every generation
+        self.auto_save_elites = True
+        self.last_elite_save_generation = 0
+        
+        # Storage manager for periodic elite saves
+        self.storage_manager = StorageManager("robot_storage")
+        self.storage_manager.enable_auto_save(interval_seconds=600)  # Auto-save every 10 minutes
 
-        # Initialize Learning Manager for advanced learning approaches
+        # All agents now handle their own learning - no learning manager needed
+        print("🧠 All agents using standalone attention deep Q-learning - no learning manager required")
+
+        # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
         try:
-            self.learning_manager = LearningManager(
-                ecosystem_interface=EcosystemInterface(self)
+            self.robot_memory_pool = RobotMemoryPool(
+                world=self.world,
+                min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
+                max_pool_size=num_agents * 2,  # 2x population as maximum pool
+                category_bits=self.AGENT_CATEGORY,
+                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
             )
-            print("🧠 Learning Manager initialized successfully")
+            
+            print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
         except Exception as e:
-            print(f"⚠️ Learning Manager initialization failed: {e}")
-            self.learning_manager = None
+            print(f"⚠️ Robot Memory Pool initialization failed: {e}")
+            self.robot_memory_pool = None
 
         # ✨ INITIALIZE RANDOM LEARNING APPROACHES FOR ALL AGENTS (after learning_manager is initialized)
         self._initialize_random_learning_approaches()
-
-        # Performance optimization tracking
+        
+        # Performance optimization tracking with CONSERVATIVE cleanup
         self.last_performance_cleanup = time.time()
-        self.performance_cleanup_interval = 120.0  # Clean up every 2 minutes
+        self.performance_cleanup_interval = 600.0  # Less frequent - every 60 seconds
+        
+        # Attention network specific cleanup
+        self.last_attention_cleanup = time.time()
+        self.attention_cleanup_interval = 300.0  # Less frequent - every 30 seconds
         
         # Web interface throttling
         self.last_web_interface_update = time.time()
         self.web_interface_update_interval = 0.05  # 20 FPS instead of 60 FPS
         self.web_data_cache = {}
         self.web_cache_valid = False
+        
+        # Health bar rendering toggle (PERFORMANCE OPTIMIZATION)
+        self.show_health_bars = False  # Default: enabled, can be toggled off for performance
+        self.enable_visualization = True  # Default: show robot visualization, can be disabled for max speed
+        
+        # Simulation speed control
+        self.simulation_speed_multiplier = 10.0  # 10x speed by default for faster training
+        self.max_speed_multiplier = 500.0  # Maximum 500x speed for high-speed training
+        
+        # AI Processing optimization settings
+        self.ai_optimization_enabled = True  # Enable AI processing optimizations
+        self.ai_batch_percentage = 0.15  # PERFORMANCE FIX: Process only 15% of agents per frame (was 25%)
+        self.ai_spatial_culling_enabled = False  # Only update AI for agents near camera
+        self.ai_spatial_culling_distance = 50.0  # Distance from camera to update AI
         
         # Physics FPS tracking
         self.physics_fps_counter = 0
@@ -2040,26 +398,20 @@ class TrainingEnvironment:
         import threading
         self._background_processing_active = False
         self._background_lock = threading.Lock()
-
-        # Initialize Robot Memory Pool for efficient agent reuse with learning preservation
-        try:
-            from src.agents.robot_memory_pool import RobotMemoryPool
-            self.robot_memory_pool = RobotMemoryPool(
-                world=self.world,
-                min_pool_size=max(5, num_agents // 4),  # 25% of population as minimum pool
-                max_pool_size=num_agents * 2,  # 2x population as maximum pool
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY  # Collide with ground AND obstacles
-            )
-            
-            # Connect learning manager to memory pool for knowledge transfer
-            if self.learning_manager:
-                self.robot_memory_pool.set_learning_manager(self.learning_manager)
-            
-            print(f"🏊 Robot Memory Pool initialized: {self.robot_memory_pool.min_pool_size}-{self.robot_memory_pool.max_pool_size} robots")
-        except Exception as e:
-            print(f"⚠️ Robot Memory Pool initialization failed: {e}")
-            self.robot_memory_pool = None
+        
+        # Emergency shutdown tracking (for performance monitoring)
+        self._emergency_shutdown_state = {
+            'max_consecutive_slow_frames': 100,  # INCREASED: Much higher threshold (was 10)
+            'consecutive_slow_frames': 0,
+            'max_physics_bodies': 2000,  # INCREASED: More tolerant (was 1000)
+            'max_memory_mb': 4000,  # INCREASED: More tolerant (was 2000)
+            'last_emergency_check': 0
+        }
+    
+    @property
+    def slow_frame_count(self):
+        """Get current slow frame count for performance monitoring."""
+        return self._emergency_shutdown_state.get('consecutive_slow_frames', 0)
 
         # Q-learning evaluation system
         self.q_learning_evaluator = None
@@ -2081,19 +433,230 @@ class TrainingEnvironment:
         print(f"🌿 Ecosystem dynamics and visualization systems active")
         print(f"🏆 Elite preservation: {self.elite_manager.elite_per_generation} per generation, max {self.elite_manager.max_elite_storage} stored")
         print(f"🏞️ Realistic terrain generated: {len(self.terrain_collision_bodies)} terrain bodies using '{self.terrain_style}' style")
+        
+        # Load elite robots on startup if requested
+        if self.restore_elites_on_start:
+            self._load_elite_robots_on_startup()
+        
+        # Log the morphology-aware learning time improvements
+        self.log_morphology_aware_learning_times()
 
+    def _load_elite_robots_on_startup(self):
+        """Load elite robots from storage and integrate them into the population on startup."""
+        try:
+            print("🔄 Loading elite robots from storage...")
+            
+            # Get elite statistics
+            elite_stats = self.elite_manager.get_elite_statistics()
+            total_elites = elite_stats.get('total_elites_stored', 0)
+            
+            if total_elites == 0:
+                print("📂 No elite robots found in storage")
+                return
+            
+            # Load top 10 elite robots
+            elite_robots = self.elite_manager.restore_elite_robots(
+                world=self.world,
+                count=min(10, total_elites),
+                min_generation=max(0, self.evolution_engine.generation - 5)  # Only recent elites
+            )
+            
+            if not elite_robots:
+                print("📂 No elite robots could be loaded")
+                return
+            
+            # Replace some random agents with elite robots to maintain population size
+            agents_to_replace = min(len(elite_robots), len(self.agents) // 3)  # Replace up to 1/3 
+            
+            if agents_to_replace > 0:
+                # Remove random agents
+                for _ in range(agents_to_replace):
+                    if self.agents:
+                        removed_agent = self.agents.pop(random.randint(0, len(self.agents) - 1))
+                        self._safe_destroy_agent(removed_agent)
+                
+                # Add elite robots
+                for i, elite_robot in enumerate(elite_robots[:agents_to_replace]):
+                    self.agents.append(elite_robot)
+                    # Initialize ecosystem data for elite robot
+                    self._initialize_single_agent_ecosystem(elite_robot)
+                
+                print(f"🏆 Loaded {agents_to_replace} elite robots into population")
+                print(f"   💫 Elite fitness range: {min(getattr(r, 'total_reward', 0) for r in elite_robots[:agents_to_replace]):.2f} - {max(getattr(r, 'total_reward', 0) for r in elite_robots[:agents_to_replace]):.2f}")
+            
+        except Exception as e:
+            print(f"⚠️ Error loading elite robots on startup: {e}")
+
+    def _save_elite_robots_periodically(self):
+        """Save elite robots periodically (called from training loop)."""
+        try:
+            current_generation = self.evolution_engine.generation
+            
+            # Save elites every generation (but not the same generation twice)
+            if (self.auto_save_elites and 
+                current_generation > self.last_elite_save_generation):
+                
+                # Get top performing agents
+                top_agents = sorted(
+                    [a for a in self.agents if not getattr(a, '_destroyed', False)],
+                    key=lambda a: getattr(a, 'total_reward', 0.0),
+                    reverse=True
+                )[:5]  # Top 5 agents
+                
+                if top_agents and max(getattr(a, 'total_reward', 0.0) for a in top_agents) > 1.0:
+                    # Save using storage manager for periodic backup
+                    self.storage_manager.save_elite_robots(top_agents, top_n=3)
+                    self.last_elite_save_generation = current_generation
+                    
+                    print(f"💾 Auto-saved top 3 elite robots from generation {current_generation}")
+            
+            # Check for auto-save checkpoint
+            self.storage_manager.check_auto_save(self.agents)
+            
+        except Exception as e:
+            print(f"⚠️ Error in periodic elite saving: {e}")
+
+    def get_morphology_aware_episode_length(self, agent) -> int:
+        """Calculate episode length based on robot morphology complexity."""
+        try:
+            # Determine robot complexity based on joint count
+            if hasattr(agent, 'physical_params'):
+                total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+            elif hasattr(agent, 'get_actual_joint_count'):
+                total_joints = agent.get_actual_joint_count()
+            else:
+                total_joints = 2  # Default for basic robots
+            
+            # Classify complexity
+            if total_joints <= 4:
+                complexity = 'simple'
+            elif total_joints <= 8:
+                complexity = 'medium'
+            elif total_joints <= 12:
+                complexity = 'complex'
+            else:
+                complexity = 'very_complex'
+            
+            # Calculate episode length
+            multiplier = self.episode_length_multipliers[complexity]
+            episode_length = int(self.base_episode_length * multiplier)
+            
+            return episode_length
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating episode length for agent {getattr(agent, 'id', 'unknown')}: {e}")
+            return self.base_episode_length
+    
+    def should_preserve_learning_on_reset(self, agent) -> bool:
+        """Determine if agent's learning should be preserved during reset."""
+        try:
+            if not self.preserve_learning_on_reset:
+                return False
+            
+            # Always preserve learning for complex robots
+            if hasattr(agent, 'physical_params'):
+                total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+                if total_joints > 4:  # Medium+ complexity robots
+                    return True
+            
+            # Check learning progress for simple robots
+            if hasattr(agent, 'total_reward') and agent.total_reward > self.learning_progress_threshold:
+                return True  # Robot is making progress, preserve learning
+            
+            # Check for recent reward improvements
+            if (hasattr(agent, 'recent_displacements') and 
+                agent.recent_displacements and 
+                len(agent.recent_displacements) >= 3):
+                recent_avg = sum(agent.recent_displacements[-3:]) / 3
+                if recent_avg > 0.001:  # Recent positive movement
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"⚠️ Error checking learning preservation for agent {getattr(agent, 'id', 'unknown')}: {e}")
+            return True  # Default to preserving learning when in doubt
+
+    def log_morphology_aware_learning_times(self):
+        """Log the learning time improvements for different robot complexities."""
+        try:
+            complexity_stats = {
+                'simple': {'count': 0, 'total_time': 0, 'avg_joints': 0},
+                'medium': {'count': 0, 'total_time': 0, 'avg_joints': 0},
+                'complex': {'count': 0, 'total_time': 0, 'avg_joints': 0},
+                'very_complex': {'count': 0, 'total_time': 0, 'avg_joints': 0}
+            }
+            
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False):
+                    continue
+                    
+                try:
+                    # Get joint count
+                    if hasattr(agent, 'physical_params'):
+                        total_joints = agent.physical_params.num_arms * agent.physical_params.segments_per_limb
+                    else:
+                        total_joints = 2
+                    
+                    # Classify complexity
+                    if total_joints <= 4:
+                        complexity = 'simple'
+                    elif total_joints <= 8:
+                        complexity = 'medium'
+                    elif total_joints <= 12:
+                        complexity = 'complex'
+                    else:
+                        complexity = 'very_complex'
+                    
+                    # Get learning time
+                    episode_length = self.get_morphology_aware_episode_length(agent)
+                    learning_time_minutes = episode_length / (60 * 60)  # Convert steps to minutes
+                    
+                    # Update stats
+                    complexity_stats[complexity]['count'] += 1
+                    complexity_stats[complexity]['total_time'] += learning_time_minutes
+                    complexity_stats[complexity]['avg_joints'] += total_joints
+                    
+                except Exception as e:
+                    continue
+            
+            print(f"\n🧠 === MORPHOLOGY-AWARE LEARNING TIME REPORT ===")
+            total_robots = sum(stats['count'] for stats in complexity_stats.values())
+            print(f"📊 Population: {total_robots} robots with adaptive learning times")
+            
+            for complexity, stats in complexity_stats.items():
+                if stats['count'] > 0:
+                    avg_time = stats['total_time'] / stats['count']
+                    avg_joints = stats['avg_joints'] / stats['count']
+                    multiplier = self.episode_length_multipliers[complexity]
+                    
+                    print(f"   {complexity.upper():12} ({stats['count']:2} robots): "
+                          f"{avg_joints:.1f} joints avg, "
+                          f"{avg_time:.1f} min learning time "
+                          f"({multiplier}x multiplier)")
+            
+            # Calculate total learning capacity improvement
+            old_total_time = total_robots * (self.base_episode_length / (60 * 60))  # All robots at base time
+            new_total_time = sum(stats['total_time'] for stats in complexity_stats.values())
+            improvement_factor = new_total_time / old_total_time if old_total_time > 0 else 1.0
+            
+            print(f"📈 Learning capacity improvement: {improvement_factor:.1f}x total learning time")
+            print(f"   Previous system: {old_total_time:.1f} total robot-minutes")
+            print(f"   New system: {new_total_time:.1f} total robot-minutes")
+            print(f"🎯 Complex robots now get up to 30x more learning time!")
+            
+        except Exception as e:
+            print(f"❌ Error logging morphology-aware learning times: {e}")
+ 
     def _create_ground(self):
-        """Creates a static ground body."""
+        """Creates a static ground body for the EXPANDED strategic food zone world."""
         ground_body = self.world.CreateStaticBody(position=(0, -1))
         
-        # Calculate ground width to accommodate evolution engine spawn area
-        # Evolution engine uses: max(800, population_size * min_spacing * 1.5)
-        # With min_spacing = 12, this ensures ground covers the full spawn area
-        min_spacing = 12  # Must match evolution engine's min_spacing
-        calculated_spawn_width = max(800, self.num_agents * min_spacing * 1.5)
+        # STRATEGIC FOOD ZONES: Ground must support 400m wide world (-200 to +200)
+        # This matches the ecosystem_dynamics world bounds for strategic food placement
+        ground_width = 450  # Wide enough for -200 to +200 world with margin
         
-        # Add extra margin for robot movement beyond spawn area
-        ground_width = calculated_spawn_width + 200  # Extra 200 units for exploration
+        print(f"🌍 Creating expanded ground for strategic food zones: {ground_width}m wide")
         
         # The ground's mask is set to collide with the agent category
         ground_fixture = ground_body.CreateFixture(
@@ -2105,7 +668,7 @@ class TrainingEnvironment:
                 maskBits=self.AGENT_CATEGORY  # Collide with all agents
             )
         )
-        print(f"🔧 Ground setup complete with width {ground_width} (spawn area: {calculated_spawn_width}) for {self.num_agents} agents.")
+        print(f"🔧 Expanded ground setup complete with width {ground_width}m for strategic food zones.")
 
     def _generate_realistic_terrain(self):
         """Generate robot-scale terrain with navigable features appropriate for 1.5m robots."""
@@ -2206,9 +769,10 @@ class TrainingEnvironment:
             # Create static body for terrain
             terrain_body = self.world.CreateStaticBody(position=position)
             
-            # Create terrain as a box (representing elevated ground)
+            # Create terrain as a box (representing elevated ground) - ROBOT-SCALE: Limit height
+            limited_height = min(height, 1.2)  # ROBOT-SCALE: Max 1.2m tall terrain
             fixture = terrain_body.CreateFixture(
-                shape=b2.b2PolygonShape(box=(size/2, height/2)),
+                shape=b2.b2PolygonShape(box=(size/2, limited_height/2)),
                 density=0.0,  # Static body
                 friction=friction,
                 restitution=0.1,  # Slight bounce for natural feel
@@ -2250,9 +814,10 @@ class TrainingEnvironment:
         # Clean up existing terrain
         self._cleanup_all_terrain()
         
+        # 🌍 DISABLE static terrain generation - let dynamic world handle everything
         # Update style and regenerate
         self.terrain_style = new_style
-        self._generate_realistic_terrain()
+        # self._generate_realistic_terrain()  # DISABLED: Using dynamic world biome system instead
         
         print(f"✅ Terrain changed to '{new_style}' style")
         return True
@@ -2301,8 +866,7 @@ class TrainingEnvironment:
                     'last_status_change': time.time(),
                     'energy': 1.0,  # 0.0 to 1.0
                     'speed_factor': 1.0,
-                    'alliances': [],
-                    'territories': []
+                                # Alliances and territories removed
                 }
                 
                 self.agent_health[agent.id] = {
@@ -2320,131 +884,43 @@ class TrainingEnvironment:
         print(f"🦎 Initialized ecosystem roles for {len(self.agents)} agents")
 
     def _initialize_random_learning_approaches(self):
-        """Initialize random learning approaches for all agents to ensure diversity."""
-        if not self.learning_manager:
-            print("⚠️ Learning Manager not available - agents will use default learning approach")
-            return
-        
-        # Import learning approaches
-        from src.agents.learning_manager import LearningApproach
-        import random
-        
-        # ANALYSIS: Only attention deep Q-learning for comprehensive review
-        learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.00),      # 0% - Disabled for analysis
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.00),   # 0% - Disabled for analysis
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.00),   # 0% - Disabled for analysis
-            (LearningApproach.DEEP_Q_LEARNING, 0.00),       # 0% - Disabled for analysis
-            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.00), # 100% - Focus on attention analysis
-        ]
-        
-        # Create weighted list for random selection
-        weighted_approaches = []
-        for approach, weight in learning_approaches:
-            weighted_approaches.extend([approach] * int(weight * 100))
-        
-        # Track assignments for reporting
-        approach_counts = {approach: 0 for approach, _ in learning_approaches}
+        """Initialize learning approaches for all agents (simplified - no learning manager needed)."""
         successful_assignments = 0
-        failed_assignments = 0
         
-        print(f"🎯 Assigning random learning approaches to {len(self.agents)} agents...")
+        print(f"🎯 All agents use standalone attention deep Q-learning...")
         
         for i, agent in enumerate(self.agents):
             if getattr(agent, '_destroyed', False):
                 continue
                 
             try:
-                # Select random learning approach
-                selected_approach = random.choice(weighted_approaches)
+                # All agents use attention deep Q-learning (handled in their own __init__)
+                setattr(agent, 'learning_approach', 'attention_deep_q_learning')
+                successful_assignments += 1
                 
-                # Apply the learning approach
-                success = self.learning_manager.set_agent_approach(agent, selected_approach)
-                
-                if success:
-                    # Store the approach name on the agent for web interface
-                    setattr(agent, 'learning_approach', selected_approach.value)
-                    approach_counts[selected_approach] += 1
-                    successful_assignments += 1
-                    
-                    # Log first few assignments for verification
-                    if i < 5:
-                        print(f"   Agent {agent.id[:8]}: {selected_approach.value}")
-                else:
-                    failed_assignments += 1
-                    print(f"   ❌ Failed to assign {selected_approach.value} to agent {agent.id[:8]}")
+                # Log first few assignments for verification
+                if i < 5:
+                    print(f"   Agent {str(agent.id)[:8]}: standalone attention_deep_q_learning")
                     
             except Exception as e:
-                failed_assignments += 1
-                print(f"   ❌ Error assigning learning approach to agent {agent.id}: {e}")
+                print(f"   ❌ Error setting up agent {agent.id}: {e}")
         
-        # Report final distribution
         print(f"🧠 Learning Approach Distribution:")
-        total_assigned = successful_assignments
-        for approach, count in approach_counts.items():
-            if count > 0:
-                percentage = (count / total_assigned * 100) if total_assigned > 0 else 0
-                approach_info = self.learning_manager.approach_info[approach]
-                icon = approach_info['icon']
-                name = approach_info['name']
-                print(f"   {icon} {name}: {count} agents ({percentage:.1f}%)")
-        
-        if failed_assignments > 0:
-            print(f"   ⚠️ Failed assignments: {failed_assignments}")
-        
-        print(f"✅ Successfully assigned learning approaches to {successful_assignments}/{len(self.agents)} agents")
+        print(f"   🧠 Standalone Attention Deep Q-Learning: {successful_assignments} agents (100%)")
+        print(f"✅ All agents handle their own learning - no external dependencies")
 
     def _assign_random_learning_approach_single(self, agent):
-        """Assign a random learning approach to a single agent (for replacement agents)."""
-        if not self.learning_manager:
-            return
-        
-        # Import learning approaches
-        from src.agents.learning_manager import LearningApproach
-        import random
-        
-        # FIXED: Conservative distribution for replacements (fewer neural networks than initial)
-        learning_approaches = [
-            (LearningApproach.BASIC_Q_LEARNING, 0.0),      # 30% - Simple baseline
-            (LearningApproach.ENHANCED_Q_LEARNING, 0.0),   # 60% - Advanced tabular (FAST)
-            (LearningApproach.SURVIVAL_Q_LEARNING, 0.0),   # 8% - Survival-focused
-            (LearningApproach.DEEP_Q_LEARNING, 0.0),       # 2% - Neural networks (very conservative)
-            (LearningApproach.ATTENTION_DEEP_Q_LEARNING, 1.0), # 0% - No attention networks for replacements (to prevent creation)
-        ]
-        
-        # Create weighted list for random selection
-        weighted_approaches = []
-        for approach, weight in learning_approaches:
-            weighted_approaches.extend([approach] * int(weight * 100))
-        
+        """Assign learning approach to a single agent (for replacement agents)."""
         try:
-            # Select random learning approach
-            selected_approach = random.choice(weighted_approaches)
-            
-            # Apply the learning approach
-            success = self.learning_manager.set_agent_approach(agent, selected_approach)
-            
-            if success:
-                # Store the approach name on the agent for web interface
-                setattr(agent, 'learning_approach', selected_approach.value)
-                approach_info = self.learning_manager.approach_info[selected_approach]
-                icon = approach_info['icon']
-                name = approach_info['name']
-                print(f"   🎯 Assigned {icon} {name} to replacement agent {agent.id[:8]}")
-                
-                # Special logging for Deep Q-Learning to track creation
-                if selected_approach == LearningApproach.DEEP_Q_LEARNING:
-                    print(f"   🧠 DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Neural network active!")
-                elif selected_approach == LearningApproach.ATTENTION_DEEP_Q_LEARNING:
-                    print(f"   🔍 ATTENTION DEEP Q-LEARNING AGENT CREATED: {agent.id[:8]} - Attention mechanism active!")
-            else:
-                print(f"   ❌ Failed to assign {selected_approach.value} to replacement agent {agent.id[:8]}")
+            # All agents use standalone attention deep Q-learning
+            setattr(agent, 'learning_approach', 'attention_deep_q_learning')
+            print(f"   🎯 Replacement agent {str(agent.id)[:8]} using standalone attention deep Q-learning")
                 
         except Exception as e:
-            print(f"   ❌ Error assigning learning approach to replacement agent {agent.id}: {e}")
+            print(f"   ❌ Error setting up replacement agent {agent.id}: {e}")
 
     def _update_ecosystem_dynamics(self):
-        """Update ecosystem dynamics including agent interactions, territories, and predation."""
+        """Update ecosystem dynamics including agent interactions and predation."""
         try:
             current_time = time.time()
             
@@ -2476,8 +952,8 @@ class TrainingEnvironment:
                 if agent_id in self.agent_health:
                     health_data = self.agent_health[agent_id]
                     
-                    # Energy decreases over time, affected by environmental factors
-                    energy_drain = 0.01 + environmental_effects.get('energy_cost', 0.0)
+                    # RESTORED: Normal energy drain since we're reusing networks
+                    energy_drain = 0.005 + environmental_effects.get('energy_cost', 0.0)  # Moderate rate
                     health_data['energy'] = max(0.0, health_data['energy'] - energy_drain)
                     
                     # Resource access affects energy recovery
@@ -2497,8 +973,6 @@ class TrainingEnvironment:
             # Update agent statuses based on their behaviors and interactions
             self._update_agent_statuses()
             
-            # Simulate predation events (visual only)
-            self._simulate_predation_events()
             
             # Clean up old predation events (keep only last 10 seconds)
             self.predation_events = [
@@ -2517,6 +991,51 @@ class TrainingEnvironment:
                 event for event in self.consumption_events
                 if current_time - event['timestamp'] < event['duration']
             ]
+            
+            # Ray casting events cleanup removed for performance
+            
+            # Update dynamic world generation based on robot positions
+            if self.dynamic_world_manager:
+                try:
+                    # PERFORMANCE MONITOR: Track dynamic world update time
+                    world_update_start = time.time()
+                    
+                    # Get robot positions for world expansion
+                    robot_positions = []
+                    for agent in self.agents:
+                        if not getattr(agent, '_destroyed', False) and agent.body:
+                            robot_positions.append((agent.id, (agent.body.position.x, agent.body.position.y)))
+                    
+                    # SAFEGUARD: Skip update if too many robots (performance protection)
+                    if len(robot_positions) > 100:
+                        print(f"⚠️ PERFORMANCE: Skipping dynamic world update ({len(robot_positions)} robots)")
+                        return
+                    
+                    # Update dynamic world (generates new tiles as robots progress)
+                    self.dynamic_world_manager.update(robot_positions)
+                    
+                    # PERFORMANCE MONITOR: Warn if update takes too long
+                    world_update_time = time.time() - world_update_start
+                    if world_update_time > 0.5:  # More than 500ms is problematic
+                        print(f"🐌 SLOW: Dynamic world update took {world_update_time:.2f}s")
+                        
+                        # Get world status for debugging
+                        status = self.dynamic_world_manager.get_world_status()
+                        print(f"   📊 World status: {status.get('active_tiles', 0)} tiles, {status.get('total_obstacles', 0)} obstacles")
+                    
+                except Exception as e:
+                    print(f"❌ Error updating dynamic world: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # EMERGENCY SAFEGUARD: Disable dynamic world if it keeps failing
+                    if not hasattr(self, '_dynamic_world_errors'):
+                        self._dynamic_world_errors = 0
+                    self._dynamic_world_errors += 1
+                    
+                    if self._dynamic_world_errors >= 5:
+                        print(f"🚨 EMERGENCY: Disabling dynamic world after {self._dynamic_world_errors} consecutive errors")
+                        self.dynamic_world_manager = None
             
         except Exception as e:
             print(f"⚠️ Error updating ecosystem dynamics: {e}")
@@ -2553,72 +1072,7 @@ class TrainingEnvironment:
             elif status_data['status'] != 'hunting':
                 status_data['status'] = 'hunting'
                 status_data['last_status_change'] = current_time
-            
-            # Update alliances and territories from ecosystem
-            status_data['alliances'] = list(self.ecosystem_dynamics.alliances.get(agent_id, set()))
-            status_data['territories'] = [
-                {'type': t.territory_type.value, 'position': t.position, 'size': t.size}
-                for t in self.ecosystem_dynamics.territories if t.owner_id == agent_id
-            ]
     
-    def _simulate_predation_events(self):
-        """Simulate predation events for visualization purposes."""
-        current_time = time.time()
-        
-        # Find carnivores and herbivores
-        carnivores = []
-        herbivores = []
-        
-        for agent in self.agents:
-            if getattr(agent, '_destroyed', False) or not agent.body:
-                continue
-                
-            agent_id = agent.id
-            if agent_id in self.agent_statuses:
-                role = self.agent_statuses[agent_id]['role']
-                if role == 'carnivore':
-                    carnivores.append(agent)
-                elif role == 'herbivore':
-                    herbivores.append(agent)
-        
-        # Simulate predation attempts
-        for predator in carnivores:
-            if self.agent_statuses[predator.id]['status'] != 'hunting':
-                continue
-                
-            # Find nearby prey
-            for prey in herbivores:
-                distance = ((predator.body.position.x - prey.body.position.x) ** 2 + 
-                           (predator.body.position.y - prey.body.position.y) ** 2) ** 0.5
-                
-                if distance < 5.0:  # Within hunting range
-                    # Predation attempt based on relative speeds/fitness
-                    predator_fitness = predator.get_evolutionary_fitness()
-                    prey_fitness = prey.get_evolutionary_fitness()
-                    
-                    success_chance = min(0.3, predator_fitness / (prey_fitness + 1.0))
-                    
-                    if random.random() < success_chance:
-                        # Successful predation event
-                        self.predation_events.append({
-                            'predator_id': predator.id,
-                            'prey_id': prey.id,
-                            'position': (predator.body.position.x, predator.body.position.y),
-                            'timestamp': current_time,
-                            'success': True
-                        })
-                        
-                        # Update prey status
-                        if prey.id in self.agent_statuses:
-                            self.agent_statuses[prey.id]['status'] = 'fleeing'
-                        
-                        # Update predator energy
-                        if predator.id in self.agent_health:
-                            self.agent_health[predator.id]['energy'] = min(1.0, 
-                                self.agent_health[predator.id]['energy'] + 0.2)
-                        
-                        break  # One predation per predator per update
-
     def _generate_resources_between_agents(self):
         """Generate resources strategically between agents."""
         try:
@@ -2646,13 +1100,17 @@ class TrainingEnvironment:
             print(f"⚠️ Error generating resources: {e}")
     
     def _validate_resource_positions(self, agent_positions):
-        """Validate that resources maintain proper distance from agents - NO MORE MOVING FOOD CLOSE TO AGENTS."""
+        """Validate that resources maintain proper distance from agents and are at reachable heights."""
         try:
             minimum_safe_distance = 6.0  # Must be at least 6m from any agent (matches ecosystem_dynamics)
+            minimum_height = 0.0   # FIXED: Minimum Y coordinate (ground at Y=-1, so food at Y=0+)
+            maximum_height = 8.0   # Maximum Y coordinate robots can reasonably reach
             resources_to_remove = []
             
             for food_source in self.ecosystem_dynamics.food_sources:
                 food_pos = food_source.position
+                should_remove = False
+                removal_reason = ""
                 
                 # Check if this resource is too close to ANY agent
                 too_close_to_agent = False
@@ -2662,17 +1120,41 @@ class TrainingEnvironment:
                         too_close_to_agent = True
                         break
                 
-                # CRITICAL: Remove resources that are too close instead of moving them
-                # This prevents random rewards from food appearing right next to robots
                 if too_close_to_agent:
-                    resources_to_remove.append(food_source)
+                    should_remove = True
+                    removal_reason = f"too close to agents (<{minimum_safe_distance}m)"
+                
+                # NEW: Check if resource is at unreachable height
+                if food_pos[1] < minimum_height:
+                    should_remove = True
+                    removal_reason = f"too low (Y={food_pos[1]:.1f} < {minimum_height})"
+                elif food_pos[1] > maximum_height:
+                    should_remove = True
+                    removal_reason = f"too high (Y={food_pos[1]:.1f} > {maximum_height})"
+                
+                # CRITICAL: Remove resources that are invalid instead of moving them
+                # This prevents random rewards and ensures fair competition
+                if should_remove:
+                    resources_to_remove.append((food_source, removal_reason))
             
-            # Remove resources that are too close to agents
+            # Remove invalid resources and log reasons
             if resources_to_remove:
-                for food_source in resources_to_remove:
+                height_issues = 0
+                distance_issues = 0
+                
+                for food_source, reason in resources_to_remove:
                     self.ecosystem_dynamics.food_sources.remove(food_source)
-                print(f"🚫 Removed {len(resources_to_remove)} food sources that were too close to agents (<{minimum_safe_distance}m)")
-                print(f"   📍 This prevents random rewards and ensures fair competition")
+                    if "too high" in reason or "too low" in reason:
+                        height_issues += 1
+                    else:
+                        distance_issues += 1
+                
+                print(f"🚫 Removed {len(resources_to_remove)} invalid food sources:")
+                if height_issues > 0:
+                    print(f"   📏 {height_issues} resources at unreachable heights (must be {minimum_height}m to {maximum_height}m)")
+                if distance_issues > 0:
+                    print(f"   📍 {distance_issues} resources too close to agents (<{minimum_safe_distance}m)")
+                print(f"   ✅ This ensures all resources are reachable and fairly positioned")
                 
         except Exception as e:
             print(f"⚠️ Error validating resource positions: {e}")
@@ -2696,13 +1178,13 @@ class TrainingEnvironment:
                 energy_gain, consumed_food_type, consumed_food_position = self.ecosystem_dynamics.consume_resource(agent_id, agent_position)
                 # Energy gain is now properly scaled in the consume_resource function
                 
-                # Apply consistent energy decay (not paused during eating)
-                base_decay = 0.0001  
+                # Apply consistent energy decay (not paused during eating) - DRASTICALLY REDUCED for much better survival
+                base_decay = 0.00005  # Reduced from 0.00005 to 0.000005 (90% reduction - 10x longer survival)
                 
                 # Minimal additional decay based on movement 
                 velocity = agent.body.linearVelocity
                 speed = (velocity.x ** 2 + velocity.y ** 2) ** 0.5
-                movement_cost = speed * 0.0001  # Very minimal movement cost
+                movement_cost = speed * 0.0005  # Reduced movement cost by 90%
                 
                 # Role-based energy costs (minimal differences)
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -2727,14 +1209,14 @@ class TrainingEnvironment:
                         health_recovery = 0.001  # Slow health recovery when well-fed
                         self.agent_health[agent_id]['health'] = min(1.0, current_health + health_recovery)
                         if current_health < 0.9 and current_health + health_recovery >= 0.9:
-                            print(f"💚 {agent_id[:8]} is recovering health (energy: {current_energy:.2f})")
+                            print(f"💚 {str(agent_id)[:8]} is recovering health (energy: {current_energy:.2f})")
                     
                     elif current_energy < 0.1:
-                        # LOW ENERGY: Health degrades from starvation
-                        health_degradation = 0.002  # Health loss when starving
+                        # DRASTICALLY REDUCED: Much slower health degradation for 10x longer survival
+                        health_degradation = 0.0001  # Reduced from 0.001 to 0.0001 (90% reduction)
                         self.agent_health[agent_id]['health'] = max(0.0, current_health - health_degradation)
                         if current_health - health_degradation <= 0.0:
-                            print(f"💀 {agent_id[:8]} is starving to death (health: {current_health:.3f})")
+                            print(f"💀 {str(agent_id)[:8]} is starving to death (health: {current_health:.3f})")
                 
                 # Apply energy gain from eating
                 current_energy = min(1.0, current_energy + energy_gain)
@@ -2765,7 +1247,7 @@ class TrainingEnvironment:
                     role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
                     food_description = role_food_descriptions.get(role, {}).get(consumed_food_type, f'eating {consumed_food_type}')
                     
-                    print(f"🍴 {agent_id[:8]} is {food_description} (energy: +{energy_gain:.2f}) [decay paused]")
+                    print(f"🍴 {str(agent_id)[:8]} is {food_description} (energy: +{energy_gain:.2f}) [decay paused]")
                     
                     # FOOD ANIMATION: Create consumption event for visual line animation
                     if consumed_food_position:
@@ -2785,10 +1267,6 @@ class TrainingEnvironment:
                     if 'food_consumed' not in self.robot_stats[agent_id]:
                         self.robot_stats[agent_id]['food_consumed'] = 0.0
                     self.robot_stats[agent_id]['food_consumed'] += energy_gain
-                
-                # Log significant consumption events (keep minimal logging)
-                #if energy_gain > 0.1:  # Only log substantial energy gains
-                #    print(f"🍽️ Agent {agent_id[:8]} consumed energy: +{boosted_energy_gain:.2f}")
                 
                 # ROBOT CONSUMPTION: Use the fixed consume_robot function from ecosystem dynamics
                 role = self.agent_statuses.get(agent_id, {}).get('role', 'omnivore')
@@ -2838,6 +1316,7 @@ class TrainingEnvironment:
                 
                 # Check for death by health loss ONLY - robots should only die when health reaches 0.0
                 current_health = self.agent_health.get(agent_id, {'health': 1.0})['health']
+                # FIXED: Allow death but reuse networks on replacement
                 if current_health <= 0.0:
                     # Only process death once per agent
                     if agent not in agents_to_replace:
@@ -2872,7 +1351,7 @@ class TrainingEnvironment:
                         else:
                             self.agent_statuses[agent_id]['status'] = 'hunting'  # Always hunting when not eating
             
-            # Replace dead agents with new ones
+            # FIXED: Replace dead agents while reusing their neural networks
             if agents_to_replace:
                 self._replace_dead_agents(agents_to_replace)
         
@@ -2908,7 +1387,8 @@ class TrainingEnvironment:
             
                             # Calculate average lifespan (only for events that have lifespan data)
             if self.survival_stats['total_deaths'] > 0:
-                events_with_lifespan = [event for event in self.death_events[-100:] if 'lifespan' in event]
+                # FIXED: Convert deque to list before slicing
+                events_with_lifespan = [event for event in list(self.death_events) if 'lifespan' in event]
                 if events_with_lifespan:
                     total_lifespan = sum(event['lifespan'] for event in events_with_lifespan)
                     self.survival_stats['average_lifespan'] = total_lifespan / len(events_with_lifespan)
@@ -2929,12 +1409,24 @@ class TrainingEnvironment:
             traceback.print_exc()
     
     def _replace_dead_agents(self, dead_agents):
-        """Replace dead agents with new randomly generated agents."""
+        """Replace dead agents while transferring their neural networks to prevent network explosion."""
         with self._physics_lock:
             try:
                 for dead_agent in dead_agents:
-                    # Mark the dead agent for destruction
-                    self._agents_pending_destruction.append(dead_agent)
+                    # Agents handle their own networks - no extraction needed
+                    
+                    # CRITICAL: Return dead agent to memory pool IMMEDIATELY so it can be reused
+                    if self.robot_memory_pool:
+                        try:
+                            self.robot_memory_pool.return_robot(dead_agent)
+                            print(f"♻️ Returned dead agent {dead_agent.id} to memory pool immediately")
+                        except Exception as e:
+                            print(f"⚠️ Failed to return dead agent {dead_agent.id} to memory pool: {e}")
+                            # Fallback: add to destruction queue
+                            self._agents_pending_destruction.append(dead_agent)
+                    else:
+                        # No memory pool available, use destruction queue
+                        self._agents_pending_destruction.append(dead_agent)
                     
                     # Remove from active agents list
                     if dead_agent in self.agents:
@@ -2948,7 +1440,7 @@ class TrainingEnvironment:
                         # Initialize new agent's ecosystem data
                         self._initialize_single_agent_ecosystem(replacement_agent)
                         
-                        # ✨ ASSIGN RANDOM LEARNING APPROACH TO REPLACEMENT AGENT
+                        # Agents create their own networks - no transfer needed
                         self._assign_random_learning_approach_single(replacement_agent)
                         
                         print(f"🐣 Spawned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
@@ -2956,42 +1448,56 @@ class TrainingEnvironment:
             except Exception as e:
                 print(f"❌ Error replacing dead agents: {e}")
     
+    def _get_current_spawn_position(self):
+        """Get the current spawn position near the leftmost (beginning) boundary of the world."""
+        try:
+            # Check if we have a dynamic world manager to track current boundaries
+            if hasattr(self, 'dynamic_world_manager') and self.dynamic_world_manager:
+                # Get current leftmost boundary from dynamic world
+                leftmost_boundary = self.dynamic_world_manager.left_wall_position
+                
+                # Spawn robots a safe distance from the left wall (10-30m to the right)
+                spawn_x = leftmost_boundary + random.uniform(10.0, 30.0)
+                spawn_y = random.uniform(4.0, 8.0)  # Slight height variation
+                
+                print(f"🌍 Dynamic world spawn: left wall at {leftmost_boundary:.1f}m, spawning at x={spawn_x:.1f}m")
+                return (spawn_x, spawn_y)
+            else:
+                # Fallback: Use traditional central spawn area if no dynamic world
+                spawn_x = random.uniform(-30.0, 30.0)
+                spawn_y = random.uniform(4.0, 8.0)
+                
+                print(f"🏠 Static world spawn: spawning at x={spawn_x:.1f}m (no dynamic world)")
+                return (spawn_x, spawn_y)
+                
+        except Exception as e:
+            print(f"⚠️ Error getting spawn position: {e}, using fallback")
+            # Safe fallback position
+            return (0.0, 5.0)
+    
     def _create_replacement_agent(self):
         """Create a new agent to replace a dead one using memory pool if available."""
         try:
-            # Find a good spawn position (spread them out)
-            existing_positions = []
-            for agent in self.agents:
-                if not getattr(agent, '_destroyed', False) and agent.body:
-                    existing_positions.append(agent.body.position.x)
+            # 🌍 DYNAMIC WORLD: Spawn near current leftmost (beginning) position
+            spawn_position = self._get_current_spawn_position()
             
-            # Find gaps in the population or place at edges
-            if existing_positions:
-                min_x = min(existing_positions) - 20
-                max_x = max(existing_positions) + 20
-                spawn_x = random.uniform(min_x, max_x)
-            else:
-                spawn_x = random.uniform(-50, 50)
-            
-            spawn_position = (spawn_x, 5.0)  # Spawn slightly above ground
+            print(f"🐣 Respawning dead agent at current world beginning: ({spawn_position[0]:.1f}, {spawn_position[1]:.1f})")
             
             # Create random physical parameters (fresh genetics)
             from src.agents.physical_parameters import PhysicalParameters
             random_params = PhysicalParameters.random_parameters()
             
-            # Use memory pool if available for efficient reuse with learning preservation
+            # Use memory pool if available for efficient reuse with size mutations
             if self.robot_memory_pool:
                 new_agent = self.robot_memory_pool.acquire_robot(
                     position=spawn_position,
                     physical_params=random_params,
-                    parent_lineage=[],  # Fresh agent, no lineage
-                    restore_learning=True  # Try to restore previous learning if available
+                    apply_size_mutations=True  # Enable size mutations during respawning
                 )
-                logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool")
+                logger.debug(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
             else:
                 # Fallback: Create new agent directly
-                from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
-                new_agent = EvolutionaryCrawlingAgent(
+                new_agent = CrawlingAgent(
                     world=self.world,
                     agent_id=None,  # Generate new UUID automatically
                     position=spawn_position,
@@ -3019,6 +1525,8 @@ class TrainingEnvironment:
                     )
                 except Exception as e:
                     print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
+            
+            # Agents are standalone - no training environment injection needed
             
             return new_agent
             
@@ -3052,8 +1560,7 @@ class TrainingEnvironment:
                 'last_status_change': time.time(),
                 'energy': 1.0,
                 'speed_factor': 1.0,
-                'alliances': [],
-                'territories': []
+                # Alliances and territories removed
             }
             
             self.agent_health[agent_id] = {
@@ -3071,10 +1578,106 @@ class TrainingEnvironment:
         except Exception as e:
             print(f"❌ Error initializing ecosystem data for agent {agent_id}: {e}")
 
+    def _track_limb_distribution(self):
+        """Track and log the distribution of limb counts among agents."""
+        try:
+            current_time = time.time()
+            if current_time - self.last_limb_distribution_log < self.limb_distribution_interval:
+                return
+            
+            # Count limbs for all active agents
+            limb_counts = {}
+            multi_limb_details = []
+            total_agents = 0
+            
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False) or not hasattr(agent, 'physical_params'):
+                    continue
+                    
+                total_agents += 1
+                num_limbs = getattr(agent.physical_params, 'num_arms', 1)
+                num_segments = getattr(agent.physical_params, 'segments_per_limb', 2)
+                
+                if num_limbs not in limb_counts:
+                    limb_counts[num_limbs] = 0
+                limb_counts[num_limbs] += 1
+                
+                # Track multi-limb robot details
+                if num_limbs > 1:
+                    multi_limb_details.append({
+                        'id': agent.id,
+                        'limbs': num_limbs,
+                        'segments': num_segments,
+                        'total_joints': num_limbs * num_segments,
+                        'position': (agent.body.position.x, agent.body.position.y) if agent.body else (0, 0),
+                        'reward': getattr(agent, 'total_reward', 0)
+                    })
+            
+            # Calculate percentages
+            limb_percentages = {}
+            for limbs, count in limb_counts.items():
+                limb_percentages[limbs] = (count / total_agents * 100) if total_agents > 0 else 0
+            
+            # Store history
+            distribution_entry = {
+                'timestamp': current_time,
+                'total_agents': total_agents,
+                'limb_counts': limb_counts.copy(),
+                'limb_percentages': limb_percentages.copy(),
+                'multi_limb_count': sum(count for limbs, count in limb_counts.items() if limbs > 1),
+                'multi_limb_details': multi_limb_details.copy()
+            }
+            self.limb_distribution_history.append(distribution_entry)
+            
+            # Keep only last 100 entries (FIXED: deque maxlen=100 handles this automatically)
+            
+            # Log current distribution
+            print(f"\n🦾 === LIMB DISTRIBUTION REPORT (Step {self.step_count}) ===")
+            print(f"👥 Total Active Agents: {total_agents}")
+            
+            for limbs in sorted(limb_counts.keys()):
+                count = limb_counts[limbs]
+                percentage = limb_percentages[limbs]
+                limb_emoji = "🦾" if limbs == 1 else "🕷️" if limbs <= 3 else "🐙" if limbs <= 5 else "👾"
+                print(f"   {limb_emoji} {limbs}-limb robots: {count:2d} ({percentage:5.1f}%)")
+            
+            # Detailed multi-limb robot info
+            if multi_limb_details:
+                print(f"\n🔍 Multi-Limb Robot Details ({len(multi_limb_details)} robots):")
+                for detail in sorted(multi_limb_details, key=lambda x: x['limbs'], reverse=True):
+                    print(f"   🤖 Agent {str(detail['id'])[:8]}: {detail['limbs']} limbs × {detail['segments']} segments = {detail['total_joints']} joints")
+                    print(f"      📍 Position: ({detail['position'][0]:.1f}, {detail['position'][1]:.1f}), Reward: {detail['reward']:.2f}")
+            else:
+                print("❌ NO MULTI-LIMB ROBOTS FOUND!")
+                
+            # Show trend if we have history
+            if len(self.limb_distribution_history) >= 2:
+                prev_multi = self.limb_distribution_history[-2]['multi_limb_count']
+                curr_multi = distribution_entry['multi_limb_count']
+                change = curr_multi - prev_multi
+                
+                if change > 0:
+                    print(f"📈 Multi-limb robots INCREASED by {change} (+{change/max(1,prev_multi)*100:.1f}%)")
+                elif change < 0:
+                    print(f"📉 Multi-limb robots DECREASED by {abs(change)} ({change/max(1,prev_multi)*100:.1f}%)")
+                else:
+                    print(f"➡️ Multi-limb robot count STABLE")
+            
+            print(f"🦾 === END LIMB DISTRIBUTION REPORT ===\n")
+            self.last_limb_distribution_log = current_time
+            
+        except Exception as e:
+            print(f"❌ Error tracking limb distribution: {e}")
+            import traceback
+            traceback.print_exc()
+
     def _update_statistics(self):
         """Update population statistics with enhanced safety checks."""
         if not self.agents:
             return
+        
+        # Track limb distribution
+        self._track_limb_distribution()
         
         # Use agent ID as key instead of list index to avoid evolution issues
         for agent in self.agents:
@@ -3115,8 +1718,36 @@ class TrainingEnvironment:
                 self.robot_stats[agent_id]['steps_alive'] += 1
                 self.robot_stats[agent_id]['total_distance'] = total_distance
                 self.robot_stats[agent_id]['fitness'] = total_distance
-                self.robot_stats[agent_id]['episode_reward'] = getattr(agent, 'total_reward', 0.0)
-                self.robot_stats[agent_id]['q_updates'] = agent.q_table.update_count if hasattr(agent.q_table, 'update_count') else 0
+                
+                # 🌊 INFINITE EXPLORATION: Use rolling rewards instead of total_reward
+                if hasattr(agent, 'get_current_performance'):
+                    performance = agent.get_current_performance()
+                    self.robot_stats[agent_id]['reward_rate'] = performance['reward_rate']
+                    self.robot_stats[agent_id]['short_term_avg'] = performance['short_term_avg'] 
+                    self.robot_stats[agent_id]['medium_term_avg'] = performance['medium_term_avg']
+                    self.robot_stats[agent_id]['performance_trend'] = performance['performance_trend']
+                    self.robot_stats[agent_id]['achievement_count'] = performance['achievement_count']
+                    self.robot_stats[agent_id]['fitness_score'] = agent.get_fitness_score() if hasattr(agent, 'get_fitness_score') else total_distance
+                else:
+                    # Fallback for backward compatibility
+                    self.robot_stats[agent_id]['reward_rate'] = getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1))
+                    self.robot_stats[agent_id]['fitness_score'] = total_distance
+                
+                # 🌊 ROLLING EPISODE REWARD: Use rolling average instead of cumulative total
+                if hasattr(agent, 'get_current_performance'):
+                    performance = agent.get_current_performance()
+                    # FIXED: Use short-term average (last 100 steps) instead of medium-term (500 steps)
+                    # This makes episode reward much more responsive to recent activity
+                    self.robot_stats[agent_id]['episode_reward'] = performance.get('short_term_avg', 0.0)
+                else:
+                    # Fallback: calculate rolling average manually with much shorter window
+                    if hasattr(agent, 'recent_rewards') and agent.recent_rewards:
+                        recent_rewards = list(agent.recent_rewards)[-100:]  # FIXED: Last 100 rewards instead of 500
+                        self.robot_stats[agent_id]['episode_reward'] = sum(recent_rewards) / len(recent_rewards)
+                    else:
+                        # Final fallback: use immediate reward rate (not cumulative)
+                        immediate_reward = getattr(agent, 'immediate_reward', 0.0)
+                        self.robot_stats[agent_id]['episode_reward'] = immediate_reward
                 self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
                 
             except Exception as e:
@@ -3213,8 +1844,8 @@ class TrainingEnvironment:
             # Return agent to memory pool if available (preserves learning)
             if self.robot_memory_pool:
                 try:
-                    self.robot_memory_pool.return_robot(agent, preserve_learning=True)
-                    print(f"♻️ Returned agent {agent.id} to memory pool with learning preserved")
+                    self.robot_memory_pool.return_robot(agent)
+                    print(f"♻️ Returned agent {agent.id} to memory pool")
                     return
                 except Exception as e:
                     print(f"⚠️ Failed to return agent {agent.id} to memory pool: {e}")
@@ -3310,17 +1941,89 @@ class TrainingEnvironment:
         last_mlflow_log = time.time()
         
         step_count = 0
+        
+        # CRITICAL SAFEGUARD: Use instance emergency shutdown state
+        self._emergency_shutdown_state['last_emergency_check'] = last_time
 
         while self.is_running:
-            current_time = time.time()
+            frame_start_time = time.time()
+            current_time = frame_start_time
             frame_time = current_time - last_time
             last_time = current_time
             
             # Add frame time to the accumulator
             accumulator += frame_time
             
+            # CRITICAL SAFEGUARD: Emergency shutdown detection
+            if current_time - self._emergency_shutdown_state['last_emergency_check'] >= 5.0:  # Check every 5 seconds
+                try:
+                    import psutil
+                    import os
+                    process = psutil.Process(os.getpid())
+                    memory_mb = process.memory_info().rss / 1024 / 1024
+                    
+                    # Count physics bodies
+                    physics_body_count = 0
+                    for agent in self.agents:
+                        if hasattr(agent, 'body') and agent.body:
+                            physics_body_count += 1
+                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                            physics_body_count += 1
+                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                            physics_body_count += 1
+                        if hasattr(agent, 'wheels') and agent.wheels:
+                            physics_body_count += len(agent.wheels)
+                    
+                    # Add dynamic world bodies
+                    if self.dynamic_world_manager:
+                        status = self.dynamic_world_manager.get_world_status()
+                        physics_body_count += status.get('total_obstacles', 0)
+                    
+                    # Check emergency conditions
+                    emergency_triggered = False
+                    
+                    if memory_mb > self._emergency_shutdown_state['max_memory_mb']:
+                        print(f"🚨 EMERGENCY: Memory usage {memory_mb:.1f}MB exceeds limit {self._emergency_shutdown_state['max_memory_mb']}MB")
+                        emergency_triggered = True
+                    
+                    if physics_body_count > self._emergency_shutdown_state['max_physics_bodies']:
+                        print(f"🚨 EMERGENCY: Physics bodies {physics_body_count} exceeds limit {self._emergency_shutdown_state['max_physics_bodies']}")
+                        emergency_triggered = True
+                    
+                    if frame_time > 0.5:  # Frame took more than 500ms
+                        self._emergency_shutdown_state['consecutive_slow_frames'] += 1
+                        print(f"🐌 SLOW FRAME: {frame_time:.2f}s ({self._emergency_shutdown_state['consecutive_slow_frames']}/{self._emergency_shutdown_state['max_consecutive_slow_frames']})")
+                        
+                        if self._emergency_shutdown_state['consecutive_slow_frames'] >= self._emergency_shutdown_state['max_consecutive_slow_frames']:
+                            print(f"🚨 EMERGENCY: {self._emergency_shutdown_state['consecutive_slow_frames']} consecutive slow frames")
+                            emergency_triggered = True
+                    else:
+                        self._emergency_shutdown_state['consecutive_slow_frames'] = 0
+                    
+                    if emergency_triggered:
+                        print("🚨 EMERGENCY CONDITIONS DETECTED - CONTINUING WITH WARNINGS ONLY")
+                        print("⚠️ System performance degraded but allowing simulation to continue")
+                        # DISABLED: Emergency shutdown - only log warnings, don't stop system
+                        # Optionally trigger cleanup without stopping
+                        if self.dynamic_world_manager and memory_mb > 1500:  # Only cleanup if memory is very high
+                            print("🧹 High memory detected - cleaning up dynamic world...")
+                            try:
+                                self.dynamic_world_manager.cleanup_all_tiles()
+                            except Exception as e:
+                                print(f"⚠️ Error during dynamic world cleanup: {e}")
+                        
+                        # Reset slow frame counter to prevent spam
+                        self._emergency_shutdown_state['consecutive_slow_frames'] = 0
+                    
+                    self._emergency_shutdown_state['last_emergency_check'] = current_time
+                    
+                except Exception as e:
+                    print(f"⚠️ Error in emergency check: {e}")
+                    self._emergency_shutdown_state['last_emergency_check'] = current_time
+            
             # Fixed-step physics updates with enhanced thread safety
             while accumulator >= self.dt:
+                physics_start = time.time()
                 with self._physics_lock:  # Protect ALL Box2D operations
                     try:
                         # Process any pending destructions first
@@ -3328,13 +2031,52 @@ class TrainingEnvironment:
                         
                         # Step the physics world only if not evolving
                         if not self._is_evolving:
-                            self.world.Step(self.dt, 8, 3)
+                            # Run multiple physics steps based on simulation speed multiplier
+                            physics_step_start = time.time()
+                            physics_steps = max(1, int(self.simulation_speed_multiplier))
+                            for _ in range(physics_steps):
+                                self.world.Step(self.dt, 8, 3)
+                            physics_step_time = time.time() - physics_step_start
                             
                             # Update all agents (copy list to avoid iteration issues)
+                            ai_processing_start = time.time()
                             current_agents = self.agents.copy()
                             agents_to_reset = []
                             
-                            for agent in current_agents:
+                            # AI OPTIMIZATION: Intelligent AI update scheduling
+                            ai_agents_this_frame = []
+                            
+                            if self.ai_optimization_enabled and len(current_agents) > 0:
+                                # Batch processing: Only update AI for a subset of agents each frame
+                                ai_batch_size = max(5, int(len(current_agents) * self.ai_batch_percentage))
+                                ai_start_index = (self.step_count * ai_batch_size) % len(current_agents)
+                                
+                                for i, agent in enumerate(current_agents):
+                                    should_update_ai = False
+                                    
+                                    # Always update AI for focused agent
+                                    if self.focused_agent and agent.id == self.focused_agent.id:
+                                        should_update_ai = True
+                                    else:
+                                        # Batch scheduling for other agents
+                                        agent_index = (ai_start_index + i) % len(current_agents)
+                                        if agent_index < ai_batch_size:
+                                            # Additional spatial culling check
+                                            if self.ai_spatial_culling_enabled:
+                                                agent_pos = agent.body.position
+                                                camera_pos = self.camera_position
+                                                distance = ((agent_pos.x - camera_pos[0])**2 + (agent_pos.y - camera_pos[1])**2)**0.5
+                                                should_update_ai = distance <= self.ai_spatial_culling_distance
+                                            else:
+                                                should_update_ai = True
+                                    
+                                    ai_agents_this_frame.append((agent, should_update_ai))
+                            else:
+                                # No optimization: update all agents (original behavior)
+                                for agent in current_agents:
+                                    ai_agents_this_frame.append((agent, True))
+                            
+                            for agent, should_update_ai in ai_agents_this_frame:
                                 # Skip destroyed agents or agents without bodies
                                 if getattr(agent, '_destroyed', False) or not agent.body:
                                     continue
@@ -3361,13 +2103,26 @@ class TrainingEnvironment:
                                         if hasattr(agent, 'lower_arm_joint') and agent.lower_arm_joint:
                                             agent.lower_arm_joint.enableMotor = True
                                     
-                                    agent.step(self.dt)
+                                    # AI OPTIMIZATION: Use different step modes based on AI update schedule
+                                    if should_update_ai:
+                                        # Full AI update with learning
+                                        agent.step(self.dt)
+                                    else:
+                                        # Physics-only update - continue previous action without AI decision
+                                        if hasattr(agent, 'step_physics_only'):
+                                            agent.step_physics_only(self.dt)
+                                        else:
+                                            # Fallback: continue previous action
+                                            if hasattr(agent, 'current_action_tuple') and agent.current_action_tuple is not None:
+                                                agent.apply_action(agent.current_action_tuple)
+                                            agent.steps += 1
 
                                     # Check for reset conditions but don't reset immediately
+                                    # 🌍 INFINITE WORLD: Only reset if agents fall off the world, no episode limits!
                                     if agent.body and agent.body.position.y < self.world_bounds_y:
                                         agents_to_reset.append(('world_bounds', agent))
-                                    elif agent.steps >= self.episode_length:
-                                        agents_to_reset.append(('episode_end', agent))
+                                    # REMOVED: Episode-based resets for infinite world exploration
+                                    # Robots can now explore forever without being teleported back!
                                 except Exception as e:
                                     print(f"⚠️  Error updating agent {agent.id}: {e}")
                                     import traceback
@@ -3382,12 +2137,53 @@ class TrainingEnvironment:
                                     
                                 try:
                                     if reset_type == 'world_bounds':
+                                        # 🌍 INFINITE WORLD: Only reset position when agent falls off world
+                                        # Preserve learning and continue exploration from spawn point
                                         agent.reset_position()
-                                    elif reset_type == 'episode_end':
-                                        agent.reset()  # preserves Q-table
-                                        agent.reset_position()
+                                        print(f"🌍 Agent {str(agent.id)[:8]} fell off world - respawned to continue infinite exploration!")
+                                    # REMOVED: episode_end handling - no more episode limits!
+                                            
                                 except Exception as e:
                                     print(f"⚠️  Error resetting agent {agent.id}: {e}")
+                            
+                            ai_processing_time = time.time() - ai_processing_start
+                            
+                            # Store performance timings and AI optimization stats
+                            if not hasattr(self, 'performance_timings'):
+                                self.performance_timings = {
+                                    'physics_simulation': [],
+                                    'agent_ai_processing': [],
+                                    'ecosystem_updates': [],
+                                    'statistics_updates': [],
+                                    'data_serialization': [],
+                                    'total_frame_time': []
+                                }
+                                self.ai_optimization_stats = {
+                                    'total_agents': [],
+                                    'ai_updated_agents': [],
+                                    'ai_optimization_ratio': []
+                                }
+                            
+                            self.performance_timings['physics_simulation'].append(physics_step_time)
+                            self.performance_timings['agent_ai_processing'].append(ai_processing_time)
+                            
+                            # Track AI optimization effectiveness
+                            ai_updated_count = sum(1 for _, should_update in ai_agents_this_frame if should_update)
+                            total_agents = len(current_agents)
+                            ai_optimization_ratio = 1.0 - (ai_updated_count / max(1, total_agents))
+                            
+                            self.ai_optimization_stats['total_agents'].append(total_agents)
+                            self.ai_optimization_stats['ai_updated_agents'].append(ai_updated_count)
+                            self.ai_optimization_stats['ai_optimization_ratio'].append(ai_optimization_ratio)
+                            
+                            # Keep only last 100 measurements
+                            for key in self.performance_timings:
+                                if len(self.performance_timings[key]) > 100:
+                                    self.performance_timings[key] = self.performance_timings[key][-100:]
+                            
+                            for key in self.ai_optimization_stats:
+                                if len(self.ai_optimization_stats[key]) > 100:
+                                    self.ai_optimization_stats[key] = self.ai_optimization_stats[key][-100:]
                                     
                     except Exception as e:
                         print(f"❌ Critical error in physics loop: {e}")
@@ -3398,8 +2194,9 @@ class TrainingEnvironment:
                 accumulator -= self.dt
                 self.step_count += 1
                 
-                # Update physics FPS tracking
-                self.physics_fps_counter += 1
+                # Update physics FPS tracking (account for speed multiplier)
+                physics_steps_this_frame = max(1, int(self.simulation_speed_multiplier))
+                self.physics_fps_counter += physics_steps_this_frame
                 if current_time - self.last_physics_fps_update >= 1.0:  # Update every second
                     self.current_physics_fps = round(self.physics_fps_counter / (current_time - self.physics_fps_start_time))
                     self.physics_fps_counter = 0
@@ -3411,7 +2208,11 @@ class TrainingEnvironment:
             
             # Update ecosystem dynamics periodically
             if current_time - self.last_ecosystem_update > self.ecosystem_update_interval:
+                ecosystem_start = time.time()
                 self._update_ecosystem_dynamics()
+                ecosystem_time = time.time() - ecosystem_start
+                if hasattr(self, 'performance_timings'):
+                    self.performance_timings['ecosystem_updates'].append(ecosystem_time)
                 self.last_ecosystem_update = current_time
             
             # Create obstacle physics bodies periodically (every 10 seconds)
@@ -3429,7 +2230,7 @@ class TrainingEnvironment:
             # Update agent energy levels through resource consumption
             self._update_resource_consumption()
             
-            # Health check logging every 30 seconds
+            # Health check logging every 30 seconds with DETAILED MEMORY TRACKING
             if current_time - last_health_check > 30.0:
                 try:
                     import psutil
@@ -3438,36 +2239,86 @@ class TrainingEnvironment:
                     memory_mb = process.memory_info().rss / 1024 / 1024
                     cpu_percent = process.cpu_percent()
                     active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
+                    
+                    # DETAILED OBJECT COUNTING in health check
+                    total_buffers = 0
+                    max_buffer_size = 0
+                    agents_with_learning = 0
+                    total_neural_networks = 0
+                    total_attention_records = 0
+                    total_physics_bodies = 0
+                    total_joints = 0
+                    total_food_sources = 0
+                    total_obstacles = 0
+                    
+                    for agent in self.agents:
+                        if getattr(agent, '_destroyed', False):
+                            continue
+                        
+                        # Count physics bodies per agent
+                        if hasattr(agent, 'body') and agent.body:
+                            total_physics_bodies += 1
+                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                            total_physics_bodies += 1
+                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                            total_physics_bodies += 1
+                        if hasattr(agent, 'wheels') and agent.wheels:
+                            total_physics_bodies += len(agent.wheels)
+                        if hasattr(agent, 'joints') and agent.joints:
+                            total_joints += len(agent.joints)
+                            
+                        if hasattr(agent, '_learning_system') and agent._learning_system:
+                            agents_with_learning += 1
+                            total_neural_networks += 1
+                            
+                            # Count memory buffer
+                            if hasattr(agent._learning_system, 'memory') and hasattr(agent._learning_system.memory, 'buffer'):
+                                buffer_size = len(agent._learning_system.memory.buffer)
+                                total_buffers += buffer_size
+                                max_buffer_size = max(max_buffer_size, buffer_size)
+                            
+                            # Count attention records  
+                            if hasattr(agent._learning_system, 'attention_history'):
+                                attention_size = len(agent._learning_system.attention_history)
+                                total_attention_records += attention_size
+                    
+                    # Count ecosystem objects
+                    if hasattr(self, 'ecosystem_dynamics') and hasattr(self.ecosystem_dynamics, 'food_sources'):
+                        total_food_sources = len(self.ecosystem_dynamics.food_sources)
+                    
+                    # Count environmental objects
+                    if hasattr(self, 'environmental_system') and hasattr(self.environmental_system, 'obstacles'):
+                        total_obstacles = len(self.environmental_system.obstacles)
+                    
                     print(f"💚 HEALTH CHECK: Memory={memory_mb:.1f}MB, CPU={cpu_percent:.1f}%, Agents={active_agents}, Step={self.step_count}")
+                    print(f"   🧠 Learning agents: {agents_with_learning}, Neural networks: {total_neural_networks}")
+                    print(f"   💾 Total buffer entries: {total_buffers}, Max buffer: {max_buffer_size}")
+                    print(f"   🎯 Total attention records: {total_attention_records}")
+                    print(f"   🌍 Physics bodies: {total_physics_bodies}, Joints: {total_joints}")
+                    print(f"   🍽️ Food sources: {total_food_sources}, Obstacles: {total_obstacles}")
+                    print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
+                    print(f"   🌿 Ecosystem events: {len(getattr(self, 'consumption_events', []))}, Death events: {len(getattr(self, 'death_events', []))}")
+                    # Ray casting logging removed for performance
+                    
+                    # Alert if memory is too high
+                    if memory_mb > 1200:  # TRAINING FIX: Increased threshold from 800MB to 1200MB
+                        print(f"⚠️ HIGH MEMORY USAGE: {memory_mb:.1f}MB - triggering conservative cleanup")
+                        self._cleanup_performance_data()
+                        self._cleanup_attention_networks()
+                        
                 except Exception as e:
                     print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
                 last_health_check = current_time
             
-            # Performance cleanup every 2 minutes
+            # Performance cleanup every minute (increased frequency)
             if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
                 self._cleanup_performance_data()
                 self.last_performance_cleanup = current_time
             
-            # Update enhanced learning systems (after current_agents is defined)
-            if hasattr(self, 'learning_manager') and self.learning_manager:
-                try:
-                    # Create a safe copy of current agents for this section
-                    current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
-                    
-                    # Update agent performance for elite identification
-                    for agent in current_agents:
-                        if not getattr(agent, '_destroyed', False) and agent.body:
-                            try:
-                                self.learning_manager.update_agent_performance(agent, self.step_count)
-                            except Exception as e:
-                                if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
-                                    print(f"⚠️ Error updating agent performance: {e}")
-                    
-                    # Update elite agents periodically
-                    self.learning_manager.update_elites(current_agents, self.step_count)
-                except Exception as e:
-                    if self.step_count % 1000 == 0:  # Log occasionally to avoid spam
-                        print(f"⚠️ Error updating enhanced learning systems: {e}")
+            # PERFORMANCE: Frequent attention network cleanup every 30 seconds
+            if current_time - self.last_attention_cleanup > self.attention_cleanup_interval:
+                self._cleanup_attention_networks()
+                self.last_attention_cleanup = current_time
                 
             # Invalidate web cache periodically
             if current_time - self.last_web_interface_update > 0.1:  # Invalidate after 100ms
@@ -3490,7 +2341,11 @@ class TrainingEnvironment:
                 last_debug_time = current_time
             
             if current_time - last_stats_time > self.stats_update_interval:
+                stats_start = time.time()
                 self._update_statistics()
+                stats_time = time.time() - stats_start
+                if hasattr(self, 'performance_timings'):
+                    self.performance_timings['statistics_updates'].append(stats_time)
                 
                 # Queue evaluation metrics for background collection (non-blocking)
                 if self.enable_evaluation and self.metrics_collector:
@@ -3533,23 +2388,22 @@ class TrainingEnvironment:
                                     'fitness': agent.get_evolutionary_fitness(),
                                     'total_reward': agent.total_reward,
                                     'steps': agent.steps,
-                                    'position_x': agent.body.position.x if agent.body else 0,
-                                    'q_table_size': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0
-                                }
+                                    'position_x': agent.body.position.x if agent.body else 0                                }
                                 self.mlflow_integration.log_individual_robot_metrics(
-                                    f"top_{i+1}_{agent.id[:8]}", individual_metrics, self.step_count
+                                    f"top_{i+1}_{str(agent.id)[:8]}", individual_metrics, self.step_count
                                 )
                         
                     except Exception as e:
                         print(f"⚠️  Error logging to MLflow: {e}")
                 
+                # Periodic elite robot saving
+                try:
+                    self._save_elite_robots_periodically()
+                except Exception as e:
+                    print(f"⚠️  Error in periodic elite saving: {e}")
+                
                 last_mlflow_log = current_time
-            
-            # Check for periodic learning
-            #if current_time - self.last_learning_time >= self.learning_interval:
-            #    self.perform_periodic_learning()
-            #    self.last_learning_time = current_time
-            
+                        
             # Check for automatic evolution (with safety)
             if (self.auto_evolution_enabled and 
                 current_time - self.last_evolution_time >= self.evolution_interval and
@@ -3566,6 +2420,19 @@ class TrainingEnvironment:
                     print(f"❌ Evolution failed: {e}")
                     import traceback
                     traceback.print_exc()
+            
+            # Calculate total frame time and store performance data
+            total_frame_time = time.time() - frame_start_time
+            if hasattr(self, 'performance_timings'):
+                self.performance_timings['total_frame_time'].append(total_frame_time)
+                
+                # Print performance report every 30 seconds
+                if not hasattr(self, 'last_performance_report'):
+                    self.last_performance_report = time.time()
+                
+                if current_time - self.last_performance_report > 30.0:
+                    self._print_performance_report()
+                    self.last_performance_report = current_time
             
             # Sleep to maintain target FPS
             time.sleep(max(0, self.dt - (time.time() - current_time)))
@@ -3647,10 +2514,297 @@ class TrainingEnvironment:
         print(f"✅ Updated {target_desc} parameters: {params}")
         return True
 
-    def get_status(self):
-        """Returns the current state of the simulation for rendering with enhanced safety."""
+    def _print_performance_report(self):
+        """Print a detailed performance analysis report with enhanced debugging."""
+        try:
+            if not hasattr(self, 'performance_timings') or not self.performance_timings:
+                return
+            
+            current_time = time.time()
+            print(f"\n📊 === ENHANCED PERFORMANCE ANALYSIS REPORT ===")
+            print(f"🕐 Report Time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))}")
+            print(f"📏 Sample size: {len(self.performance_timings.get('total_frame_time', []))} frames")
+            print(f"🔢 Step count: {self.step_count}")
+            print(f"⚡ Simulation speed: {self.simulation_speed_multiplier}x")
+            
+            # ENHANCED: Memory and system resource tracking
+            print(f"\n🧠 === SYSTEM RESOURCES ===")
+            try:
+                import psutil
+                import os
+                process = psutil.Process(os.getpid())
+                memory_info = process.memory_info()
+                memory_mb = memory_info.rss / 1024 / 1024
+                cpu_percent = process.cpu_percent()
+                print(f"💾 Memory Usage: {memory_mb:.1f} MB")
+                print(f"⚙️  CPU Usage: {cpu_percent:.1f}%")
+                
+                # Memory trend analysis
+                if not hasattr(self, 'memory_history'):
+                    self.memory_history = []
+                self.memory_history.append((current_time, memory_mb))
+                
+                # Keep last 20 measurements (10 minutes of history)
+                if len(self.memory_history) > 20:
+                    self.memory_history = self.memory_history[-20:]
+                
+                if len(self.memory_history) >= 2:
+                    memory_trend = self.memory_history[-1][1] - self.memory_history[0][1]
+                    memory_rate = memory_trend / max(1, (self.memory_history[-1][0] - self.memory_history[0][0]) / 60)  # MB per minute
+                    print(f"📈 Memory Trend: {memory_trend:+.1f} MB ({memory_rate:+.1f} MB/min)")
+                    
+                    if memory_rate > 5:
+                        print(f"⚠️  WARNING: High memory growth rate detected!")
+                    elif memory_mb > 1500:
+                        print(f"⚠️  WARNING: High memory usage detected!")
+                        
+            except ImportError:
+                print(f"⚠️  psutil not available for system monitoring")
+            except Exception as e:
+                print(f"⚠️  Error getting system info: {e}")
+            
+            # ENHANCED: Agent and simulation health metrics
+            print(f"\n🤖 === SIMULATION HEALTH ===")
+            active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
+            print(f"👥 Active Agents: {active_agents}")
+            print(f"🌍 Physics Bodies: {len(self.world.bodies)}")
+            print(f"🔗 Physics Joints: {len(self.world.joints)}")
+            
+            if hasattr(self, 'ecosystem_dynamics'):
+                food_sources = len(self.ecosystem_dynamics.food_sources)
+                print(f"🍽️ Food Sources: {food_sources}")
+            
+            if hasattr(self, 'slow_frame_count'):
+                print(f"🐌 Slow Frames: {self.slow_frame_count}/10")
+                if self.slow_frame_count >= 7:
+                    print(f"🚨 CRITICAL: Approaching emergency shutdown threshold!")
+            
+            # ENHANCED: Performance timing analysis with percentiles
+            print(f"\n⏱️  === DETAILED TIMING ANALYSIS ===")
+            for category, timings in self.performance_timings.items():
+                if timings:
+                    sorted_times = sorted(timings)
+                    avg_time = sum(timings) / len(timings) * 1000  # Convert to milliseconds
+                    max_time = max(timings) * 1000
+                    min_time = min(timings) * 1000
+                    p50_time = sorted_times[len(sorted_times)//2] * 1000  # Median
+                    p95_time = sorted_times[int(len(sorted_times)*0.95)] * 1000  # 95th percentile
+                    p99_time = sorted_times[int(len(sorted_times)*0.99)] * 1000  # 99th percentile
+                    
+                    # Calculate percentage of total frame time
+                    if category != 'total_frame_time' and self.performance_timings.get('total_frame_time'):
+                        total_avg = sum(self.performance_timings['total_frame_time']) / len(self.performance_timings['total_frame_time'])
+                        percentage = (avg_time / 1000) / total_avg * 100 if total_avg > 0 else 0
+                        print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg ({percentage:.1f}% of frame)")
+                        print(f"    📊 Distribution: min={min_time:.1f}ms p50={p50_time:.1f}ms p95={p95_time:.1f}ms p99={p99_time:.1f}ms max={max_time:.1f}ms")
+                        
+                        # Performance warnings
+                        if p99_time > 100:  # 99th percentile over 100ms
+                            print(f"    ⚠️  99th percentile shows occasional severe delays!")
+                        elif p95_time > 50:  # 95th percentile over 50ms
+                            print(f"    ⚠️  95th percentile shows regular delays")
+                    else:
+                        print(f"⏱️  {category.replace('_', ' ').title()}: {avg_time:.2f}ms avg, {min_time:.2f}-{max_time:.2f}ms range")
+                        
+                        # Total frame time analysis
+                        if category == 'total_frame_time':
+                            slow_frames = sum(1 for t in timings if t > 1.0)  # Frames over 1 second
+                            very_slow_frames = sum(1 for t in timings if t > 5.0)  # Frames over 5 seconds
+                            print(f"    🐌 Slow frames (>1s): {slow_frames}/{len(timings)} ({slow_frames/len(timings)*100:.1f}%)")
+                            print(f"    🚨 Very slow frames (>5s): {very_slow_frames}/{len(timings)} ({very_slow_frames/len(timings)*100:.1f}%)")
+            
+            # ENHANCED: Bottleneck analysis with severity assessment
+            print(f"\n🚩 === BOTTLENECK ANALYSIS ===")
+            bottlenecks = []
+            for category, timings in self.performance_timings.items():
+                if category != 'total_frame_time' and timings:
+                    avg_time = sum(timings) / len(timings)
+                    max_time = max(timings)
+                    bottlenecks.append((category, avg_time, max_time))
+            
+            if bottlenecks:
+                bottlenecks.sort(key=lambda x: x[1], reverse=True)
+                print(f"🚩 Primary bottleneck: {bottlenecks[0][0].replace('_', ' ').title()}")
+                print(f"   Average: {bottlenecks[0][1]*1000:.2f}ms, Peak: {bottlenecks[0][2]*1000:.2f}ms")
+                
+                # Severity assessment
+                severity = "LOW"
+                if bottlenecks[0][1] > 0.050:  # > 50ms average
+                    severity = "HIGH"
+                elif bottlenecks[0][1] > 0.020:  # > 20ms average
+                    severity = "MEDIUM"
+                    
+                print(f"   Severity: {severity}")
+                
+                # Enhanced recommendations with specific thresholds
+                category = bottlenecks[0][0]
+                avg_ms = bottlenecks[0][1] * 1000
+                if category == 'physics_simulation':
+                    if avg_ms > 10:
+                        print(f"💡 URGENT: Physics simulation averaging {avg_ms:.1f}ms - reduce agent count or simulation complexity")
+                    else:
+                        print(f"💡 Recommendation: Physics simulation is the bottleneck - consider reducing simulation frequency or agent count")
+                elif category == 'agent_ai_processing':
+                    if avg_ms > 20:
+                        print(f"💡 URGENT: AI processing averaging {avg_ms:.1f}ms - enable AI optimization or reduce learning frequency")
+                    else:
+                        print(f"💡 Recommendation: AI processing is the bottleneck - consider optimizing learning algorithms or reducing update frequency")
+                elif category == 'ecosystem_updates':
+                    print(f"💡 Recommendation: Ecosystem updates are the bottleneck - consider reducing update frequency or optimizing ecosystem calculations")
+                elif category == 'statistics_updates':
+                    print(f"💡 Recommendation: Statistics updates are the bottleneck - consider reducing statistics calculation frequency")
+            
+            # ENHANCED: Frame rate analysis with performance grade
+            print(f"\n🎯 === FRAME RATE ANALYSIS ===")
+            if self.performance_timings.get('total_frame_time'):
+                total_times = self.performance_timings['total_frame_time']
+                target_frame_time = 1.0 / 60.0  # 60 FPS
+                
+                frames_60fps = sum(1 for t in total_times if t <= target_frame_time)
+                frames_30fps = sum(1 for t in total_times if t <= 1.0/30.0)
+                frames_15fps = sum(1 for t in total_times if t <= 1.0/15.0)
+                frames_1fps = sum(1 for t in total_times if t <= 1.0)
+                
+                perf_60 = frames_60fps / len(total_times) * 100
+                perf_30 = frames_30fps / len(total_times) * 100
+                perf_15 = frames_15fps / len(total_times) * 100
+                perf_1 = frames_1fps / len(total_times) * 100
+                
+                print(f"🎯 60 FPS target: {perf_60:.1f}% of frames")
+                print(f"🎯 30 FPS target: {perf_30:.1f}% of frames") 
+                print(f"🎯 15 FPS target: {perf_15:.1f}% of frames")
+                print(f"🎯 1 FPS minimum: {perf_1:.1f}% of frames")
+                
+                # Performance grade
+                if perf_60 >= 95:
+                    grade = "A+ (Excellent)"
+                elif perf_60 >= 80:
+                    grade = "A (Good)"
+                elif perf_30 >= 90:
+                    grade = "B (Acceptable)"
+                elif perf_15 >= 80:
+                    grade = "C (Poor)"
+                else:
+                    grade = "F (Critical)"
+                    
+                print(f"📊 Performance Grade: {grade}")
+                
+                # Critical warnings
+                if perf_1 < 90:
+                    print(f"🚨 CRITICAL: {100-perf_1:.1f}% of frames are slower than 1 FPS!")
+                elif perf_15 < 80:
+                    print(f"⚠️  WARNING: {100-perf_15:.1f}% of frames are slower than 15 FPS!")
+                elif perf_60 < 80:
+                    print(f"⚠️  Performance Warning: Less than 80% of frames meet the 60 FPS target!")
+            
+            # ENHANCED: AI Optimization with efficiency metrics
+            print(f"\n🧠 === AI OPTIMIZATION ANALYSIS ===")
+            if hasattr(self, 'ai_optimization_stats') and self.ai_optimization_stats.get('ai_optimization_ratio'):
+                avg_optimization_ratio = sum(self.ai_optimization_stats['ai_optimization_ratio']) / len(self.ai_optimization_stats['ai_optimization_ratio'])
+                avg_ai_updated = sum(self.ai_optimization_stats['ai_updated_agents']) / len(self.ai_optimization_stats['ai_updated_agents'])
+                avg_total_agents = sum(self.ai_optimization_stats['total_agents']) / len(self.ai_optimization_stats['total_agents'])
+                
+                print(f"🧠 AI Optimization: {avg_optimization_ratio:.1%} AI processing reduction")
+                print(f"🔄 AI Updates: {avg_ai_updated:.1f}/{avg_total_agents:.1f} agents per frame ({(avg_ai_updated/avg_total_agents):.1%})")
+                
+                # Efficiency assessment
+                if avg_optimization_ratio > 0.7:
+                    print(f"✅ AI optimization is highly effective - over 70% reduction in AI processing!")
+                elif avg_optimization_ratio > 0.5:
+                    print(f"✅ AI optimization is highly effective - over 50% reduction in AI processing!")
+                elif avg_optimization_ratio > 0.2:
+                    print(f"👍 AI optimization is working - {avg_optimization_ratio:.0%} reduction achieved")
+                else:
+                    print(f"⚠️  AI optimization is minimal - consider adjusting ai_batch_percentage or ai_spatial_culling_distance")
+                    
+                # Specific recommendations based on efficiency
+                efficiency = avg_ai_updated / avg_total_agents
+                if efficiency > 0.8:
+                    print(f"💡 Consider reducing ai_batch_percentage to improve efficiency")
+                elif efficiency < 0.1:
+                    print(f"💡 AI optimization may be too aggressive - consider increasing ai_batch_percentage")
+            else:
+                print(f"⚠️  AI optimization statistics not available")
+            
+            # ENHANCED: Emergency shutdown proximity warning
+            print(f"\n🚨 === STABILITY MONITORING ===")
+            if hasattr(self, 'slow_frame_count'):
+                emergency_proximity = self.slow_frame_count / 10.0 * 100
+                print(f"🐌 Slow frame count: {self.slow_frame_count}/10 ({emergency_proximity:.0f}% to emergency shutdown)")
+                
+                if self.slow_frame_count >= 8:
+                    print(f"🚨 CRITICAL: Very close to emergency shutdown! System will stop at 10 slow frames.")
+                elif self.slow_frame_count >= 5:
+                    print(f"⚠️  WARNING: Multiple slow frames detected. Monitor system closely.")
+                elif self.slow_frame_count >= 3:
+                    print(f"⚠️  CAUTION: Some slow frames detected. Performance degrading.")
+                else:
+                    print(f"✅ Stability: System running normally")
+            
+            # Performance trend analysis
+            if len(self.performance_timings.get('total_frame_time', [])) >= 50:
+                recent_frames = self.performance_timings['total_frame_time'][-20:]  # Last 20 frames
+                older_frames = self.performance_timings['total_frame_time'][-50:-30]  # 30-50 frames ago
+                
+                recent_avg = sum(recent_frames) / len(recent_frames) * 1000
+                older_avg = sum(older_frames) / len(older_frames) * 1000
+                trend = recent_avg - older_avg
+                
+                print(f"📈 Performance Trend: Recent frames {recent_avg:.1f}ms vs older {older_avg:.1f}ms ({trend:+.1f}ms change)")
+                
+                if trend > 10:
+                    print(f"📉 DEGRADING: Performance is getting worse over time!")
+                elif trend > 5:
+                    print(f"⚠️  DECLINING: Performance showing degradation")
+                elif trend < -5:
+                    print(f"📈 IMPROVING: Performance is getting better")
+                else:
+                    print(f"✅ STABLE: Performance is stable")
+            
+            print(f"📊 === END ENHANCED PERFORMANCE REPORT ===\n")
+            
+        except Exception as e:
+            print(f"⚠️ Error generating enhanced performance report: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def get_status(self, canvas_width=1200, canvas_height=800, viewport_culling=True, camera_x=0.0, camera_y=0.0):
+        """
+        Returns the current state of the simulation for rendering with enhanced safety and optional viewport culling.
+        
+        VIEWPORT CULLING BEHAVIOR:
+        - 'agents': Viewport-filtered agents for rendering performance (only visible agents)
+        - 'all_agents': ALL agents for UI panels (population summary, robot details, leaderboard)
+        - 'leaderboard': Always shows ALL agents for fair ranking
+        - 'robots': Always shows ALL agents for complete population view
+        - 'statistics': Always calculated from ALL agents
+        
+        This ensures viewport culling only affects visual rendering, not data integrity.
+        """
+        serialization_start = time.time()
+        
         if not self.is_running:
-            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
+            return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'all_agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
+
+        # 🚀 PERFORMANCE OPTIMIZATION: Return minimal data when visualization is disabled
+        if not self.enable_visualization:
+            return {
+                'shapes': {},
+                'leaderboard': [], 
+                'robots': [], 
+                'agents': [], 
+                'all_agents': [],
+                'statistics': {'total_agents': len([a for a in self.agents if not getattr(a, '_destroyed', False)])},
+                'camera': self.get_camera_state(),
+                'focused_agent_id': None,
+                'ecosystem': {'status': 'visualization_disabled'},
+                'environment': {'status': 'visualization_disabled', 'obstacles': []},
+                'viewport_culling': {'enabled': False, 'status': 'visualization_disabled'},
+                'physics_fps': getattr(self, 'current_physics_fps', 0),
+                'simulation_speed': self.simulation_speed_multiplier,
+                'show_health_bars': self.show_health_bars,
+                'enable_visualization': self.enable_visualization
+            }
 
         # Use a read lock to safely access agents
         with self._physics_lock:
@@ -3660,9 +2814,44 @@ class TrainingEnvironment:
                 # Create a safe copy of agents list
                 current_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
                 
-                # 1. Get agent shapes for drawing
+                if viewport_culling:
+                    # Calculate viewport bounds for culling using actual canvas dimensions and frontend camera position
+                    viewport_bounds = self._calculate_viewport_bounds(canvas_width, canvas_height, camera_x, camera_y)
+                    # Filter agents by viewport for performance optimization
+                    viewport_agents = self._filter_agents_by_viewport(current_agents, viewport_bounds)
+                else:
+                    # No viewport culling - render all agents
+                    viewport_bounds = {'left': -9999, 'right': 9999, 'bottom': -9999, 'top': 9999}
+                    viewport_agents = current_agents
+                
+                # Store viewport culling statistics for monitoring
+                zoom_used = getattr(self, 'user_zoom_level', 1.0)
+                
+                
+                # Log viewport culling effectiveness occasionally for monitoring
+                if viewport_culling and self.step_count % 10000 == 0:  # Every 5 seconds
+                    viewport_stats = {
+                        'enabled': viewport_culling,
+                        'total_agents': len(current_agents),
+                        'visible_agents': len(viewport_agents),
+                        'culled_agents': len(current_agents) - len(viewport_agents),
+                        'culling_ratio': (len(current_agents) - len(viewport_agents)) / max(1, len(current_agents)),
+                        'viewport_bounds': viewport_bounds,
+                        'zoom_level': zoom_used,
+                        'camera_position': self.camera_position,
+                        'canvas_size': [canvas_width, canvas_height],
+                        'performance_note': 'Viewport culling only affects frontend rendering - backend simulation still processes all agents'
+                    }
+                    if viewport_stats['culled_agents'] > 0:
+                        print(f"🔍 Viewport culling active: {viewport_stats['visible_agents']}/{viewport_stats['total_agents']} agents visible ({viewport_stats['culling_ratio']:.1%} culled)")
+                        print(f"   📐 Zoom: {zoom_used:.2f}x, Camera: ({self.camera_position[0]:.1f}, {self.camera_position[1]:.1f})")
+                        print(f"   📏 Viewport: {viewport_bounds['left']:.1f} to {viewport_bounds['right']:.1f} (width: {viewport_bounds['right'] - viewport_bounds['left']:.1f})")
+                    else:
+                        print(f"🔍 Viewport culling: ALL {viewport_stats['total_agents']} agents visible (zoom: {zoom_used:.2f}x)")
+                
+                # 1. Get agent shapes for drawing (only for viewport-visible agents)
                 robot_shapes = []
-                for agent in current_agents:
+                for agent in viewport_agents:
                     try:
                         if not agent.body:  # Skip agents without bodies
                             continue
@@ -3670,10 +2859,20 @@ class TrainingEnvironment:
                         body_parts = []
                         # Chassis, Arms, Wheels
                         body_list = [agent.body] + (agent.wheels or [])
-                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
-                            body_list.append(agent.upper_arm)
-                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
-                            body_list.append(agent.lower_arm)
+                        
+                        # MULTI-LIMB RENDERING FIX: Render ALL limbs, not just first 2
+                        if hasattr(agent, 'limbs') and agent.limbs:
+                            # Multi-limb robot: render all limb segments
+                            for limb_segments in agent.limbs:
+                                for segment in limb_segments:
+                                    if segment:
+                                        body_list.append(segment)
+                        else:
+                            # Legacy single-limb robot: render upper_arm and lower_arm
+                            if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                                body_list.append(agent.upper_arm)
+                            if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                                body_list.append(agent.lower_arm)
                             
                         for part in body_list:
                             if not part:  # Skip None bodies
@@ -3717,7 +2916,8 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️  Error getting ground shapes: {e}")
                 
-                # 3. Get leaderboard data (top 10 robots) - safely sorted by food consumption
+                # 3. Get leaderboard data (top 10 robots) - use all agents for leaderboard fairness
+                # NOTE: Leaderboard should show all agents regardless of viewport for fair ranking
                 try:
                     valid_stats = {k: v for k, v in self.robot_stats.items() 
                                   if k in {agent.id for agent in current_agents}}
@@ -3766,9 +2966,17 @@ class TrainingEnvironment:
                     robot_details = []
 
                 # 5. Get minimal agent data for rendering + detailed data for focused agent only
-                agents_data = []
+                # SEPARATE: rendering agents (viewport-filtered) vs all agents data (for UI panels)
+                agents_data = []  # For rendering - viewport filtered
+                all_agents_data = []  # For UI panels - ALL agents
+                
                 try:
-                    for agent in current_agents:
+                    # Rendering agents: Use viewport_agents for rendering, but always include focused agent
+                    visible_agents_set = set(viewport_agents)
+                    if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
+                        visible_agents_set.add(self.focused_agent)
+                    
+                    for agent in visible_agents_set:
                         if not agent.body:  # Skip agents without bodies
                             continue
                             
@@ -3776,6 +2984,11 @@ class TrainingEnvironment:
                         is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
                         
                         # Basic data for all agents (needed for rendering)
+                        # Get episode reward from robot_stats if available
+                        episode_reward = 0.0
+                        if agent.id in self.robot_stats:
+                            episode_reward = float(self.robot_stats[agent.id].get('episode_reward', 0.0))
+                        
                         basic_agent_data = {
                             'id': agent.id,
                             'body': {
@@ -3786,69 +2999,215 @@ class TrainingEnvironment:
                                     'y': float(agent.body.linearVelocity.y)
                                 }
                             },
-                            'upper_arm': {
+                            'total_reward': float(agent.total_reward),
+                            'episode_reward': episode_reward,
+                        }
+                        
+                        # MULTI-LIMB DATA FIX: Include all limbs for rendering
+                        if hasattr(agent, 'limbs') and agent.limbs:
+                            # Multi-limb robot: include all limb segment positions
+                            limbs_data = []
+                            for limb_idx, limb_segments in enumerate(agent.limbs):
+                                segments_data = []
+                                for segment_idx, segment in enumerate(limb_segments):
+                                    if segment:
+                                        segments_data.append({
+                                            'x': float(segment.position.x),
+                                            'y': float(segment.position.y),
+                                            'angle': float(segment.angle)
+                                        })
+                                    else:
+                                        segments_data.append({'x': 0, 'y': 0, 'angle': 0})
+                                limbs_data.append(segments_data)
+                            basic_agent_data['limbs'] = limbs_data
+                            basic_agent_data['num_limbs'] = len(agent.limbs)
+                            basic_agent_data['segments_per_limb'] = len(agent.limbs[0]) if agent.limbs else 0
+                        else:
+                            # Legacy single-limb robot: use upper_arm and lower_arm
+                            basic_agent_data['upper_arm'] = {
                                 'x': float(agent.upper_arm.position.x) if agent.upper_arm else 0,
                                 'y': float(agent.upper_arm.position.y) if agent.upper_arm else 0
-                            },
-                            'lower_arm': {
+                            }
+                            basic_agent_data['lower_arm'] = {
                                 'x': float(agent.lower_arm.position.x) if agent.lower_arm else 0,
                                 'y': float(agent.lower_arm.position.y) if agent.lower_arm else 0
-                            },
-                            'total_reward': float(agent.total_reward),
-                            # Basic ecosystem data for rendering
-                            'ecosystem': {
-                                'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
-                                'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
-                                'health': safe_convert_numeric(self.agent_health.get(agent_id, {'health': 1.0})['health']),
-                                'energy': safe_convert_numeric(self.agent_health.get(agent_id, {'energy': 1.0})['energy']),
-                                'speed': safe_convert_numeric((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
                             }
+                        
+                        # Add ecosystem data
+                        ecosystem_data = {
+                            'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
+                            'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                            'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
                         }
+                        
+                        # PERFORMANCE OPTIMIZATION: Only include health data if health bars are enabled
+                        if self.show_health_bars:
+                            ecosystem_data.update({
+                                'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
+                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy'])
+                            })
+                        
+                        basic_agent_data.update({'ecosystem': ecosystem_data})
                         agents_data.append(basic_agent_data)
                         
                         # Add detailed data for focused agent
                         if is_focused:
                             agent_status = self.agent_statuses.get(agent_id, {})
-                            agent_health = self.agent_health.get(agent_id, {'health': 1.0, 'energy': 1.0})
                             closest_food_info = self._get_closest_food_distance_for_agent(agent)
+                            
+                            # Get recent reward information - use the last reward from current step
+                            recent_reward = float(getattr(agent, 'last_reward', 
+                                                 getattr(agent, 'immediate_reward', 0.0)))
                             
                             # Add detailed data to the basic agent data
                             basic_agent_data.update({
-                                'steps': safe_convert_numeric(agent.steps),
-                                'current_action': safe_convert_list(agent.current_action_tuple),
-                                'state': safe_convert_list(agent.current_state),
-                                'q_table': len(agent.q_table.q_values) if hasattr(agent.q_table, 'q_values') else 0,
-                                'action_history': safe_convert_list(agent.action_history[-10:]) if agent.action_history else [],
-                                'best_reward': safe_convert_numeric(getattr(agent, 'best_reward_received', 0.0)),
-                                'worst_reward': safe_convert_numeric(getattr(agent, 'worst_reward_received', 0.0)),
-                                'awake': agent.body.awake if agent.body else False,
-                                'learning_approach': getattr(agent, 'learning_approach', 'basic_q_learning'),
+                                'steps': int(agent.steps),
+                                'action_history': [int(x) for x in agent.action_history[-10:]] if hasattr(agent, 'action_history') and agent.action_history else [],
+                                'best_reward': float(getattr(agent, 'best_reward_received', 0.0)),
+                                'worst_reward': float(getattr(agent, 'worst_reward_received', 0.0)),
+                                'recent_reward': recent_reward,
+                                'learning_approach': str(getattr(agent, 'learning_approach', 'basic_q_learning')),
                             })
                             
                             # Add detailed ecosystem data
                             basic_agent_data['ecosystem'].update({
-                                'speed_factor': safe_convert_numeric(agent_status.get('speed_factor', 1.0)),
-                                'alliances': agent_status.get('alliances', []),
-                                'territories': agent_status.get('territories', []),
-                                'closest_food_distance': safe_convert_numeric(closest_food_info['distance']),
-                                'closest_food_signed_x_distance': safe_convert_numeric(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
+                                'speed_factor': float(agent_status.get('speed_factor', 1.0)),
+                                                # Alliances and territories removed
+                                'closest_food_distance': float(closest_food_info['distance']),
+                                'closest_food_signed_x_distance': float(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
                                 'closest_food_type': closest_food_info['food_type'],
                                 'closest_food_source': closest_food_info.get('source_type', 'environment'),
-                                'closest_food_position': safe_convert_position(closest_food_info.get('food_position', None))
+                                'closest_food_position': [float(closest_food_info['food_position'][0]), float(closest_food_info['food_position'][1])] if closest_food_info.get('food_position') is not None else None
                             })
                             
+                    # Generate ALL agents data (for UI panels - not affected by viewport culling)
+                    for agent in current_agents:
+                        if not agent.body:  # Skip agents without bodies
+                            continue
+                            
+                        agent_id = agent.id
+                        is_focused = (self.focused_agent and not getattr(self.focused_agent, '_destroyed', False) and self.focused_agent.id == agent_id)
+                        
+                        # Basic data for all agents
+                        ecosystem_data_all = {
+                            'role': self.agent_statuses.get(agent_id, {}).get('role', 'omnivore'),
+                            'status': self.agent_statuses.get(agent_id, {}).get('status', 'idle'),
+                            'speed': float((agent.body.linearVelocity.x ** 2 + agent.body.linearVelocity.y ** 2) ** 0.5)
+                        }
+                        
+                        # PERFORMANCE OPTIMIZATION: Only include health data if health bars are enabled
+                        if self.show_health_bars:
+                            ecosystem_data_all.update({
+                                'health': float(self.agent_health.get(agent_id, {'health': 1.0})['health']),
+                                'energy': float(self.agent_health.get(agent_id, {'energy': 1.0})['energy'])
+                            })
+                        
+                        # Get episode reward from robot_stats if available
+                        episode_reward_all = 0.0
+                        if agent.id in self.robot_stats:
+                            episode_reward_all = float(self.robot_stats[agent.id].get('episode_reward', 0.0))
+                        
+                        basic_all_agent_data = {
+                            'id': agent.id,
+                            'body': {
+                                'x': float(agent.body.position.x),
+                                'y': float(agent.body.position.y),
+                                'velocity': {
+                                    'x': float(agent.body.linearVelocity.x),
+                                    'y': float(agent.body.linearVelocity.y)
+                                }
+                            },
+                            'total_reward': float(agent.total_reward),
+                            'episode_reward': episode_reward_all,
+                            # Basic ecosystem data
+                            'ecosystem': ecosystem_data_all
+                        }
+                        
+                        # CRITICAL FIX: Add detailed info for focused agent even if outside viewport
+                        if is_focused:
+                            try:
+                                # Add detailed food info
+                                closest_food_info = self._get_closest_food_distance_for_agent(agent)
+                                basic_all_agent_data['ecosystem'].update({
+                                    'closest_food_distance': float(closest_food_info['distance']),
+                                    'closest_food_signed_x_distance': float(closest_food_info.get('signed_x_distance', closest_food_info['distance'])),
+                                    'closest_food_type': closest_food_info['food_type'],
+                                    'closest_food_source': closest_food_info.get('source_type', 'environment'),
+                                    'closest_food_position': [float(closest_food_info['food_position'][0]), float(closest_food_info['food_position'][1])] if closest_food_info.get('food_position') is not None else None
+                                })
+                                
+                                # Add detailed reward and step info 
+                                recent_reward = float(getattr(agent, 'last_reward', getattr(agent, 'immediate_reward', 0.0)))
+                                basic_all_agent_data.update({
+                                    'steps': int(agent.steps) if hasattr(agent, 'steps') else 0,
+                                    'recent_reward': recent_reward,
+                                    'best_reward': float(getattr(agent, 'best_reward_received', 0.0)),
+                                    'worst_reward': float(getattr(agent, 'worst_reward_received', 0.0)),
+                                    'learning_approach': str(getattr(agent, 'learning_approach', 'basic_q_learning')),
+                                })
+                                
+                                # Add reward components if available
+                                reward_components = getattr(agent, 'reward_components', None)
+                                if reward_components:
+                                    basic_all_agent_data['reward_components'] = reward_components
+                                    
+                                # Add arm positions for focused agent (for angle calculations)
+                                if hasattr(agent, 'upper_arm') and agent.upper_arm:
+                                    basic_all_agent_data['upper_arm'] = {
+                                        'x': float(agent.upper_arm.position.x),
+                                        'y': float(agent.upper_arm.position.y)
+                                    }
+                                if hasattr(agent, 'lower_arm') and agent.lower_arm:
+                                    basic_all_agent_data['lower_arm'] = {
+                                        'x': float(agent.lower_arm.position.x), 
+                                        'y': float(agent.lower_arm.position.y)
+                                    }
+                                    
+                            except Exception as e:
+                                print(f"⚠️ Error getting detailed info for focused agent {agent_id}: {e}")
+                        
+                        all_agents_data.append(basic_all_agent_data)
+                        
                 except Exception as e:
                     print(f"⚠️  Error creating agents data: {e}")
                     agents_data = []
+                    all_agents_data = []
 
                 # 6. Get focused agent ID safely
                 focused_agent_id = None
                 if self.focused_agent and not getattr(self.focused_agent, '_destroyed', False):
                     focused_agent_id = self.focused_agent.id
 
-                # 7. Get ecosystem and environmental data
+                # 7. Get ecosystem and environmental data with viewport filtering
                 ecosystem_status = self.ecosystem_dynamics.get_ecosystem_status()
                 environmental_status = self.environmental_system.get_status()
+                
+                # Calculate filtered counts for viewport statistics
+                all_food_sources = self.ecosystem_dynamics.food_sources
+                all_obstacles = self._get_obstacle_data_for_ui()
+                
+                if viewport_culling:
+                    visible_food_sources = self._filter_food_sources_by_viewport(all_food_sources, viewport_bounds)
+                    visible_obstacles = self._filter_obstacles_by_viewport(all_obstacles, viewport_bounds)
+                else:
+                    visible_food_sources = all_food_sources
+                    visible_obstacles = all_obstacles
+                
+                # Calculate viewport culling statistics for frontend debugging
+                viewport_culling_stats = {
+                    'enabled': viewport_culling,
+                    'total_agents': len(current_agents),
+                    'visible_agents': len(viewport_agents),
+                    'culled_agents': len(current_agents) - len(viewport_agents),
+                    'culling_ratio': (len(current_agents) - len(viewport_agents)) / max(1, len(current_agents)),
+                    'total_food_sources': len(all_food_sources),
+                    'visible_food_sources': len(visible_food_sources),
+                    'culled_food_sources': len(all_food_sources) - len(visible_food_sources),
+                    'total_obstacles': len(all_obstacles),
+                    'visible_obstacles': len(visible_obstacles),
+                    'culled_obstacles': len(all_obstacles) - len(visible_obstacles),
+                    'viewport_bounds': viewport_bounds if viewport_culling else None
+                }
                 
                 # 8. Get recent predation events for visualization
                 recent_predation_events = [
@@ -3866,24 +3225,15 @@ class TrainingEnvironment:
                     'shapes': {'robots': robot_shapes, 'ground': ground_shapes},
                     'leaderboard': leaderboard_data,
                     'robots': robot_details,
-                    'agents': agents_data,
+                    'agents': agents_data,  # Viewport-filtered agents for rendering
+                    'all_agents': all_agents_data,  # ALL agents for UI panels (not affected by viewport culling)
                     'statistics': self.population_stats,
                     'camera': self.get_camera_state(),
                     'focused_agent_id': focused_agent_id,
                     # Enhanced visualization data
                     'ecosystem': {
                         'status': ecosystem_status,
-                        'territories': [
-                            {
-                                'type': t.territory_type.value,
-                                'position': t.position,
-                                'size': t.size,
-                                'resource_value': t.resource_value,
-                                'owner_id': t.owner_id,
-                                'contested': t.contested
-                            }
-                            for t in self.ecosystem_dynamics.territories
-                        ],
+                        # Territories removed
                         'food_sources': [
                             {
                                 'position': f.position,
@@ -3891,8 +3241,10 @@ class TrainingEnvironment:
                                 'amount': f.amount,
                                 'max_capacity': f.max_capacity
                             }
-                            for f in self.ecosystem_dynamics.food_sources
+                            for f in visible_food_sources
                         ],
+                        # Dynamic world status
+                        'dynamic_world': self.dynamic_world_manager.get_world_status() if self.dynamic_world_manager else None,
                         'predation_events': recent_predation_events,
                         'death_events': [
                             {
@@ -3916,6 +3268,7 @@ class TrainingEnvironment:
                             }
                             for c in self.consumption_events  # Include all active consumption events
                         ],
+                        # ray_casting_events removed for performance
                         'survival_stats': {
                             'total_deaths': self.survival_stats['total_deaths'],
                             'deaths_by_starvation': self.survival_stats['deaths_by_starvation'],
@@ -3926,16 +3279,25 @@ class TrainingEnvironment:
                     },
                     'environment': {
                         'status': environmental_status,
-                        'obstacles': self._get_obstacle_data_for_ui()  # Use new physics-body-based obstacle data
+                        'obstacles': visible_obstacles
                     },
-                    'physics_fps': getattr(self, 'current_physics_fps', 0)
+                    'viewport_culling': viewport_culling_stats,
+                    'physics_fps': getattr(self, 'current_physics_fps', 0),
+                    'simulation_speed': self.simulation_speed_multiplier,
+                    'show_health_bars': self.show_health_bars,  # PERFORMANCE: Tell frontend if health data is included
+                    'enable_visualization': self.enable_visualization  # PERFORMANCE: Tell frontend if visualization is enabled
                 }
+                
+                # Track data serialization time for performance analysis
+                serialization_time = time.time() - serialization_start
+                if hasattr(self, 'performance_timings'):
+                    self.performance_timings['data_serialization'].append(serialization_time)
                 
             except Exception as e:
                 print(f"❌ Critical error in get_status: {e}")
                 import traceback
                 traceback.print_exc()
-                return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
+                return {'shapes': {}, 'leaderboard': [], 'robots': [], 'agents': [], 'all_agents': [], 'statistics': {}, 'camera': self.get_camera_state(), 'focused_agent_id': None}
 
     def start(self):
         """Starts the training loop in a separate thread."""
@@ -4006,6 +3368,13 @@ class TrainingEnvironment:
             except Exception as e:
                 print(f"⚠️  Error stopping evaluation services: {e}")
         
+        # Cleanup dynamic world manager
+        if hasattr(self, 'dynamic_world_manager') and self.dynamic_world_manager:
+            try:
+                self.dynamic_world_manager.cleanup_all_tiles()
+            except Exception as e:
+                print(f"⚠️ Error cleaning up dynamic world: {e}")
+        
         if self.thread:
             self.thread.join()
             print("✅ Training loop stopped")
@@ -4057,50 +3426,7 @@ class TrainingEnvironment:
         
         return leader
     
-    def perform_periodic_learning(self):
-        """Make all robots learn from the best performing robot with safety checks."""
-        leader = self.find_leader()
-        if not leader:
-            print("⚠️ No leader found for periodic learning")
-            return
-        
-        # Double-check leader has valid body before proceeding
-        if not leader.body:
-            print("⚠️ Leader has no body, skipping periodic learning")
-            return
-        
-        # Count how many agents actually learned
-        learning_count = 0
-        
-        print(f"🎓 === PERIODIC LEARNING EVENT ===")
-        
-        try:
-            leader_distance = leader.body.position.x - leader.initial_position[0]
-            print(f"🏆 Leader: Robot {leader.id} (Distance: {leader_distance:.2f})")
-        except Exception as e:
-            print(f"🏆 Leader: Robot {leader.id} (Distance calculation failed: {e})")
-        
-        # Only include valid agents in learning
-        valid_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False)]
-        
-        for agent in valid_agents:
-            if agent == leader:
-                continue  # Leader doesn't learn from itself
-            
-            # Make agent learn from leader's Q-table
-            if hasattr(agent, 'q_table') and hasattr(leader, 'q_table'):
-                try:
-                    # Use the existing learn_from_other_table method
-                    agent.q_table.learn_from_other_table(leader.q_table, self.learning_rate)
-                    learning_count += 1
-                except Exception as e:
-                    print(f"❌ Error during learning for Agent {agent.id}: {e}")
-        
-        print(f"📚 {learning_count} robots learned from Robot {leader.id}")
-        print(f"🔄 Learning rate: {self.learning_rate:.1%}")
-        print(f"⏰ Next learning session in {self.learning_interval} seconds")
-        print(f"🎓 === LEARNING EVENT COMPLETE ===")
-        print()  # Add spacing for readability
+    
 
     def trigger_evolution(self):
         """Trigger evolutionary generation advancement with comprehensive safety."""
@@ -4153,7 +3479,7 @@ class TrainingEnvironment:
                     new_population, agents_to_destroy = self.evolution_engine.evolve_generation()
                     
                     # Update agents list FIRST, before any cleanup
-                    self.agents:List[EvolutionaryCrawlingAgent] = new_population
+                    self.agents = new_population
                     
                     # Add agents to destruction queue instead of immediate destruction
                     self._agents_pending_destruction.extend(agents_to_destroy)
@@ -4237,7 +3563,7 @@ class TrainingEnvironment:
         # Create random physical parameters for diversity
         random_params = PhysicalParameters.random_parameters()
         
-        new_agent = EvolutionaryCrawlingAgent(
+        new_agent = CrawlingAgent(
             world=self.world,
             agent_id=None,  # Generate new UUID automatically
             position=position,
@@ -4280,7 +3606,7 @@ class TrainingEnvironment:
         
         # Update position for the clone (ID is already generated)
         cloned_agent.initial_position = position
-        cloned_agent.reset_with_new_position(position)
+        cloned_agent.reset_position()
         
         self.agents.append(cloned_agent)
         print(f"👯 Cloned best agent {best_agent.id} to new agent {cloned_agent.id} (fitness: {best_agent.get_evolutionary_fitness():.3f}). Total agents: {len(self.agents)}")
@@ -4383,7 +3709,7 @@ class TrainingEnvironment:
         """Move an agent to the specified world coordinates with enhanced safety."""
         with self._physics_lock:
             try:
-                agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+                agent = next((a for a in self.agents if str(a.id) == str(agent_id) and not getattr(a, '_destroyed', False)), None)
                 if not agent or not agent.body:
                     print(f"❌ Agent {agent_id} not found or destroyed for moving")
                     return False
@@ -4406,11 +3732,14 @@ class TrainingEnvironment:
         """Handles a click event from the frontend."""
         data = request.get_json()
         agent_id = data.get('agent_id')
-        print(f"🖱️ SERVER: Received click for agent_id: {agent_id}")
+        print(f"🖱️ SERVER: Received click for agent_id: {agent_id} (type: {type(agent_id)})")
 
         if agent_id is not None:
-            # Find the agent by ID
-            agent_to_focus = next((agent for agent in self.agents if agent.id == agent_id), None)
+            # DEBUG: Log actual agent IDs to see the type mismatch
+            print(f"🔍 Available agent IDs: {[(agent.id, type(agent.id)) for agent in self.agents[:3]]}")
+            
+            # Find the agent by ID - convert both to strings for comparison
+            agent_to_focus = next((agent for agent in self.agents if str(agent.id) == str(agent_id)), None)
             if agent_to_focus:
                 self.focus_on_agent(agent_to_focus)
                 return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
@@ -4418,8 +3747,8 @@ class TrainingEnvironment:
                 self.focus_on_agent(None) # Clear focus if agent not found
                 return jsonify({'status': 'error', 'message': f'Agent {agent_id} not found', 'agent_id': None})
         else:
-            # If no agent_id is provided, it's a click on empty space, so clear focus
-            self.focus_on_agent(None)
+            # Clear focus if no agent_id provided
+            env.focus_on_agent(None)
             return jsonify({'status': 'success', 'message': 'Focus cleared', 'agent_id': None})
 
     def get_camera_state(self):
@@ -4437,9 +3766,100 @@ class TrainingEnvironment:
             'focused_agent_id': focused_agent_id,
             'zoom_override': getattr(self, '_zoom_override', None)  # Only send zoom when we want to override
         }
-    
+
+    def _calculate_viewport_bounds(self, canvas_width=1200, canvas_height=800, camera_x=None, camera_y=None):
+        """Calculate the world-space bounds of the current viewport using ACTUAL frontend zoom level and camera position."""
+        # Get camera parameters - use provided camera position if available (from frontend)
+        if camera_x is not None and camera_y is not None:
+            cam_x, cam_y = camera_x, camera_y  # Use frontend camera position
+        else:
+            cam_x, cam_y = self.camera_position  # Fallback to backend camera position
+        # CRITICAL FIX: Use actual frontend zoom level, not backend camera zoom
+        zoom = getattr(self, 'user_zoom_level', 1.0)  # Use the actual frontend zoom level
+        
+        # Calculate half-dimensions of the viewport in world units
+        half_width_world = (canvas_width / 2) / zoom
+        half_height_world = (canvas_height / 2) / zoom
+        
+        # Calculate viewport bounds in world coordinates
+        viewport_bounds = {
+            'left': cam_x - half_width_world,
+            'right': cam_x + half_width_world,
+            'bottom': cam_y - half_height_world,
+            'top': cam_y + half_height_world
+        }
+        
+        # Add a small margin for objects partially visible
+        margin = max(5.0, min(half_width_world, half_height_world) * 0.1)
+        viewport_bounds['left'] -= margin
+        viewport_bounds['right'] += margin
+        viewport_bounds['bottom'] -= margin
+        viewport_bounds['top'] += margin
+        
+        return viewport_bounds
+
+    def _is_object_in_viewport(self, position, size, viewport_bounds):
+        """Check if an object is visible within the viewport bounds."""
+        x, y = position
+        
+        # Object bounds
+        half_size = size / 2
+        obj_left = x - half_size
+        obj_right = x + half_size
+        obj_bottom = y - half_size
+        obj_top = y + half_size
+        
+        # Check if object overlaps with viewport
+        return not (obj_right < viewport_bounds['left'] or 
+                   obj_left > viewport_bounds['right'] or
+                   obj_top < viewport_bounds['bottom'] or 
+                   obj_bottom > viewport_bounds['top'])
+
+    def _filter_agents_by_viewport(self, agents, viewport_bounds):
+        """Filter agents to only include those visible in the viewport."""
+        visible_agents = []
+        
+        for agent in agents:
+            if getattr(agent, '_destroyed', False) or not agent.body:
+                continue
+                
+            # Agent position and approximate size
+            position = (agent.body.position.x, agent.body.position.y)
+            agent_size = 4.0  # Approximate robot size including arms
+            
+            if self._is_object_in_viewport(position, agent_size, viewport_bounds):
+                visible_agents.append(agent)
+                
+        return visible_agents
+
+    def _filter_food_sources_by_viewport(self, food_sources, viewport_bounds):
+        """Filter food sources to only include those visible in the viewport."""
+        visible_food = []
+        
+        for food in food_sources:
+            position = food.position
+            food_size = 3.0  # Approximate food source size
+            
+            if self._is_object_in_viewport(position, food_size, viewport_bounds):
+                visible_food.append(food)
+                
+        return visible_food
+
+    def _filter_obstacles_by_viewport(self, obstacles, viewport_bounds):
+        """Filter obstacles to only include those visible in the viewport."""
+        visible_obstacles = []
+        
+        for obstacle in obstacles:
+            position = obstacle.get('position', (0, 0))
+            obstacle_size = obstacle.get('size', 2.0)
+            
+            if self._is_object_in_viewport(position, obstacle_size, viewport_bounds):
+                visible_obstacles.append(obstacle)
+                
+        return visible_obstacles
+
     def update_user_zoom(self, zoom_level):
-        """Update the user's preferred zoom level."""
+        """Update the user's zoom level preference."""
         self.user_zoom_level = max(0.01, min(20, zoom_level))  # Clamp to reasonable bounds
         self.user_has_manually_zoomed = True
         # Don't update target_zoom - let frontend handle zoom locally
@@ -4463,57 +3883,9 @@ class TrainingEnvironment:
         if hasattr(self, '_zoom_override'):
             delattr(self, '_zoom_override')
 
-    def switch_agent_learning_approach(self, agent_id: str, approach: str) -> bool:
-        """
-        Switch a specific agent to a new learning approach.
-        
-        Args:
-            agent_id: ID of the agent to switch
-            approach: Learning approach name ('basic_q_learning', 'enhanced_survival_q', etc.)
-            
-        Returns:
-            bool: True if switch was successful, False otherwise
-        """
-        if not self.learning_manager:
-            print(f"❌ Learning Manager not available for agent {agent_id}")
-            return False
-        
-        # Find the agent by ID
-        agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
-        if not agent:
-            print(f"❌ Agent {agent_id} not found or destroyed")
-            return False
-        
-        # Map string approach to enum
-        from src.agents.learning_manager import LearningApproach
-        approach_mapping = {
-            'basic_q_learning': LearningApproach.BASIC_Q_LEARNING,
-            'enhanced_survival_q': LearningApproach.SURVIVAL_Q_LEARNING,
-            'deep_survival_q': LearningApproach.DEEP_Q_LEARNING,
-            'auto_advanced': LearningApproach.ENHANCED_Q_LEARNING  # Fallback for auto-advanced
-        }
-        
-        learning_approach = approach_mapping.get(approach)
-        if not learning_approach:
-            print(f"❌ Unknown learning approach: {approach}")
-            return False
-        
-        # Perform the switch
-        success = self.learning_manager.set_agent_approach(agent, learning_approach)
-        
-        if success:
-            # Update agent data to include learning approach for frontend
-            setattr(agent, 'learning_approach', approach)
-            
-            print(f"✅ Agent {agent_id} switched to {approach}")
-        else:
-            print(f"❌ Failed to switch agent {agent_id} to {approach}")
-        
-        return success
-
     def _get_agent_learning_approach_name(self, agent_id: str) -> str:
         """Get the learning approach name for an agent."""
-        agent = next((a for a in self.agents if a.id == agent_id and not getattr(a, '_destroyed', False)), None)
+        agent = next((a for a in self.agents if str(a.id) == str(agent_id) and not getattr(a, '_destroyed', False)), None)
         if agent:
             return getattr(agent, 'learning_approach', 'basic_q_learning')
         return 'basic_q_learning'
@@ -4620,7 +3992,7 @@ class TrainingEnvironment:
             if best_target.get('source') == 'prey':
                 prey_id = best_target.get('prey_id', 'unknown')
                 prey_energy = best_target.get('prey_energy', 0.0)
-                food_type_desc = f"robot prey {prey_id[:8]} (energy: {prey_energy:.2f})"
+                food_type_desc = f"robot prey {str(prey_id)[:8]} (energy: {prey_energy:.2f})"
             else:
                 food_type_desc = best_target.get('type', 'unknown')
             
@@ -4697,9 +4069,9 @@ class TrainingEnvironment:
             
             # Choose shape based on obstacle type
             if obstacle_type in ['boulder', 'wall']:
-                # Rectangular obstacles
-                width = size if obstacle_type == 'boulder' else min(size, 1.0)  # Walls are thinner
-                height = size if obstacle_type == 'boulder' else max(size, 3.0)  # Walls are taller
+                # ROBOT-SCALE: Smaller rectangular obstacles
+                width = size if obstacle_type == 'boulder' else min(size, 0.5)  # Thinner walls (was 1.0)
+                height = min(size, 1.0) if obstacle_type == 'boulder' else min(size, 1.2)  # LOWER: Max 1.0-1.2m tall (was 3.0m)
                 
                 fixture = obstacle_body.CreateFixture(
                     shape=b2.b2PolygonShape(box=(width/2, height/2)),
@@ -4819,12 +4191,111 @@ class TrainingEnvironment:
                         'active': True
                     })
             
+            # 🌍 ADD DYNAMIC WORLD TERRAIN with biome colors
+            if hasattr(self, 'dynamic_world_manager') and self.dynamic_world_manager:
+                try:
+                    # Get all active tiles from dynamic world
+                    for tile in self.dynamic_world_manager.tiles.values():
+                        if tile.active:
+                            biome_config = self.dynamic_world_manager._get_biome_config(tile.biome)
+                            biome_color = biome_config.get('color', (0.5, 0.5, 0.5))  # Default gray
+                            
+                            # Add ground bodies from this tile
+                            for ground_body in tile.ground_bodies:
+                                if hasattr(ground_body, 'position'):
+                                    position_array = [ground_body.position.x, ground_body.position.y]
+                                    
+                                    # Determine size from fixtures
+                                    size = 4.0  # Default
+                                    if ground_body.fixtures:
+                                        fixture = ground_body.fixtures[0]
+                                        shape = fixture.shape
+                                        if hasattr(shape, 'vertices'):
+                                            vertices = shape.vertices
+                                            if vertices:
+                                                x_coords = [v[0] for v in vertices]
+                                                y_coords = [v[1] for v in vertices]
+                                                size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
+                                    
+                                    terrain_data = {
+                                        'type': ground_body.userData.get('type', 'dynamic_terrain') if hasattr(ground_body, 'userData') and ground_body.userData else 'dynamic_terrain',
+                                        'position': position_array,
+                                        'size': size,
+                                        'height': size,
+                                        'source': 'dynamic_world',
+                                        'danger_level': 0.1,  # Ground is safe
+                                        'active': True,
+                                        'biome_color': list(biome_color),  # Convert tuple to list for JSON
+                                        'biome_type': tile.biome.value,
+                                        'is_dynamic_world': True
+                                    }
+                                    
+                                    obstacles_for_ui.append(terrain_data)
+                                
+                            # 🎯 ADD ACTUAL DYNAMIC WORLD OBSTACLES from tile.obstacle_bodies
+                            for obstacle_body in tile.obstacle_bodies:
+                                try:
+                                    if obstacle_body and hasattr(obstacle_body, 'userData') and obstacle_body.userData:
+                                        obstacle_type = obstacle_body.userData.get('type', 'dynamic_obstacle')
+                                        position = (obstacle_body.position.x, obstacle_body.position.y)
+                                        
+                                        # Get size from fixture
+                                        size = 2.0  # Default
+                                        if obstacle_body.fixtures:
+                                            fixture = obstacle_body.fixtures[0]
+                                            shape = fixture.shape
+                                            if hasattr(shape, 'radius'):  # Circle
+                                                size = shape.radius * 2
+                                            elif hasattr(shape, 'vertices'):  # Polygon box
+                                                # Get the box half-extents and convert to full size
+                                                vertices = shape.vertices
+                                                if vertices and len(vertices) >= 2:
+                                                    width = abs(vertices[1][0] - vertices[0][0])
+                                                    height = abs(vertices[2][1] - vertices[1][1]) if len(vertices) >= 3 else width
+                                                    size = max(width, height)
+                                        
+                                        # Convert position tuple to array for JavaScript
+                                        position_array = [position[0], position[1]]
+                                        
+                                        # Get biome data
+                                        biome_color = obstacle_body.userData.get('color', None)
+                                        biome_type = obstacle_body.userData.get('biome', None)
+                                        
+                                        obstacle_data = {
+                                            'type': obstacle_type,
+                                            'position': position_array,
+                                            'size': size,
+                                            'height': size,  # Height for 3D rendering
+                                            'source': 'dynamic_world',
+                                            'danger_level': 0.4,  # Medium difficulty for small obstacles
+                                            'active': True,
+                                            'biome_color': list(biome_color) if biome_color else None,  # Convert tuple to list for JSON
+                                            'biome_type': biome_type,
+                                            'is_dynamic_world': True,
+                                            'tile_id': obstacle_body.userData.get('tile_id', None)
+                                        }
+                                        
+                                        obstacles_for_ui.append(obstacle_data)
+                                        
+                                except Exception as obstacle_error:
+                                    print(f"⚠️ Error processing dynamic obstacle: {obstacle_error}")
+                                    continue
+                                    
+                except Exception as e:
+                    # Don't fail if dynamic world isn't available
+                    pass
+            
             # Add obstacles that have physics bodies (including any remaining dynamic ones)
             if hasattr(self, 'obstacle_bodies'):
                 for obstacle_id, body in self.obstacle_bodies.items():
                     if body and hasattr(body, 'userData') and body.userData:
                         obstacle_type = body.userData.get('obstacle_type', 'unknown')
                         position = (body.position.x, body.position.y)
+                        
+                        # 🎨 EXTRACT BIOME COLOR from dynamic world obstacles
+                        biome_color = body.userData.get('color', None)
+                        biome_type = body.userData.get('biome', None)
+                        is_dynamic_world = body.userData.get('type') == 'dynamic_obstacle'
                         
                         # Determine size based on fixtures
                         size = 2.0  # Default
@@ -4853,14 +4324,22 @@ class TrainingEnvironment:
                         elif obstacle_type == 'boulder':
                             danger_level = 0.6  # Medium danger
                         
-                        obstacles_for_ui.append({
+                        obstacle_data = {
                             'id': obstacle_id,
                             'type': obstacle_type,
                             'position': position_array,  # JavaScript expects array [x, y]
                             'size': size,
                             'danger_level': danger_level,  # JavaScript expects this for coloring
                             'active': True
-                        })
+                        }
+                        
+                        # 🌍 ADD BIOME COLOR INFORMATION for dynamic world obstacles
+                        if is_dynamic_world and biome_color:
+                            obstacle_data['biome_color'] = list(biome_color)  # Convert tuple to list for JSON
+                            obstacle_data['biome_type'] = biome_type
+                            obstacle_data['is_dynamic_world'] = True
+                        
+                        obstacles_for_ui.append(obstacle_data)
             
             return obstacles_for_ui
             
@@ -4871,39 +4350,53 @@ class TrainingEnvironment:
     def _cleanup_performance_data(self):
         """Clean up accumulated performance data to prevent memory growth."""
         try:
+            # DETAILED LOGGING: Track what's accumulating
+            total_action_history = 0
+            total_replay_buffer = 0
+            total_attention_history = 0
+            agents_with_large_buffers = 0
+            
             # Clean up Q-learning history data
             for agent in self.agents:
                 if getattr(agent, '_destroyed', False):
                     continue
                     
-                # Limit action history
-                if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
-                    agent.action_history = agent.action_history[-50:]
+                # Track action history sizes
+                if hasattr(agent, 'action_history'):
+                    action_size = len(agent.action_history)
+                    total_action_history += action_size
+                    if action_size > 50:
+                        agent.action_history = agent.action_history[-50:]
                 
-                # Clean up Q-table data if it exists and has history
-                if hasattr(agent, 'q_table'):
-                    if hasattr(agent.q_table, 'q_value_history') and len(agent.q_table.q_value_history) > 100:
-                        agent.q_table.q_value_history = agent.q_table.q_value_history[-100:]
-                    
-                    # Clean up visit counts for very large Q-tables
-                    if hasattr(agent.q_table, 'visit_counts') and hasattr(agent.q_table.visit_counts, '__len__'):
-                        try:
-                            if len(agent.q_table.visit_counts) > 5000:
-                                # Reset visit counts for least visited state-actions
-                                pass  # Skip complex cleanup for now
-                        except:
-                            pass
+                # Track replay buffer sizes
+                if (hasattr(agent, '_learning_system') and agent._learning_system and 
+                    hasattr(agent._learning_system, 'memory') and 
+                    hasattr(agent._learning_system.memory, 'buffer')):
+                    buffer_size = len(agent._learning_system.memory.buffer)
+                    total_replay_buffer += buffer_size
+                    if buffer_size > 1000:
+                        agents_with_large_buffers += 1
                 
-                # Clean up replay buffer if too large
-                if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
-                    buffer_capacity = getattr(agent.replay_buffer, 'capacity', 3000)
-                    if len(agent.replay_buffer.buffer) > buffer_capacity * 0.9:
-                        # Remove oldest 25% of experiences
-                        old_size = len(agent.replay_buffer.buffer)
-                        remove_count = old_size // 4
+                # Track attention history sizes
+                if (hasattr(agent, '_learning_system') and agent._learning_system and
+                    hasattr(agent._learning_system, 'attention_history')):
+                    attention_size = len(agent._learning_system.attention_history)
+                    total_attention_history += attention_size
+                
+                
+                # Clean up replay buffer if too large (TRAINING FIX: less aggressive)
+                if (hasattr(agent, '_learning_system') and agent._learning_system and 
+                    hasattr(agent._learning_system, 'memory') and 
+                    hasattr(agent._learning_system.memory, 'buffer')):
+                    buffer = agent._learning_system.memory.buffer
+                    buffer_capacity = getattr(agent._learning_system.memory, 'maxlen', 3000)
+                    if len(buffer) > buffer_capacity * 0.8:  # TRAINING FIX: Clean at 80% (was 50%)
+                        # Remove oldest 20% of experiences (was 50%)
+                        old_size = len(buffer)
+                        remove_count = old_size // 5  # Remove 20% instead of 50%
                         for _ in range(remove_count):
-                            if agent.replay_buffer.buffer:
-                                agent.replay_buffer.buffer.popleft()
+                            if buffer:
+                                buffer.popleft()
             
             # Clean up old robot stats for destroyed agents
             active_agent_ids = {agent.id for agent in self.agents if not getattr(agent, '_destroyed', False)}
@@ -4919,372 +4412,94 @@ class TrainingEnvironment:
                 ]
             
             # Memory pool handles its own cleanup automatically
-            print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
+            
+            # DETAILED MEMORY TRACKING LOGS
+            print(f"🧹 MEMORY TRACKING - Performance cleanup completed:")
+            print(f"   📊 Active agents: {len(self.agents)}")
+            print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
+            print(f"   📊 Total action history entries: {total_action_history}")
+            print(f"   📊 Total replay buffer entries: {total_replay_buffer}")
+            print(f"   📊 Total attention history entries: {total_attention_history}")
+            print(f"   📊 Agents with large buffers (>1k): {agents_with_large_buffers}")
+            print(f"   📊 Avg replay buffer per agent: {total_replay_buffer / max(1, len(self.agents)):.1f}")
+            print(f"   📊 Avg attention per agent: {total_attention_history / max(1, len(self.agents)):.1f}")
+            
+            # AGGRESSIVE: Clean up attention network specific data
+            attention_networks_cleaned = 0
+            for agent in self.agents:
+                if getattr(agent, '_destroyed', False):
+                    continue
+                
+                # Clean up attention networks (FIXED: correct path)
+                if hasattr(agent, '_learning_system') and agent._learning_system:
+                    learning_system = agent._learning_system
+                    
+                    # Clean attention history conservatively
+                    if hasattr(learning_system, 'attention_history'):
+                        old_size = len(learning_system.attention_history)
+                        if old_size > 100:  # Keep 100 most recent (was 10)
+                            learning_system.attention_history = deque(
+                                list(learning_system.attention_history)[-100:], 
+                                maxlen=200  # Increased from 25
+                            )
+                            attention_networks_cleaned += 1
+                    
+                    # CONSERVATIVE: Clean experience replay buffer for training effectiveness
+                    if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
+                        buffer_size = len(learning_system.memory.buffer)
+                        if buffer_size > 2000:  # TRAINING FIX: Clean at 2000 entries (was 500)
+                            # Keep only most recent 2000 experiences
+                            learning_system.memory.buffer = deque(
+                                list(learning_system.memory.buffer)[-2000:],
+                                maxlen=3000  # TRAINING FIX: Increased max from 1000 to 3000
+                            )
+            
+            if attention_networks_cleaned > 0:
+                print(f"🧹 Aggressively cleaned {attention_networks_cleaned} attention networks")
             
         except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
 
-    def test_carnivore_feeding(self):
-        """Test method to place a carnivore next to prey to verify feeding mechanics"""
-        print("🧪 Running carnivore feeding test...")
-        
-        # Find a carnivore and a herbivore
-        carnivore = None
-        herbivore = None
-        
-        for agent in self.agents:
-            if getattr(agent, '_destroyed', False) or not agent.body:
-                continue
-            role = self.agent_statuses.get(agent.id, {}).get('role', 'omnivore')
-            if role == 'carnivore' and carnivore is None:
-                carnivore = agent
-            elif role == 'herbivore' and herbivore is None:
-                herbivore = agent
-            
-            if carnivore and herbivore:
-                break
-        
-        if not carnivore or not herbivore:
-            print("❌ Test failed: Could not find both carnivore and herbivore")
-            return
-        
-        # Record initial states
-        carnivore_initial_energy = self.agent_energy_levels.get(carnivore.id, 1.0)
-        herbivore_initial_energy = self.agent_energy_levels.get(herbivore.id, 1.0)
-        herbivore_initial_health = self.agent_health.get(herbivore.id, {'health': 1.0})['health']
-        
-        # Position carnivore next to herbivore (within consumption distance)
-        herbivore_pos = (herbivore.body.position.x, herbivore.body.position.y)
-        test_position = (herbivore_pos[0] + 2.0, herbivore_pos[1])  # 2 meters away (within 4m consumption distance)
-        
-        # Move carnivore to test position
-        carnivore.body.position = test_position
-        carnivore.body.linearVelocity = (0, 0)  # Stop movement
-        
-        # Lower carnivore's energy to trigger hunting behavior
-        self.agent_energy_levels[carnivore.id] = 0.5  # Below 0.6 threshold
-        
-        print(f"🔬 Test setup:")
-        print(f"   Carnivore {carnivore.id[:8]} - Energy: {carnivore_initial_energy:.2f} -> 0.5")
-        print(f"   Herbivore {herbivore.id[:8]} - Energy: {herbivore_initial_energy:.2f}, Health: {herbivore_initial_health:.2f}")
-        print(f"   Distance: {math.sqrt((test_position[0] - herbivore_pos[0])**2 + (test_position[1] - herbivore_pos[1])**2):.1f}m")
-        
-        # Run consumption updates for several frames to see if feeding occurs
-        print("🔄 Running consumption updates...")
-        for frame in range(10):  # Run for 10 frames
-            # Manually trigger resource consumption update
-            self._update_resource_consumption()
-            
-            # Check current states
-            carnivore_energy = self.agent_energy_levels.get(carnivore.id, 1.0)
-            herbivore_energy = self.agent_energy_levels.get(herbivore.id, 1.0)
-            herbivore_health = self.agent_health.get(herbivore.id, {'health': 1.0})['health']
-            carnivore_status = self.agent_statuses.get(carnivore.id, {}).get('status', 'unknown')
-            
-            print(f"   Frame {frame+1}: Carnivore energy {carnivore_energy:.3f}, status: {carnivore_status}")
-            print(f"   Frame {frame+1}: Herbivore energy {herbivore_energy:.3f}, health: {herbivore_health:.3f}")
-            
-            # Check if carnivore is consuming herbivore
-            if carnivore_energy > 0.5 or carnivore_status == 'eating':
-                print(f"✅ SUCCESS: Carnivore is consuming herbivore!")
-                print(f"   Energy gained: {carnivore_energy - 0.5:.3f}")
-                print(f"   Herbivore health lost: {herbivore_initial_health - herbivore_health:.3f}")
-                return
-        
-        print("❌ FAILED: Carnivore did not consume herbivore after 10 frames")
-        print("   This indicates the robot consumption system is not working properly")
-        
-        # Reset positions to avoid disrupting normal simulation
-        carnivore.body.position = (random.uniform(-30, 30), 5.0)
-        self.agent_energy_levels[carnivore.id] = carnivore_initial_energy
 
-    def _create_obstacle_physics_bodies(self):
-        """Create Box2D physics bodies for obstacles that don't have them yet. 
-        NOTE: This is kept for backward compatibility but static world generation is now preferred."""
-        try:
-            if not hasattr(self, 'obstacle_bodies'):
-                self.obstacle_bodies = {}  # Track obstacle ID -> Box2D body mapping
-            
-            # MODIFIED: Reduced dynamic obstacle creation since we now use static world generation
-            # Only create physics bodies for any remaining dynamic obstacles (minimal)
-            obstacles_to_create = []
-            
-            # NOTE: Environmental system and evolution engine obstacle spawning has been disabled
-            # Static obstacles are created once during initialization via _generate_static_world()
-            
-            # Only process existing moving obstacles or special dynamic obstacles if any exist
-            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
-                for i, obstacle in enumerate(self.environmental_system.obstacles):
-                    # Only create physics bodies for moving obstacles that weren't created statically
-                    if hasattr(obstacle, 'movement_pattern') and obstacle.movement_pattern:
-                        obstacle_id = f"moving_{i}_{obstacle.type.value if hasattr(obstacle, 'type') else 'unknown'}"
-                        if obstacle_id not in self.obstacle_bodies:
-                            obstacles_to_create.append({
-                                'id': obstacle_id,
-                                'type': obstacle.type.value if hasattr(obstacle, 'type') else 'boulder',
-                                'position': obstacle.position,
-                                'size': obstacle.size,
-                                'source': 'environmental_moving'
-                            })
-            
-            # Create physics bodies for any remaining dynamic obstacles
-            bodies_created = 0
-            for obstacle_data in obstacles_to_create:
-                try:
-                    body = self._create_single_obstacle_body(obstacle_data)
-                    if body:
-                        self.obstacle_bodies[obstacle_data['id']] = body
-                        bodies_created += 1
-                except Exception as e:
-                    print(f"⚠️ Error creating physics body for dynamic obstacle {obstacle_data['id']}: {e}")
-            
-            if bodies_created > 0:
-                print(f"🏃 Created {bodies_created} dynamic obstacle physics bodies. Total active: {len(self.obstacle_bodies)}")
-            
-            # Clean up bodies for obstacles that no longer exist
-            self._cleanup_removed_obstacles()
-            
-        except Exception as e:
-            print(f"⚠️ Error in obstacle physics body creation: {e}")
-    
-    def _create_single_obstacle_body(self, obstacle_data):
-        """Create a Box2D physics body for a single obstacle."""
-        try:
-            obstacle_type = obstacle_data['type']
-            position = obstacle_data['position']
-            size = obstacle_data.get('size', 2.0)
-            
-            # Create static body for obstacle
-            obstacle_body = self.world.CreateStaticBody(position=position)
-            
-            # Choose shape based on obstacle type
-            if obstacle_type in ['boulder', 'wall']:
-                # Rectangular obstacles
-                width = size if obstacle_type == 'boulder' else min(size, 1.0)  # Walls are thinner
-                height = size if obstacle_type == 'boulder' else max(size, 3.0)  # Walls are taller
-                
-                fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2PolygonShape(box=(width/2, height/2)),
-                    density=0.0,  # Static body
-                    friction=0.7,
-                    restitution=0.2,
-                                    filter=b2.b2Filter(
-                    categoryBits=self.OBSTACLE_CATEGORY,
-                    maskBits=self.AGENT_CATEGORY  # ONLY collide with agents, NOT other obstacles (performance optimization)
-                )
-                )
-                
-            elif obstacle_type == 'pit':
-                # Create pit as a low rectangular obstacle
-                fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2PolygonShape(box=(size/2, 0.5)),  # Low height for pit
-                    density=0.0,
-                    friction=0.3,  # Slippery
-                    restitution=0.0,
-                    filter=b2.b2Filter(
-                        categoryBits=self.OBSTACLE_CATEGORY,
-                        maskBits=self.AGENT_CATEGORY
-                    )
-                )
-                
-            else:
-                # Default: circular obstacle for other types
-                fixture = obstacle_body.CreateFixture(
-                    shape=b2.b2CircleShape(radius=size/2),
-                    density=0.0,
-                    friction=0.5,
-                    restitution=0.3,
-                    filter=b2.b2Filter(
-                        categoryBits=self.OBSTACLE_CATEGORY,
-                        maskBits=self.AGENT_CATEGORY
-                    )
-                )
-            
-            # Store obstacle type on the body for identification
-            obstacle_body.userData = {
-                'type': 'obstacle',
-                'obstacle_type': obstacle_type,
-                'obstacle_id': obstacle_data['id']
-            }
-            
-            return obstacle_body
-            
-        except Exception as e:
-            print(f"⚠️ Error creating obstacle body: {e}")
-            return None
-    
-    def _cleanup_removed_obstacles(self):
-        """Remove physics bodies for obstacles that no longer exist."""
-        try:
-            if not hasattr(self, 'obstacle_bodies'):
-                return
-            
-            # Get current obstacle IDs
-            current_obstacle_ids = set()
-            
-            # Environmental obstacles
-            if hasattr(self, 'environmental_system') and self.environmental_system.obstacles:
-                for i, obstacle in enumerate(self.environmental_system.obstacles):
-                    current_obstacle_ids.add(f"env_{i}_{obstacle['type']}")
-            
-            # Evolution obstacles
-            if hasattr(self, 'evolution_engine') and hasattr(self.evolution_engine, 'environment_obstacles'):
-                for i, obstacle in enumerate(self.evolution_engine.environment_obstacles):
-                    if obstacle.get('active', True):
-                        current_obstacle_ids.add(f"evo_{i}_{obstacle['type']}")
-            
-            # Remove bodies for obstacles that no longer exist
-            bodies_to_remove = []
-            for obstacle_id, body in self.obstacle_bodies.items():
-                if obstacle_id not in current_obstacle_ids:
-                    bodies_to_remove.append(obstacle_id)
-            
-            removed_count = 0
-            for obstacle_id in bodies_to_remove:
-                try:
-                    body = self.obstacle_bodies.pop(obstacle_id)
-                    self.world.DestroyBody(body)
-                    removed_count += 1
-                except Exception as e:
-                    print(f"⚠️ Error removing obstacle body {obstacle_id}: {e}")
-            
-            if removed_count > 0:
-                print(f"🗑️ Removed {removed_count} obsolete obstacle bodies")
-                
-        except Exception as e:
-            print(f"⚠️ Error cleaning up obstacle bodies: {e}")
-    
-    def _get_obstacle_data_for_ui(self):
-        """Get obstacle data for the web UI visualization."""
-        try:
-            obstacles_for_ui = []
-            
-            # Add terrain segments from the generated terrain
-            if hasattr(self, 'terrain_collision_bodies'):
-                for terrain_body in self.terrain_collision_bodies:
-                    terrain_type = terrain_body.get('type', 'terrain_segment')
-                    position = terrain_body.get('position', (0, 0))
-                    size = terrain_body.get('size', 2.0)
-                    height = terrain_body.get('height', size)
-                    
-                    # Convert position tuple to array for JavaScript
-                    position_array = [position[0], position[1]]
-                    
-                    # Add terrain to UI data
-                    obstacles_for_ui.append({
-                        'type': terrain_type,
-                        'position': position_array,
-                        'size': size,
-                        'height': height,
-                        'source': 'terrain_generation',
-                        'danger_level': 0.2,  # Terrain is natural, less dangerous
-                        'active': True
-                    })
-            
-            # Add obstacles that have physics bodies (including any remaining dynamic ones)
-            if hasattr(self, 'obstacle_bodies'):
-                for obstacle_id, body in self.obstacle_bodies.items():
-                    if body and hasattr(body, 'userData') and body.userData:
-                        obstacle_type = body.userData.get('obstacle_type', 'unknown')
-                        position = (body.position.x, body.position.y)
-                        
-                        # Determine size based on fixtures
-                        size = 2.0  # Default
-                        if body.fixtures:
-                            fixture = body.fixtures[0]
-                            shape = fixture.shape
-                            if hasattr(shape, 'radius'):  # Circle
-                                size = shape.radius * 2
-                            elif hasattr(shape, 'vertices'):  # Polygon
-                                # Approximate size from polygon bounds
-                                vertices = shape.vertices
-                                if vertices:
-                                    x_coords = [v[0] for v in vertices]
-                                    y_coords = [v[1] for v in vertices]
-                                    size = max(max(x_coords) - min(x_coords), max(y_coords) - min(y_coords))
-                        
-                        # Convert position tuple to array for JavaScript
-                        position_array = [position[0], position[1]]
-                        
-                        # Add danger level based on obstacle type
-                        danger_level = 0.5  # Default
-                        if obstacle_type == 'pit':
-                            danger_level = 0.8  # High danger
-                        elif obstacle_type == 'wall':
-                            danger_level = 0.3  # Low danger
-                        elif obstacle_type == 'boulder':
-                            danger_level = 0.6  # Medium danger
-                        
-                        obstacles_for_ui.append({
-                            'id': obstacle_id,
-                            'type': obstacle_type,
-                            'position': position_array,  # JavaScript expects array [x, y]
-                            'size': size,
-                            'danger_level': danger_level,  # JavaScript expects this for coloring
-                            'active': True
-                        })
-            
-            return obstacles_for_ui
-            
-        except Exception as e:
-            print(f"⚠️ Error getting obstacle data for UI: {e}")
-            return []
 
-    def _cleanup_performance_data(self):
-        """Clean up accumulated performance data to prevent memory growth."""
+    def _cleanup_attention_networks(self):
+        """Dedicated cleanup for attention networks to prevent memory accumulation."""
         try:
-            # Clean up Q-learning history data
+            cleaned_count = 0
+            total_attention_records = 0
+            total_buffer_size = 0
+            
             for agent in self.agents:
                 if getattr(agent, '_destroyed', False):
                     continue
                     
-                # Limit action history
-                if hasattr(agent, 'action_history') and len(agent.action_history) > 50:
-                    agent.action_history = agent.action_history[-50:]
-                
-                # Clean up Q-table data if it exists and has history
-                if hasattr(agent, 'q_table'):
-                    if hasattr(agent.q_table, 'q_value_history') and len(agent.q_table.q_value_history) > 100:
-                        agent.q_table.q_value_history = agent.q_table.q_value_history[-100:]
+                if hasattr(agent, '_attention_dqn') and agent._attention_dqn:
+                    # Track total attention records
+                    if hasattr(agent._attention_dqn, 'attention_history'):
+                        total_attention_records += len(agent._attention_dqn.attention_history)
                     
-                    # Clean up visit counts for very large Q-tables
-                    if hasattr(agent.q_table, 'visit_counts') and hasattr(agent.q_table.visit_counts, '__len__'):
-                        try:
-                            if len(agent.q_table.visit_counts) > 5000:
-                                # Reset visit counts for least visited state-actions
-                                pass  # Skip complex cleanup for now
-                        except:
-                            pass
+                    # Track total buffer size
+                    if hasattr(agent._attention_dqn, 'memory') and hasattr(agent._attention_dqn.memory, 'buffer'):
+                        total_buffer_size += len(agent._attention_dqn.memory.buffer)
+                    
+                    # Force cleanup if agent has cleanup method
+                    if hasattr(agent._attention_dqn, '_cleanup_attention_data'):
+                        agent._attention_dqn._cleanup_attention_data()
+                        cleaned_count += 1
+            
+            # Force GPU memory cleanup
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except:
+                pass
+            
+            if cleaned_count > 0:
+                print(f"🧹 Attention cleanup: {cleaned_count} networks, {total_attention_records} attention records, {total_buffer_size} buffer entries")
                 
-                # Clean up replay buffer if too large
-                if hasattr(agent, 'replay_buffer') and hasattr(agent.replay_buffer, 'buffer'):
-                    buffer_capacity = getattr(agent.replay_buffer, 'capacity', 3000)
-                    if len(agent.replay_buffer.buffer) > buffer_capacity * 0.9:
-                        # Remove oldest 25% of experiences
-                        old_size = len(agent.replay_buffer.buffer)
-                        remove_count = old_size // 4
-                        for _ in range(remove_count):
-                            if agent.replay_buffer.buffer:
-                                agent.replay_buffer.buffer.popleft()
-            
-            # Clean up old robot stats for destroyed agents
-            active_agent_ids = {agent.id for agent in self.agents if not getattr(agent, '_destroyed', False)}
-            old_stats_keys = [k for k in self.robot_stats.keys() if k not in active_agent_ids]
-            for old_key in old_stats_keys[:10]:  # Remove up to 10 old entries at a time
-                del self.robot_stats[old_key]
-            
-            # Clean up ecosystem data
-            if hasattr(self.ecosystem_dynamics, 'food_sources'):
-                # Remove depleted food sources
-                self.ecosystem_dynamics.food_sources = [
-                    f for f in self.ecosystem_dynamics.food_sources if f.amount > 0.05
-                ]
-            
-            # Memory pool handles its own cleanup automatically
-            print(f"🧹 Performance cleanup completed (agents: {len(self.agents)}, stats: {len(self.robot_stats)})")
-            
         except Exception as e:
-            print(f"⚠️ Error during performance cleanup: {e}")
+            print(f"⚠️ Error in attention network cleanup: {e}")
 
 # Create Flask app and SocketIO instance
 app = Flask(__name__)
@@ -5296,13 +4511,20 @@ env = TrainingEnvironment()
 # Add missing main web interface route
 @app.route('/')
 def index():
-    """Serve the main web interface."""
-    return render_template_string(HTML_TEMPLATE)
+    """Serve the main web interface with WebGL rendering."""
+    return render_template_string(get_webgl_template())
 
 @app.route('/status')
 def status():
     """Get current training status for the web interface."""
-    return jsonify(env.get_status())
+    # Get canvas dimensions and culling preference if provided via query parameters
+    canvas_width = request.args.get('canvas_width', type=int, default=1200)
+    canvas_height = request.args.get('canvas_height', type=int, default=800)
+    viewport_culling = request.args.get('viewport_culling', default='true').lower() == 'true'
+    # CRITICAL FIX: Get current frontend camera position for accurate viewport culling
+    camera_x = request.args.get('camera_x', type=float, default=0.0)
+    camera_y = request.args.get('camera_y', type=float, default=0.0)
+    return jsonify(env.get_status(canvas_width, canvas_height, viewport_culling, camera_x, camera_y))
 
 # Add missing reward signal endpoints to training system's Flask app
 @app.route('/reward_signal_status')
@@ -5395,8 +4617,8 @@ def click():
         agent_id = data.get('agent_id')
         
         if agent_id:
-            # Find the agent by ID
-            agent_to_focus = next((agent for agent in env.agents if agent.id == agent_id), None)
+            # Find the agent by ID - convert both to strings for comparison
+            agent_to_focus = next((agent for agent in env.agents if str(agent.id) == str(agent_id)), None)
             if agent_to_focus:
                 env.focus_on_agent(agent_to_focus)
                 return jsonify({'status': 'success', 'message': f'Focused on agent {agent_id}', 'agent_id': agent_id})
@@ -5491,33 +4713,186 @@ def update_agent_params():
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/switch_learning_approach', methods=['POST'])
-def switch_learning_approach():
-    """Switch an agent's learning approach."""
+@app.route('/set_simulation_speed', methods=['POST'])
+def set_simulation_speed():
+    """Set the simulation speed multiplier."""
     try:
         data = request.get_json()
-        agent_id = data.get('agent_id')
-        approach = data.get('approach')
+        speed = data.get('speed', 1.0)
         
-        if not agent_id or not approach:
-            return jsonify({'status': 'error', 'message': 'agent_id and approach are required'}), 400
+        # Validate speed range
+        if not isinstance(speed, (int, float)) or speed <= 0:
+            return jsonify({'status': 'error', 'message': 'Speed must be a positive number'}), 400
         
-        success = env.switch_agent_learning_approach(agent_id, approach)
-        if success:
-            return jsonify({'status': 'success', 'message': f'Agent {agent_id} switched to {approach}'})
-        else:
-            return jsonify({'status': 'error', 'message': f'Failed to switch agent {agent_id} to {approach}'})
+        if speed > env.max_speed_multiplier:
+            return jsonify({'status': 'error', 'message': f'Speed cannot exceed {env.max_speed_multiplier}x'}), 400
+        
+        # Set the speed
+        env.simulation_speed_multiplier = float(speed)
+        
+        return jsonify({
+            'status': 'success', 
+            'message': f'Simulation speed set to {speed}x',
+            'speed': speed
+        })
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
-@app.route('/test_carnivore_feeding', methods=['POST'])
-def test_carnivore_feeding():
-    """Test carnivore feeding mechanics."""
+@app.route('/ai_optimization_settings', methods=['GET', 'POST'])
+def ai_optimization_settings():
+    """Get or set AI optimization settings."""
     try:
-        env.test_carnivore_feeding()
-        return jsonify({'status': 'success', 'message': 'Carnivore feeding test executed'})
+        if request.method == 'GET':
+            return jsonify({
+                'status': 'success',
+                'settings': {
+                    'ai_optimization_enabled': env.ai_optimization_enabled,
+                    'ai_batch_percentage': env.ai_batch_percentage,
+                    'ai_spatial_culling_enabled': env.ai_spatial_culling_enabled,
+                    'ai_spatial_culling_distance': env.ai_spatial_culling_distance
+                }
+            })
+        
+        elif request.method == 'POST':
+            data = request.get_json()
+            
+            # Update settings if provided
+            if 'ai_optimization_enabled' in data:
+                env.ai_optimization_enabled = bool(data['ai_optimization_enabled'])
+            
+            if 'ai_batch_percentage' in data:
+                percentage = float(data['ai_batch_percentage'])
+                if 0.1 <= percentage <= 1.0:
+                    env.ai_batch_percentage = percentage
+                else:
+                    return jsonify({'status': 'error', 'message': 'ai_batch_percentage must be between 0.1 and 1.0'}), 400
+            
+            if 'ai_spatial_culling_enabled' in data:
+                env.ai_spatial_culling_enabled = bool(data['ai_spatial_culling_enabled'])
+            
+            if 'ai_spatial_culling_distance' in data:
+                distance = float(data['ai_spatial_culling_distance'])
+                if distance > 0:
+                    env.ai_spatial_culling_distance = distance
+                else:
+                    return jsonify({'status': 'error', 'message': 'ai_spatial_culling_distance must be positive'}), 400
+            
+            return jsonify({
+                'status': 'success',
+                'message': 'AI optimization settings updated',
+                'settings': {
+                    'ai_optimization_enabled': env.ai_optimization_enabled,
+                    'ai_batch_percentage': env.ai_batch_percentage,
+                    'ai_spatial_culling_enabled': env.ai_spatial_culling_enabled,
+                    'ai_spatial_culling_distance': env.ai_spatial_culling_distance
+                }
+            })
+            
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/toggle_health_bars', methods=['POST'])
+def toggle_health_bars():
+    """Toggle health bar rendering on/off for performance optimization."""
+    try:
+        data = request.get_json() or {}
+        enable = data.get('enable', not env.show_health_bars)  # Toggle if not specified
+        
+        env.show_health_bars = bool(enable)
+        
+        message = f"Health bars {'enabled' if env.show_health_bars else 'disabled'}"
+        return jsonify({
+            'status': 'success',
+            'message': message,
+            'show_health_bars': env.show_health_bars
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/toggle_visualization', methods=['POST'])
+def toggle_visualization():
+    """Toggle robot visualization on/off for maximum performance optimization."""
+    try:
+        data = request.get_json() or {}
+        enable = data.get('enable', not env.enable_visualization)  # Toggle if not specified
+        
+        env.enable_visualization = bool(enable)
+        
+        message = f"Robot visualization {'enabled' if env.enable_visualization else 'disabled'}"
+        status_message = message + (" (maximum speed mode)" if not env.enable_visualization else " (normal mode)")
+        
+        return jsonify({
+            'status': 'success',
+            'message': status_message,
+            'enable_visualization': env.enable_visualization
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+# WebGL routes removed - WebGL is now the only rendering mode
+
+@app.route('/elite_robots', methods=['GET', 'POST'])
+def elite_robots():
+    """Manage elite robots - get stats or load elites into population."""
+    try:
+        if request.method == 'GET':
+            # Get elite robot statistics
+            stats = env.elite_manager.get_elite_statistics()
+            top_elites = env.elite_manager.get_top_elites(10)
+            
+            return jsonify({
+                'elite_statistics': stats,
+                'top_elites': top_elites,
+                'auto_save_enabled': env.auto_save_elites,
+                'current_generation': env.evolution_engine.generation
+            })
+        
+        elif request.method == 'POST':
+            # Load elite robots into current population
+            data = request.get_json() or {}
+            count = data.get('count', 5)
+            min_generation = data.get('min_generation', max(0, env.evolution_engine.generation - 5))
+            
+            # Load elite robots
+            elite_robots = env.elite_manager.restore_elite_robots(
+                world=env.world,
+                count=count,
+                min_generation=min_generation
+            )
+            
+            if elite_robots:
+                # Replace random agents with elite robots
+                agents_replaced = min(len(elite_robots), len(env.agents) // 4)  # Replace up to 25%
+                
+                # Remove random agents
+                for _ in range(agents_replaced):
+                    if env.agents:
+                        removed_agent = env.agents.pop(random.randint(0, len(env.agents) - 1))
+                        env._safe_destroy_agent(removed_agent)
+                
+                # Add elite robots
+                for elite_robot in elite_robots[:agents_replaced]:
+                    env.agents.append(elite_robot)
+                    env._initialize_single_agent_ecosystem(elite_robot)
+                
+                return jsonify({
+                    'success': True,
+                    'message': f'Loaded {agents_replaced} elite robots into population',
+                    'agents_replaced': agents_replaced,
+                    'elite_count': len(elite_robots),
+                    'population_size': len(env.agents)
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'message': 'No elite robots found to load',
+                    'agents_replaced': 0
+                })
+                
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# Ray casting visualization endpoint removed for performance
 
 def main():
     # Set a different port for the web server to avoid conflicts

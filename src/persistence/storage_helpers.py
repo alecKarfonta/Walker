@@ -16,37 +16,56 @@ from copy import deepcopy
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+    from src.agents.crawling_agent import CrawlingAgent
     from .robot_storage import RobotState, PerformanceHistory
 else:
     # Import at runtime to avoid circular dependency issues
     try:
-        from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+        from src.agents.crawling_agent import CrawlingAgent
         from .robot_storage import RobotState, PerformanceHistory
     except ImportError:
         # Fallback for linting/analysis
-        EvolutionaryCrawlingAgent = None
+        CrawlingAgent = None
         RobotState = None 
         PerformanceHistory = None
 
 
-def extract_q_table_data(agent: EvolutionaryCrawlingAgent) -> Dict[str, Any]:
-    """Extract Q-table data from agent."""
-    if not hasattr(agent, 'q_table'):
+def extract_neural_network_data(agent: CrawlingAgent) -> Dict[str, Any]:
+    """Extract neural network data from agent."""
+    if not hasattr(agent, '_learning_system') or agent._learning_system is None:
         return {}
     
-    q_table = agent.q_table
-    return {
-        'q_values': dict(q_table.q_values) if hasattr(q_table, 'q_values') else {},
-        'state_coverage': list(q_table.state_coverage) if hasattr(q_table, 'state_coverage') else [],
-        'confidence_threshold': getattr(q_table, 'confidence_threshold', 15),
-        'exploration_bonus': getattr(q_table, 'exploration_bonus', 0.15),
-        'action_count': getattr(q_table, 'action_count', 6),
-        'default_value': getattr(q_table, 'default_value', 0.0)
-    }
+    learning_system = agent._learning_system
+    neural_data = {}
+    
+    try:
+        # Extract neural network weights
+        if hasattr(learning_system, 'state_dict'):
+            neural_data['network_weights'] = learning_system.state_dict()
+        
+        # Extract experience buffer (limit size)
+        if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
+            buffer_size = min(10000, len(learning_system.memory.buffer))  # Limit to 10k experiences
+            neural_data['experience_buffer'] = list(learning_system.memory.buffer)[-buffer_size:] if buffer_size > 0 else []
+        
+        # Extract training statistics
+        neural_data['training_stats'] = {
+            'epsilon': getattr(learning_system, 'epsilon', 0.3),
+            'training_steps': getattr(learning_system, '_training_steps', 0),
+            'loss_history': getattr(learning_system, '_loss_history', [])[-100:]  # Last 100 losses
+        }
+        
+        # Extract attention-specific data
+        if hasattr(learning_system, 'attention_history'):
+            neural_data['attention_history'] = list(learning_system.attention_history)[-100:]  # Last 100 attention records
+            
+    except Exception as e:
+        print(f"⚠️ Error extracting neural network data: {e}")
+    
+    return neural_data
 
 
-def extract_learning_parameters(agent: EvolutionaryCrawlingAgent) -> Dict[str, Any]:
+def extract_learning_parameters(agent: CrawlingAgent) -> Dict[str, Any]:
     """Extract learning parameters from agent."""
     return {
         'learning_rate': getattr(agent, 'learning_rate', 0.005),
@@ -62,7 +81,7 @@ def extract_learning_parameters(agent: EvolutionaryCrawlingAgent) -> Dict[str, A
     }
 
 
-def extract_performance_metrics(agent: EvolutionaryCrawlingAgent) -> Dict[str, Any]:
+def extract_performance_metrics(agent: CrawlingAgent) -> Dict[str, Any]:
     """Extract current performance metrics from agent."""
     return {
         'total_reward': getattr(agent, 'total_reward', 0.0),
@@ -71,14 +90,14 @@ def extract_performance_metrics(agent: EvolutionaryCrawlingAgent) -> Dict[str, A
         'best_reward_received': getattr(agent, 'best_reward_received', 0.0),
         'worst_reward_received': getattr(agent, 'worst_reward_received', 0.0),
         'time_since_good_value': getattr(agent, 'time_since_good_value', 0.0),
-        'convergence_estimate': agent.q_table.get_convergence_estimate() if hasattr(agent, 'q_table') else 0.0,
+        'learning_progress': getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1)),  # Reward per step as progress metric
         'current_position': (agent.body.position.x, agent.body.position.y) if agent.body else (0.0, 0.0),
         'distance_traveled': agent.body.position.x - agent.initial_position[0] if agent.body else 0.0,
         'stability_score': max(0, 1.0 - abs(agent.body.angle)) if agent.body else 0.0
     }
 
 
-def create_performance_history(agent: EvolutionaryCrawlingAgent, existing_history: Optional[PerformanceHistory] = None) -> PerformanceHistory:
+def create_performance_history(agent: CrawlingAgent, existing_history: Optional[PerformanceHistory] = None) -> PerformanceHistory:
     """Create or update performance history for agent."""
     robot_id = str(agent.id)
     
@@ -97,36 +116,53 @@ def create_performance_history(agent: EvolutionaryCrawlingAgent, existing_histor
         return history
 
 
-def restore_q_table_data(agent: EvolutionaryCrawlingAgent, q_data: Dict[str, Any]):
-    """Restore Q-table data to agent."""
-    if not q_data or not hasattr(agent, 'q_table'):
+def restore_neural_network_data(agent: CrawlingAgent, neural_data: Dict[str, Any]):
+    """Restore neural network data to agent."""
+    if not neural_data or not hasattr(agent, '_learning_system') or agent._learning_system is None:
         return
     
-    q_table = agent.q_table
+    learning_system = agent._learning_system
     
-    # Restore Q-values
-    if 'q_values' in q_data:
-        q_table.q_values = dict(q_data['q_values'])
-    
-    # Restore state coverage
-    if 'state_coverage' in q_data:
-        q_table.state_coverage = set(q_data['state_coverage'])
-    
-    # Restore parameters
-    if 'confidence_threshold' in q_data:
-        q_table.confidence_threshold = q_data['confidence_threshold']
-    if 'exploration_bonus' in q_data:
-        q_table.exploration_bonus = q_data['exploration_bonus']
+    try:
+        # Restore neural network weights
+        if 'network_weights' in neural_data and hasattr(learning_system, 'load_state_dict'):
+            learning_system.load_state_dict(neural_data['network_weights'])
+        
+        # Restore experience buffer
+        if 'experience_buffer' in neural_data and hasattr(learning_system, 'memory'):
+            for experience in neural_data['experience_buffer']:
+                try:
+                    learning_system.memory.push(*experience)
+                except Exception as e:
+                    continue  # Skip invalid experiences
+        
+        # Restore training statistics
+        if 'training_stats' in neural_data:
+            stats = neural_data['training_stats']
+            if 'epsilon' in stats and hasattr(learning_system, 'epsilon'):
+                learning_system.epsilon = stats['epsilon']
+            if 'training_steps' in stats and hasattr(learning_system, '_training_steps'):
+                learning_system._training_steps = stats['training_steps']
+            if 'loss_history' in stats and hasattr(learning_system, '_loss_history'):
+                learning_system._loss_history = stats['loss_history']
+        
+        # Restore attention history
+        if 'attention_history' in neural_data and hasattr(learning_system, 'attention_history'):
+            from collections import deque
+            learning_system.attention_history = deque(neural_data['attention_history'], maxlen=learning_system.attention_history.maxlen)
+            
+    except Exception as e:
+        print(f"⚠️ Error restoring neural network data: {e}")
 
 
-def restore_learning_parameters(agent: EvolutionaryCrawlingAgent, learning_params: Dict[str, Any]):
+def restore_learning_parameters(agent: CrawlingAgent, learning_params: Dict[str, Any]):
     """Restore learning parameters to agent."""
     for param, value in learning_params.items():
         if hasattr(agent, param):
             setattr(agent, param, value)
 
 
-def restore_performance_metrics(agent: EvolutionaryCrawlingAgent, perf_metrics: Dict[str, Any]):
+def restore_performance_metrics(agent: CrawlingAgent, perf_metrics: Dict[str, Any]):
     """Restore performance metrics to agent."""
     for metric, value in perf_metrics.items():
         if hasattr(agent, metric):
