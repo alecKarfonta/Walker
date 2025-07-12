@@ -7,6 +7,7 @@ from .metrics import metrics_bp
 from .interaction import interaction_bp
 from .settings import settings_bp
 from .elite import elite_bp
+from .evaluation import evaluation_bp
 
 def register_routes(app, env):
     """Register all route blueprints with the Flask app."""
@@ -17,6 +18,7 @@ def register_routes(app, env):
     app.register_blueprint(interaction_bp)
     app.register_blueprint(settings_bp)
     app.register_blueprint(elite_bp)
+    app.register_blueprint(evaluation_bp)
     
     # Store environment instance for access in routes
     app.env = env 

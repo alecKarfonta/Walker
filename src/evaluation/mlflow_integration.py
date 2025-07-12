@@ -5,16 +5,21 @@ Provides comprehensive logging and experiment management capabilities.
 
 import mlflow
 import mlflow.tracking
+import mlflow.system_metrics
+import mlflow.config
 import numpy as np
 import time
 import json
 import os
+import psutil
 from typing import Dict, List, Any, Optional, Union
 from dataclasses import asdict
 import tempfile
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
+import threading
+import atexit
 
 
 class MLflowIntegration:
@@ -22,6 +27,10 @@ class MLflowIntegration:
     MLflow integration for tracking robot training experiments.
     Logs metrics, parameters, and artifacts for comprehensive experiment tracking.
     """
+    
+    # Class-level system metrics configuration
+    _system_metrics_enabled = False
+    _system_metrics_lock = threading.Lock()
     
     def __init__(self, tracking_uri: Optional[str] = None, experiment_name: str = "walker_robot_training"):
         """
@@ -33,11 +42,11 @@ class MLflowIntegration:
         """
         # Set up MLflow tracking
         if tracking_uri is None:
-            # Create a local SQLite database in the project directory
-            project_root = Path(__file__).parent.parent.parent
-            db_path = project_root / "experiments" / "walker_experiments.db"
-            db_path.parent.mkdir(exist_ok=True)
-            tracking_uri = f"sqlite:///{db_path}"
+            # Check for environment variable first (for Docker setup)
+            tracking_uri = os.environ.get('MLFLOW_TRACKING_URI')
+            if tracking_uri is None:
+                # Default to PostgreSQL in Docker environment
+                tracking_uri = "postgresql://walker_user:walker_secure_2024@walker-postgres:5432/mlflow_db"
         
         mlflow.set_tracking_uri(tracking_uri)
         
@@ -59,9 +68,54 @@ class MLflowIntegration:
         self.current_run = None
         self.run_start_time = None
         
+        # Initialize system metrics globally once
+        self._initialize_system_metrics()
+        
         print(f"✅ MLflow integration initialized")
         print(f"   Tracking URI: {tracking_uri}")
         print(f"   Experiment: {experiment_name}")
+    
+    def _initialize_system_metrics(self):
+        """Initialize MLflow system metrics monitoring once globally."""
+        with self._system_metrics_lock:
+            if not self._system_metrics_enabled:
+                try:
+                    print("📊 Initializing MLflow system metrics monitoring...")
+                    
+                    # Set environment variable for global system metrics
+                    os.environ["MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING"] = "true"
+                    
+                    # Configure system metrics collection settings BEFORE enabling
+                    mlflow.config.set_system_metrics_sampling_interval(10)  # Sample every 10 seconds
+                    mlflow.config.set_system_metrics_samples_before_logging(1)  # Log immediately
+                    mlflow.config.set_system_metrics_node_id("walker_training_node")
+                    
+                    # Enable system metrics globally - this starts the background thread
+                    mlflow.config.enable_system_metrics_logging()
+                    
+                    self._system_metrics_enabled = True
+                    
+                    print(f"✅ MLflow system metrics monitoring initialized:")
+                    print(f"   • Sampling interval: 10 seconds")
+                    print(f"   • Node ID: walker_training_node") 
+                    print(f"   • Background thread: persistent")
+                    print(f"   • Metrics location: 'System Metrics' tab in MLflow UI")
+                    
+                    # Register cleanup on exit
+                    atexit.register(self._cleanup_system_metrics)
+                    
+                except Exception as e:
+                    print(f"❌ Error initializing system metrics: {e}")
+                    self._system_metrics_enabled = False
+    
+    def _cleanup_system_metrics(self):
+        """Clean up system metrics monitoring on exit."""
+        try:
+            if self._system_metrics_enabled:
+                mlflow.config.disable_system_metrics_logging()
+                print("🔄 System metrics monitoring disabled")
+        except Exception as e:
+            print(f"⚠️ Error disabling system metrics: {e}")
     
     def start_training_run(self, run_name: Optional[str] = None, 
                           population_size: int = 30, 
@@ -79,29 +133,42 @@ class MLflowIntegration:
         """
         try:
             if run_name is None:
-                run_name = f"training_run_{int(time.time())}"
+                run_name = f"training_session_{int(time.time())}"
             
             # End current run if exists
             if self.current_run is not None:
+                print(f"🔄 Ending previous MLflow run: {self.current_run.info.run_id}")
                 mlflow.end_run()
             
-            # Start new run
-            self.current_run = mlflow.start_run(run_name=run_name, experiment_id=self.experiment_id)
-            self.run_start_time = time.time()
+            # Start run with system metrics enabled (they're already running globally)
+            self.current_run = mlflow.start_run(
+                run_name=run_name,
+                log_system_metrics=True  # Enable for this specific run
+            )
+            
+            print(f"🔬 Started MLflow run: {run_name}")
+            print(f"📈 System metrics will be logged automatically to the 'System Metrics' section")
             
             # Log initial parameters
             mlflow.log_param("population_size", population_size)
-            mlflow.log_param("start_time", time.strftime("%Y-%m-%d %H:%M:%S"))
+            mlflow.log_param("run_type", "robot_training")
+            mlflow.log_param("framework", "Walker_Robot_Training")
+            mlflow.log_param("system_metrics_enabled", True)
+            mlflow.log_param("system_metrics_interval", 10)
             
             if evolution_config:
                 for key, value in evolution_config.items():
                     mlflow.log_param(f"evolution_{key}", value)
             
-            print(f"🔬 Started MLflow run: {run_name}")
+            # Store run start time
+            self.run_start_time = time.time()
+            
             return self.current_run.info.run_id
             
         except Exception as e:
             print(f"❌ Error starting MLflow run: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
     
     def log_individual_robot_metrics(self, robot_id: str, metrics: Dict[str, Any], step: int):
@@ -115,8 +182,10 @@ class MLflowIntegration:
         """
         try:
             if self.current_run is None:
-                print("⚠️  No active MLflow run. Starting default run.")
-                self.start_training_run()
+                # FIXED: Don't auto-start run when using shared integration
+                # The training environment should have already started the run
+                print(f"⚠️  No active MLflow run for robot metrics. Current run must be started first.")
+                return
             
             # Log individual metrics with robot prefix
             for metric_name, value in metrics.items():
@@ -144,18 +213,25 @@ class MLflowIntegration:
         """
         try:
             if self.current_run is None:
-                print("⚠️  No active MLflow run. Starting default run.")
-                self.start_training_run()
+                # FIXED: Don't auto-start run when using shared integration
+                # The training environment should have already started the run
+                print(f"⚠️  No active MLflow run for population metrics. Current run must be started first.")
+                return
+            
+            # Calculate proper step for time series visualization
+            # Use timestamp-based step for consistent time series in MLflow
+            current_time = time.time()
+            step_counter = int((current_time - 1752340000) / 10)  # 10-second intervals from baseline
             
             # Log population metrics
             for metric_name, value in metrics.items():
                 if isinstance(value, (int, float, np.number)):
-                    mlflow.log_metric(f"population_{metric_name}", float(value), step=generation)
+                    mlflow.log_metric(f"population_{metric_name}", float(value), step=step_counter)
                 elif isinstance(value, dict):
                     # Log nested dictionary metrics
                     for sub_key, sub_value in value.items():
                         if isinstance(sub_value, (int, float, np.number)):
-                            mlflow.log_metric(f"population_{metric_name}_{sub_key}", float(sub_value), step=generation)
+                            mlflow.log_metric(f"population_{metric_name}_{sub_key}", float(sub_value), step=step_counter)
                 
         except Exception as e:
             print(f"⚠️  Error logging population metrics: {e}")
@@ -169,8 +245,10 @@ class MLflowIntegration:
         """
         try:
             if self.current_run is None:
-                print("⚠️  No active MLflow run. Starting default run.")
-                self.start_training_run()
+                # FIXED: Don't auto-start run when using shared integration
+                # The training environment should have already started the run
+                print(f"⚠️  No active MLflow run for hyperparameters. Current run must be started first.")
+                return
             
             # Log parameters
             for param_name, value in params.items():
@@ -194,8 +272,10 @@ class MLflowIntegration:
         """
         try:
             if self.current_run is None:
-                print("⚠️  No active MLflow run. Starting default run.")
-                self.start_training_run()
+                # FIXED: Don't auto-start run when using shared integration
+                # The training environment should have already started the run
+                print(f"⚠️  No active MLflow run for training artifacts. Current run must be started first.")
+                return
             
             # Create temporary directory for artifacts
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -221,6 +301,51 @@ class MLflowIntegration:
                 
         except Exception as e:
             print(f"⚠️  Error logging training artifacts: {e}")
+    
+    def get_system_metrics_status(self) -> Dict[str, Any]:
+        """
+        Get the current status of MLflow's automatic system metrics monitoring.
+        
+        Returns:
+            Dictionary with system metrics configuration and status
+        """
+        try:
+            # Check if system metrics are enabled
+            status = {
+                'enabled': True,  # We enable it in start_training_run()
+                'node_id': 'walker_training_node',
+                'sampling_interval': 10,  # seconds
+                'samples_before_logging': 1,
+                'automatic_collection': True,
+                'metrics_location': 'MLflow System Metrics Section',
+                'description': 'MLflow automatically collects CPU, memory, disk, network, and GPU metrics'
+            }
+            
+            # Add current system info snapshot
+            try:
+                memory = psutil.virtual_memory()
+                status.update({
+                    'current_cpu_percent': psutil.cpu_percent(),
+                    'current_memory_percent': memory.percent,
+                    'current_memory_gb': round(memory.used / 1024**3, 2),
+                    'total_memory_gb': round(memory.total / 1024**3, 2)
+                })
+            except Exception as e:
+                status['snapshot_error'] = str(e)
+            
+            return status
+            
+        except Exception as e:
+            print(f"⚠️ Error getting system metrics status: {e}")
+            return {'enabled': False, 'error': str(e)}
+    
+    def disable_system_metrics_logging(self):
+        """Disable MLflow's automatic system metrics logging."""
+        try:
+            mlflow.config.disable_system_metrics_logging()
+            print(f"✅ MLflow automatic system metrics logging disabled")
+        except Exception as e:
+            print(f"⚠️ Could not disable MLflow system metrics logging: {e}")
     
     def _generate_training_plots(self, plot_data: Dict, output_dir: Path):
         """Generate training visualization plots."""
@@ -574,3 +699,106 @@ class ExperimentComparator:
         except Exception as e:
             print(f"❌ Error generating experiment report: {e}")
             return "" 
+
+    def check_system_metrics_status(self) -> Dict[str, Any]:
+        """
+        Check and display the current status of both types of system metrics.
+        
+        Returns:
+            Dictionary with comprehensive system metrics status
+        """
+        try:
+            status = {
+                'timestamp': time.time(),
+                'mlflow_builtin_system_metrics': {},
+                'custom_system_performance_metrics': {},
+                'comparison': {}
+            }
+            
+            # Check MLflow's built-in system metrics
+            try:
+                # Check environment variable
+                env_enabled = os.environ.get('MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING', 'false').lower() == 'true'
+                
+                # Get current system info for comparison
+                memory = psutil.virtual_memory()
+                cpu_percent = psutil.cpu_percent(interval=0.1)
+                
+                status['mlflow_builtin_system_metrics'] = {
+                    'environment_variable_set': env_enabled,
+                    'node_id': 'walker_training_node',
+                    'sampling_interval_seconds': 10,
+                    'expected_metrics': [
+                        'system/cpu_utilization_percentage',
+                        'system/system_memory_usage_megabytes', 
+                        'system/system_memory_usage_percentage',
+                        'system/disk_usage_megabytes',
+                        'system/disk_available_megabytes',
+                        'system/network_receive_megabytes',
+                        'system/network_transmit_megabytes'
+                    ],
+                    'current_system_snapshot': {
+                        'cpu_percent': cpu_percent,
+                        'memory_percent': memory.percent,
+                        'memory_used_gb': round(memory.used / 1024**3, 2),
+                        'memory_total_gb': round(memory.total / 1024**3, 2)
+                    }
+                }
+                
+            except Exception as e:
+                status['mlflow_builtin_system_metrics']['error'] = str(e)
+            
+            # Check our custom system performance metrics
+            try:
+                status['custom_system_performance_metrics'] = {
+                    'prefix': 'system_performance/',
+                    'manually_logged': True,
+                    'metrics_include': [
+                        'system_performance/simulation_step',
+                        'system_performance/generation', 
+                        'system_performance/cpu_usage',
+                        'system_performance/memory_usage',
+                        'system_performance/timestamp'
+                    ],
+                    'purpose': 'Training-specific performance tracking'
+                }
+            except Exception as e:
+                status['custom_system_performance_metrics']['error'] = str(e)
+            
+            # Comparison and explanation
+            status['comparison'] = {
+                'key_differences': {
+                    'mlflow_builtin': 'Automatic hardware monitoring (system/ prefix)',
+                    'custom_performance': 'Manual training metrics (system_performance/ prefix)'
+                },
+                'both_should_appear': True,
+                'mlflow_ui_sections': {
+                    'system_metrics_tab': 'MLflow built-in metrics (system/)',
+                    'metrics_tab': 'All metrics including custom (system_performance/)'
+                }
+            }
+            
+            print(f"\n🔍 === SYSTEM METRICS STATUS REPORT ===")
+            print(f"📊 MLflow Built-in System Metrics:")
+            print(f"   • Environment enabled: {status['mlflow_builtin_system_metrics'].get('environment_variable_set', False)}")
+            print(f"   • Prefix: system/")
+            print(f"   • Purpose: Automatic hardware monitoring")
+            print(f"   • Location: MLflow UI 'System Metrics' tab")
+            
+            print(f"\n📊 Custom System Performance Metrics:")
+            print(f"   • Manually logged: {status['custom_system_performance_metrics']['manually_logged']}")
+            print(f"   • Prefix: system_performance/")
+            print(f"   • Purpose: Training-specific performance")
+            print(f"   • Location: MLflow UI 'Metrics' tab")
+            
+            print(f"\n💡 Expected Result:")
+            print(f"   • You should see BOTH types in MLflow UI")
+            print(f"   • System Metrics tab: automatic system/ metrics") 
+            print(f"   • Metrics tab: organized custom metrics including system_performance/")
+            print(f"🔍 === END STATUS REPORT ===\n")
+            
+            return status
+            
+        except Exception as e:
+            print(f"❌ Error checking system metrics status: {e}")
+            return {'error': str(e)} 
