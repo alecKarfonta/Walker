@@ -133,16 +133,55 @@ class EvolutionaryCrawlingAgent:
             print(f"🔄 Agent {self.id}: Preserved network from Robot Memory Pool (action_size: {self.action_size})")
     
     def step(self, dt: float):
-        """Step the robot simulation with action persistence."""
+        """Step the robot simulation with action persistence and learning."""
         self.steps += 1
         
-        # Apply current action if still persistent
+        # Initialize action if needed
+        if self.current_action is None:
+            self.previous_state = self.get_state_representation()
+            action_idx = self.choose_action(self.previous_state)
+            self.current_action = action_idx
+            self.current_action_tuple = self.actions[action_idx] if action_idx < len(self.actions) else self.actions[0]
+            self.last_action_time = time.time()
+        
+        # Apply current action
+        if hasattr(self, 'current_action_tuple') and self.current_action_tuple:
+            self.apply_action_to_joints(self.current_action_tuple)
+        
+        # Calculate reward
+        current_x = self.body.position.x if self.body else 0.0
+        prev_x = self.last_positions[-1][0] if self.last_positions else current_x
+        reward = self.get_reward(prev_x)
+        self.total_reward += reward
+        
+        # Check action persistence timing for learning trigger
         current_time = time.time()
-        if (self.current_action is not None and 
-            current_time - self.last_action_time < self.action_persistence_duration):
-            # Continue with current action
-            if hasattr(self, 'current_action_tuple') and self.current_action_tuple:
-                self.apply_action_to_joints(self.current_action_tuple)
+        time_since_action = current_time - self.last_action_time
+        
+        # Only learn when action has persisted long enough
+        if time_since_action >= self.action_persistence_duration:
+            # Store current state for learning
+            current_state = self.get_state_representation()
+            
+            # Learn from the experience of the persistent action
+            if self.previous_state is not None:
+                # Use the existing reward calculation from earlier in the step
+                self.learn_from_experience(
+                    self.previous_state, 
+                    self.current_action,
+                    reward,
+                    current_state,
+                    done=False
+                )
+            
+            # Update state for next learning cycle
+            self.previous_state = current_state
+            self.last_action_time = current_time
+            
+            # Choose new action
+            action_idx = self.choose_action(current_state)
+            self.current_action = action_idx
+            self.current_action_tuple = self.actions[action_idx] if action_idx < len(self.actions) else self.actions[0]
         
         # Update position tracking for reward calculation
         if self.body:
@@ -167,22 +206,67 @@ class EvolutionaryCrawlingAgent:
             
             # Apply action to joints
             self.apply_action_to_joints(action_tuple)
-            self.last_action_time = time.time()
+            # REMOVED: Don't update last_action_time here - it breaks persistence timing!
+            # self.last_action_time = time.time()
             
         except Exception as e:
             print(f"⚠️ Error applying action for agent {self.id}: {e}")
     
     def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
         """Learn from experience using neural network."""
-        # Ensure states are numpy arrays
         if prev_state is None:
             return
         
-        # Skip learning if no learning system assigned (waiting for Learning Manager)
         if self._learning_system is None:
-            return
+            raise RuntimeError(f"Agent {self.id}: No learning system assigned!")
         
+        # Store the experience
         self._learning_system.store_experience(prev_state, action, reward, new_state, done)
+        
+        # Train when we have enough experiences
+        self._maybe_train_network()
+    
+    def _maybe_train_network(self):
+        """Train the neural network when conditions are met."""
+        if (not self._learning_system or 
+            not hasattr(self._learning_system, 'memory') or 
+            not self._learning_system.memory or
+            not hasattr(self._learning_system.memory, 'buffer')):
+            return
+            
+        buffer_size = len(self._learning_system.memory.buffer)
+        
+        # Train when we have enough experiences and haven't trained recently
+        min_buffer_size = 32  # Need at least 32 experiences
+        train_interval = 10   # Train every 10 new experiences
+        
+        if not hasattr(self, '_last_training_buffer_size'):
+            self._last_training_buffer_size = 0
+            
+        experiences_since_training = buffer_size - self._last_training_buffer_size
+        
+        if buffer_size >= min_buffer_size and experiences_since_training >= train_interval:
+            # Train the network
+            training_stats = self._learning_system.learn()
+            self._last_training_buffer_size = buffer_size
+            
+            # Increment training count
+            if not hasattr(self, '_training_count'):
+                self._training_count = 0
+            self._training_count += 1
+            
+            # Only log every 10th training session to reduce spam
+            if self._training_count % 10 == 0:
+                loss = training_stats.get('loss', 0.0) if training_stats else 0.0
+                q_val = training_stats.get('mean_q_value', 0.0) if training_stats else 0.0  # FIXED: Use correct key name
+                epsilon = getattr(self._learning_system, 'epsilon', 0.0)
+                
+                print(f"🧠 Agent {str(self.id)[:8]}: Training #{self._training_count} - Loss: {loss:.4f}, Q-val: {q_val:.3f}, ε: {epsilon:.3f}, Buffer: {buffer_size}")
+            
+            return training_stats
+        
+        return None
+
     
     def get_debug_info(self) -> Dict[str, Any]:
         """Get debug information for the agent."""

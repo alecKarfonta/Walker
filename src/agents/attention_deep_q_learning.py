@@ -366,6 +366,10 @@ class AttentionDeepQLearning:
         self.target_update_freq = 500
         self.steps_done = 0
         
+        # NEW: Training run counter
+        self.training_runs = 0
+        self.last_training_time = 0.0
+        
         # Epsilon cycling to prevent permanent local minima
         self.epsilon_cycle_steps = 10000
         self.epsilon_reset_value = 0.3
@@ -538,13 +542,26 @@ class AttentionDeepQLearning:
         
         self.steps_done += 1
         
+        # NEW: Increment training run counter and update timestamp
+        self.training_runs += 1
+        self.last_training_time = time.time()
+        
+        # Debug Q-values if they're consistently 0
+        mean_q_val = current_q_values.mean().item()
+        if abs(mean_q_val) < 1e-6 and self.training_runs % 50 == 0:
+            print(f"⚠️ DEBUG: Q-values near zero! mean_q={mean_q_val:.6f}, network_weights_sum={sum(p.data.sum().item() for p in self.q_network.parameters()):.6f}")
+            print(f"   Sample Q-values: {current_q_values[:3].flatten().detach().cpu().numpy()}")
+            print(f"   Sample rewards: {rewards[:3].detach().cpu().numpy()}")
+            print(f"   Sample states: {states[0][:5].detach().cpu().numpy()}")
+        
         return {
             'loss': loss.item(),
-            'mean_q_value': current_q_values.mean().item(),
+            'mean_q_value': mean_q_val,
             'attention_entropy': self._calculate_attention_entropy(current_attention['attention_weights']),
             'epsilon': self.epsilon,
             'beta': self.beta if isinstance(self.memory, PrioritizedReplayBuffer) else 0.0,
-            'mean_td_error': torch.abs(td_errors).mean().item()
+            'mean_td_error': torch.abs(td_errors).mean().item(),
+            'training_runs': self.training_runs  # NEW: Include training run count in return stats
         }
     
     def _calculate_attention_entropy(self, attention_weights):
