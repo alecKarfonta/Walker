@@ -1099,7 +1099,8 @@ class EnhancedEvolutionEngine:
             # Get safe spawn position to avoid overlaps
             position = self._get_safe_spawn_position(position_index=i)
             
-            agent = CrawlingAgent(
+            from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+            agent = EvolutionaryCrawlingAgent(
                 world=self.world,
                 agent_id=i,
                 position=position,
@@ -1438,7 +1439,8 @@ class EnhancedEvolutionEngine:
         # Get safe spawn position (improved from original problematic logic)
         position = self._get_safe_spawn_position(position_index)
         
-        return CrawlingAgent(
+        from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
+        return EvolutionaryCrawlingAgent(
             world=self.world,
             agent_id=None,  # Let agent generate its own UUID
             position=position,

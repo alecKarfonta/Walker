@@ -162,6 +162,11 @@ class CrawlingAgent(BaseAgent):
         Any dimension mismatch will cause "expected sequence of length X (got Y)" errors.
         """
         try:
+            # CRITICAL: Check if network is already assigned by Robot Memory Pool
+            if hasattr(self, '_learning_system') and self._learning_system is not None:
+                print(f"🧠 Agent {self.id}: Using pre-assigned network from Robot Memory Pool")
+                return
+            
             # Import here to avoid circular imports
             from .attention_deep_q_learning import AttentionDeepQLearning
             
@@ -664,6 +669,7 @@ class CrawlingAgent(BaseAgent):
         if prev_state is None:
             return
         
+        
         self._learning_system.store_experience(prev_state, action, reward, new_state, done)
         
         # Train every 38 steps (increased by 25% from 30 steps for better performance)
@@ -814,13 +820,13 @@ class CrawlingAgent(BaseAgent):
             total_reward += velocity_reward
         elif abs(self.body.linearVelocity.x) < 0.01:
             # 🚫 MUCH STRONGER PENALTY FOR STANDING STILL: Prevent exploitation
-            total_reward -= 0.02  # Increased from -0.005 to -0.02 (4x stronger)
+            total_reward -= 0.05  # INCREASED: from -0.02 to -0.05 (stronger penalty)
         
         # NEW: Additional inactivity penalty based on recent movement history
         if hasattr(self, 'recent_displacements') and len(self.recent_displacements) >= 5:
             recent_avg_movement = sum(abs(d) for d in self.recent_displacements[-5:]) / 5
             if recent_avg_movement < 0.001:  # Very little movement in last 5 steps
-                total_reward -= 0.015  # Strong penalty for sustained inactivity
+                total_reward -= 0.03  # INCREASED: from -0.015 to -0.03 (stronger sustained inactivity penalty)
         
         # NEW: Efficiency reward - penalize excessive joint movement
         if hasattr(self, 'upper_arm_joint') and hasattr(self, 'lower_arm_joint'):

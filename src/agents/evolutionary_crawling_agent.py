@@ -1,6 +1,7 @@
 """
 Evolutionary Crawling Agent with Attention-based Deep Q-Learning.
 Clean, modern architecture focused on attention-based neural networks.
+STANDALONE - No inheritance from CrawlingAgent.
 """
 
 import numpy as np
@@ -11,14 +12,14 @@ import random
 import uuid
 import time
 
-from .crawling_agent import CrawlingAgent  
 from .physical_parameters import PhysicalParameters
 
 
-class EvolutionaryCrawlingAgent(CrawlingAgent):
+class EvolutionaryCrawlingAgent:
     """
     Enhanced CrawlingCrate agent with evolvable physical parameters.
     Uses ONLY attention-based deep Q-learning for optimal performance.
+    STANDALONE - No inheritance from CrawlingAgent.
     """
     
     def __init__(self, 
@@ -33,6 +34,13 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
         """
         Initialize evolutionary crawling agent with attention-based learning ONLY.
         """
+        # Store basic attributes
+        self.world = world
+        self.initial_position = position
+        self.category_bits = category_bits
+        self.mask_bits = mask_bits
+        self.learning_approach = "attention_deep_q_learning"
+        
         # Initialize physical parameters first
         if physical_params is None:
             self.physical_params = PhysicalParameters.random_parameters()
@@ -56,31 +64,39 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
         total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
         temp_actions = self._generate_dynamic_action_space_static(total_joints)
         
-        # Set required attributes before calling parent constructor
+        # Set required attributes for neural network compatibility
         self.temp_action_size = len(temp_actions)
-        # FIXED: Use standardized 19D state size for neural network compatibility
-        # ALL agents must use 19D states to match the neural network architecture
-        self.state_size = 19  # Fixed size for neural network consistency
+        # FIXED: Use standardized 29D state size for neural network compatibility
+        # ALL agents must use 29D states to match the neural network architecture
+        self.state_size = 29  # Fixed size for neural network consistency
         
-        # FORCE attention deep Q-learning - no other options
-        self.learning_approach = "attention_deep_q_learning"
+        # Initialize basic robot attributes
+        self.steps = 0
+        self.total_reward = 0.0
+        self.current_action = None
+        self.current_action_tuple = None
+        self.last_action_time = 0.0
+        self.action_persistence_duration = 0.1  # Default, will be overridden
         
-        # Initialize parent class with attention learning
-        super().__init__(
-            world=world,
-            agent_id=self.id,  # Keep as string
-            position=position,
-            category_bits=category_bits,
-            mask_bits=mask_bits,
-            learning_approach="attention_deep_q_learning"  # Force attention learning
-        )
+        # Initialize body parts (will be created later)
+        self.body = None
+        self.limb_joints = []
+        self.limb_segments = []
+        self.wheels = []
         
-        # Override physical properties with evolved parameters
+        # Initialize learning system (will be assigned by Learning Manager)
+        self._learning_system = None
+        
+        # Initialize reward tracking
+        self.previous_state = None
+        self.previous_action = None
+        self.last_positions = []
+        
+        # Motor parameters
         self.motor_torque = self.physical_params.motor_torque
         self.motor_speed = self.physical_params.motor_speed
         
-        # Recreate body parts with evolved parameters
-        self._destroy_existing_body()
+        # Create body parts with evolved parameters
         self._create_evolutionary_body()
         self._create_evolutionary_arms()
         self._create_evolutionary_wheels()
@@ -100,16 +116,209 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
         if hasattr(self, 'temp_action_size'):
             delattr(self, 'temp_action_size')
         
-        # DON'T initialize learning during __init__ - will be assigned by Learning Manager later
+        # Initialize learning system (will be assigned by Learning Manager later)
         self._learning_system = None
         
         # MORPHOLOGY-AWARE ACTION PERSISTENCE: Complex robots need more time per action
         self._set_morphology_aware_timing()
         
+        # UI COMPATIBILITY: Ensure limb references are set for UI rendering
+        self._ensure_limb_references()
+        
+        # CRITICAL FIX: Initialize learning system (was missing!)
+        # BUT ONLY if no network was preserved from Robot Memory Pool
+        if not hasattr(self, '_learning_system') or self._learning_system is None:
+            self._initialize_learning_system()
+        else:
+            print(f"🔄 Agent {self.id}: Preserved network from Robot Memory Pool (action_size: {self.action_size})")
+    
+    def step(self, dt: float):
+        """Step the robot simulation with action persistence."""
+        self.steps += 1
+        
+        # Apply current action if still persistent
+        current_time = time.time()
+        if (self.current_action is not None and 
+            current_time - self.last_action_time < self.action_persistence_duration):
+            # Continue with current action
+            if hasattr(self, 'current_action_tuple') and self.current_action_tuple:
+                self.apply_action_to_joints(self.current_action_tuple)
+        
+        # Update position tracking for reward calculation
+        if self.body:
+            self.last_positions.append((self.body.position.x, self.body.position.y))
+            if len(self.last_positions) > 10:  # Keep last 10 positions
+                self.last_positions.pop(0)
+    
+    def apply_action(self, action: Union[int, Tuple[float, float]]):
+        """Apply action to evolved joint configuration."""
+        try:
+            # Convert action index to action tuple if needed
+            if isinstance(action, int):
+                if 0 <= action < len(self.actions):
+                    action_tuple = self.actions[action]
+                    self.current_action = action
+                    self.current_action_tuple = action_tuple
+                else:
+                    return  # Invalid action index
+            else:
+                action_tuple = action
+                self.current_action_tuple = action_tuple
+            
+            # Apply action to joints
+            self.apply_action_to_joints(action_tuple)
+            self.last_action_time = time.time()
+            
+        except Exception as e:
+            print(f"⚠️ Error applying action for agent {self.id}: {e}")
+    
+    def learn_from_experience(self, prev_state, action, reward, new_state, done=False):
+        """Learn from experience using neural network."""
+        # Ensure states are numpy arrays
+        if prev_state is None:
+            return
+        
+        # Skip learning if no learning system assigned (waiting for Learning Manager)
+        if self._learning_system is None:
+            return
+        
+        self._learning_system.store_experience(prev_state, action, reward, new_state, done)
+    
+    def get_debug_info(self) -> Dict[str, Any]:
+        """Get debug information for the agent."""
+        return {
+            'id': self.id,
+            'generation': self.generation,
+            'steps': self.steps,
+            'total_reward': self.total_reward,
+            'num_arms': self.physical_params.num_arms,
+            'segments_per_limb': self.physical_params.segments_per_limb,
+            'learning_system_assigned': self._learning_system is not None,
+            # UI COMPATIBILITY: Add missing fields that the UI expects
+            'agent_id': self.id,  # UI expects 'agent_id' field
+            'position': (self.body.position.x, self.body.position.y) if self.body else (0, 0),
+            'velocity': (self.body.linearVelocity.x, self.body.linearVelocity.y) if self.body else (0, 0),
+            'body_angle': self.body.angle if self.body else 0,
+            'current_action': getattr(self, 'current_action_tuple', None),
+            'num_limbs': self.physical_params.num_arms,
+            'state_size': self.state_size,
+            'action_size': self.action_size,
+            'learning_approach': self.learning_approach,
+        }
+
+    # UI COMPATIBILITY: Add backward compatibility methods that the UI and other systems expect
+    def get_state(self):
+        """Backward compatibility - return state as list for UI systems."""
+        if self.body and hasattr(self, 'upper_arm') and hasattr(self, 'lower_arm'):
+            return [
+                self.body.position.x, self.body.position.y,
+                self.body.linearVelocity.x, self.body.linearVelocity.y,
+                self.body.angle, 
+                self.upper_arm.angle if self.upper_arm else 0, 
+                self.lower_arm.angle if self.lower_arm else 0
+            ]
+        return [0.0] * 7
+
+    def take_action(self, action):
+        """Backward compatibility for UI systems."""
+        if isinstance(action, (list, tuple)) and len(action) >= 2:
+            self.apply_action((float(action[0]), float(action[1])))
+        elif isinstance(action, int):
+            self.apply_action(action)
+
+    def get_reward(self, prev_x: float) -> float:
+        """Backward compatibility for UI systems."""
+        # Simple reward calculation for UI display
+        if self.body:
+            current_x = self.body.position.x
+            return current_x - prev_x
+        return 0.0
+
+    def update(self, delta_time: float):
+        """Backward compatibility for UI systems."""
+        self.step(delta_time)
+
+    def get_fitness(self) -> float:
+        """Get fitness score for evolution and UI display."""
+        return self.get_evolutionary_fitness()
+
+    def reset(self):
+        """Reset agent for new episode while preserving learning."""
+        self.reset_position()
+        
+        # Reset state tracking
+        self.current_action = None
+        self.current_action_tuple = None
+        self.total_reward = 0.0
+        self.steps = 0
+        
+        # Reset timing
+        self.last_action_time = 0.0
+        
+        # Reset tracking
+        self.last_positions = []
+
+    def reset_position(self):
+        """Reset physical position while preserving learning state."""
+        try:
+            if not self.body:
+                return
+                
+            # Reset main body
+            self.body.position = self.initial_position
+            self.body.angle = 0
+            self.body.linearVelocity = (0, 0)
+            self.body.angularVelocity = 0
+            self.body.awake = True
+            
+            # Reset limb segments
+            if hasattr(self, 'limbs') and self.limbs:
+                for limb_segments in self.limbs:
+                    for segment in limb_segments:
+                        if segment:
+                            segment.linearVelocity = (0, 0)
+                            segment.angularVelocity = 0
+                            segment.awake = True
+            
+            # Reset wheels
+            if hasattr(self, 'wheels') and self.wheels:
+                for wheel in self.wheels:
+                    if wheel:
+                        wheel.linearVelocity = (0, 0)
+                        wheel.angularVelocity = 0
+                        wheel.awake = True
+            
+        except Exception as e:
+            print(f"⚠️ Error resetting position for agent {self.id}: {e}")
+
+    # UI COMPATIBILITY: Ensure limb references are properly set for UI rendering
+    def _ensure_limb_references(self):
+        """Ensure upper_arm and lower_arm references are set for UI compatibility."""
+        if not hasattr(self, 'upper_arm') or not hasattr(self, 'lower_arm'):
+            # Set references for UI compatibility
+            self.upper_arm = self.upper_arms[0] if hasattr(self, 'upper_arms') and self.upper_arms else None
+            self.lower_arm = self.lower_arms[0] if hasattr(self, 'lower_arms') and self.lower_arms else None
+            
+            # Set joint references for UI compatibility
+            if hasattr(self, 'limb_joints') and self.limb_joints and len(self.limb_joints) > 0:
+                first_limb_joints = self.limb_joints[0]
+                if not hasattr(self, 'upper_arm_joint'):
+                    self.upper_arm_joint = first_limb_joints[0] if len(first_limb_joints) >= 1 else None
+                if not hasattr(self, 'lower_arm_joint'):
+                    self.lower_arm_joint = first_limb_joints[1] if len(first_limb_joints) >= 2 else None
+
+    def _initialize_learning_system(self):
+        """Initialize learning system by getting network from Learning Manager."""
+        # Initialize as None first
+        self._learning_system = None
+        print(f"⏳ Agent {self.id}: Deferring network creation to Learning Manager")
+        
         # MULTI-ACTION SYSTEM: Very complex robots can execute multiple actions per step
         self._set_multi_action_capability()
         
-        print(f"🧠 Created agent {self.id} with {self.physical_params.num_arms} limbs, {self.physical_params.segments_per_limb} segments each (learning will be assigned later)")
+        self._initialize_attention_learning()
+
+        print(f"🧠 Created agent {self.id} with {self.physical_params.num_arms} limbs, {self.physical_params.segments_per_limb} segments each")
 
     def _set_morphology_aware_timing(self):
         """Set action persistence duration based on robot complexity."""
@@ -163,36 +372,28 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
 
     def _initialize_attention_learning(self):
         """Initialize ONLY attention-based deep Q-learning via Learning Manager."""
-        try:
-            # CRITICAL: Never create networks directly - ONLY get from Learning Manager
-            # This prevents the constant GPU network recreation that's killing performance
-            from .learning_manager import LearningManager
-            
-            # Try to get learning manager instance from training environment
-            learning_manager = None
-            if hasattr(self, 'world') and hasattr(self.world, '_training_env'):
-                learning_manager = getattr(self.world._training_env, 'learning_manager', None)
-            
-            if learning_manager:
-                # Use Learning Manager's pooling system - this is the ONLY way to get networks
-                self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
-                if self._learning_system:
-                    print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
-                    return
-                else:
-                    print(f"❌ Agent {self.id}: Learning Manager failed to provide network")
-            else:
-                print(f"❌ Agent {self.id}: No Learning Manager available - agent will have no learning")
-            
-            # CRITICAL: NO FALLBACK NETWORK CREATION - this was the performance killer
-            # If Learning Manager can't provide a network, agent just won't learn
-            # This is better than constant GPU thrashing
-            self._learning_system = None
-            print(f"⚠️ Agent {self.id}: No learning system - will use random actions")
-            
-        except Exception as e:
-            print(f"❌ Error getting learning system for agent {self.id}: {e}")
-            self._learning_system = None
+        # CRITICAL: Check if network is already assigned by Robot Memory Pool
+        if hasattr(self, '_learning_system') and self._learning_system is not None:
+            print(f"🧠 Agent {self.id}: Using pre-assigned network from Robot Memory Pool")
+            return
+        
+        # CRITICAL: Learning Manager is REQUIRED - no fallback patterns
+        from .learning_manager import LearningManager
+        
+        # Get learning manager instance from training environment
+        if not hasattr(self, 'world') or not hasattr(self.world, '_training_env'):
+            raise RuntimeError(f"Agent {self.id}: No training environment available for Learning Manager access")
+        
+        learning_manager = getattr(self.world._training_env, 'learning_manager', None)
+        if not learning_manager:
+            raise RuntimeError(f"Agent {self.id}: Learning Manager is required but not available in training environment")
+        
+        # Use Learning Manager's pooling system - this is the ONLY way to get networks
+        self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
+        if not self._learning_system:
+            raise RuntimeError(f"Agent {self.id}: Learning Manager failed to provide network - cannot proceed without learning system")
+        
+        print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
 
     @property 
     def q_table(self):
@@ -278,18 +479,18 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
 
     def get_state_representation(self) -> np.ndarray:
         """
-        FIXED: Use standardized 19-dimensional state representation for neural network compatibility.
+        FIXED: Use standardized 29-dimensional state representation for neural network compatibility.
         
         This ensures ALL agents (evolutionary and standard) use the same state format
         to prevent neural network dimension mismatch errors.
         """
         try:
-            # FIXED: Always return 19 dimensions for neural network compatibility
-            state_array = np.zeros(19, dtype=np.float32)
+            # FIXED: Always return 29 dimensions for neural network compatibility
+            state_array = np.zeros(29, dtype=np.float32)
             
             # DEBUG: Minimal state generation confirmation (only once per agent)
             if not hasattr(self, '_state_gen_confirmed'):
-                print(f"✅ Agent {str(self.id)[:8]}: Using 19D evolutionary state representation")
+                print(f"✅ Agent {str(self.id)[:8]}: Using 29D evolutionary state representation")
                 self._state_gen_confirmed = True
             
             # 1. Joint angles and velocities (4 values) - Use primary joints
@@ -345,6 +546,16 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
                 state_array[17] = self.current_action_tuple[0] if len(self.current_action_tuple) > 0 else 0.0
                 state_array[18] = self.current_action_tuple[1] if len(self.current_action_tuple) > 1 else 0.0
             
+            # 6. Ray sensing data (10 values: 5 rays × 2 values each)
+            # Indices 19-28 for distance and object type of each ray
+            for i in range(5):  # 5 rays
+                distance_idx = 19 + (i * 2)      # Indices 19, 21, 23, 25, 27
+                object_type_idx = 19 + (i * 2) + 1  # Indices 20, 22, 24, 26, 28
+                
+                # Placeholder ray data (TODO: implement actual ray casting)
+                state_array[distance_idx] = 1.0      # Normalized max distance (no obstacle)
+                state_array[object_type_idx] = 0.0   # Clear path
+            
             # Ensure no NaN values
             state_array = np.nan_to_num(state_array, nan=0.0, posinf=1.0, neginf=-1.0)
             
@@ -352,13 +563,16 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
                 
         except Exception as e:
             print(f"⚠️ Error getting evolutionary state for agent {self.id}: {e}")
-            # Safe fallback: return zero-filled 19-dimensional state
-            return np.zeros(19, dtype=np.float32)
+            # Safe fallback: return zero-filled 29-dimensional state
+            return np.zeros(29, dtype=np.float32)
 
-    def choose_action(self) -> int:
+    def choose_action(self, state: Optional[np.ndarray] = None) -> int:
         """Choose action using attention-based learning system."""
         try:
-            state = self.get_state_representation()
+            # Use provided state or get current state
+            if state is None:
+                state = self.get_state_representation()
+            
             if self._learning_system:
                 action = self._learning_system.choose_action(state)
                 return max(0, min(action, len(self.actions) - 1))
@@ -369,36 +583,7 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
             print(f"❌ Error choosing evolutionary action for agent {self.id}: {e}")
             return random.randint(0, len(self.actions) - 1)
 
-    def apply_action(self, action: Tuple[float, float]):
-        """Apply action to evolved joint configuration."""
-        try:
-            if hasattr(self, 'limb_joints') and self.limb_joints:
-                # CRITICAL FIX: Multi-limb robots need to use their dynamic action space
-                # Convert action index to proper joint action tuple for multi-limb robots
-                if isinstance(action, tuple) and len(action) == 2:
-                    # This is a basic 2-joint action from parent class - need to map to multi-limb
-                    if hasattr(self, 'current_action') and self.current_action is not None:
-                        # Use the current action index to get the proper multi-limb action
-                        if 0 <= self.current_action < len(self.actions):
-                            multi_limb_action = self.actions[self.current_action]
-                            self.apply_action_to_joints(multi_limb_action)
-                        else:
-                            # Fallback: apply action to first 2 joints only
-                            self.apply_action_to_joints(action)
-                    else:
-                        # Fallback: apply action to first 2 joints only
-                        self.apply_action_to_joints(action)
-                else:
-                    # Already a proper multi-joint action tuple
-                    self.apply_action_to_joints(action)
-            else:
-                # Fallback to basic joint control
-                super().apply_action(action)
-                
-        except Exception as e:
-            print(f"⚠️ Error applying action for agent {self.id}: {e}")
-            # Fallback to parent class method
-            super().apply_action(action)
+
 
     def get_evolutionary_fitness(self) -> float:
         """Calculate comprehensive fitness including morphological efficiency and coordination."""
@@ -558,26 +743,7 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
         clone.mutation_count = self.mutation_count + 1
         return clone
 
-    def get_debug_info(self) -> Dict[str, Any]:
-        """Get comprehensive debug information."""
-        debug = super().get_debug_info()
-        
-        debug.update({
-            'generation': self.generation,
-            'parent_lineage': self.parent_lineage,
-            'mutation_count': self.mutation_count,
-            'crossover_count': self.crossover_count,
-            'evolutionary_fitness': self.get_evolutionary_fitness(),
-            
-            # Physical parameter summary
-            'body_dimensions': f"{self.physical_params.body_width:.2f}x{self.physical_params.body_height:.2f}",
-            'limb_config': f"{self.physical_params.num_arms} arms, {self.physical_params.segments_per_limb} segments",
-            'motor_config': f"torque={self.physical_params.motor_torque:.0f}, speed={self.physical_params.motor_speed:.1f}",
-            'action_space_size': len(self.actions),
-            'total_joints': self.physical_params.num_arms * self.physical_params.segments_per_limb,
-        })
-        
-        return debug
+
 
     # Keep all the existing evolutionary body creation methods
     # (These are preserved from the original implementation)
@@ -1001,14 +1167,7 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
         
         return actions
         
-    def step(self, dt: float):
-        """Enhanced step function with multi-action capability for complex robots."""
-        # For very complex robots, execute multiple actions per step
-        if hasattr(self, 'actions_per_step') and self.actions_per_step > 1:
-            for _ in range(self.actions_per_step):
-                super().step(dt)  # Execute parent step multiple times
-        else:
-            super().step(dt)  # Standard single step
+
         
     def destroy(self):
         """Clean up physics bodies safely."""
@@ -1057,7 +1216,7 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
         """Calculate advanced coordination reward for multi-limb robots."""
         try:
             if not hasattr(self, 'limb_joints') or not self.limb_joints:
-                return super()._get_coordination_reward()  # Fall back to basic coordination
+                return 0.0  # No coordination reward without joints
             
             total_coordination_reward = 0.0
             total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
@@ -1169,8 +1328,8 @@ class EvolutionaryCrawlingAgent(CrawlingAgent):
                     efficiency_reward = min(0.08, efficiency * 0.05 * complexity_factor)
                     return efficiency_reward
             
-            # Fallback to parent class method
-            return super()._get_energy_efficiency_reward(displacement)
+            # Simple fallback calculation
+            return min(0.05, displacement * 0.01)
             
         except Exception as e:
-            return super()._get_energy_efficiency_reward(displacement) 
+            return 0.0 
