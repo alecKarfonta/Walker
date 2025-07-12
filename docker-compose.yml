@@ -12,12 +12,13 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - PYTHONPATH=/app
-      - MLFLOW_TRACKING_URI=http://walker-mlflow:5000
+      - MLFLOW_TRACKING_URI=postgresql://walker_user:walker_secure_2024@walker-postgres:5432/mlflow_db
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_metrics
       - GRAFANA_URL=http://walker-grafana:3000
     ports:
       - "7777:8080"  # Web interface
       - "2322:2322"  # Dashboard exporter API
+      - "5001:5000"  # MLflow UI for training data
     deploy:
       resources:
         reservations:
@@ -31,6 +32,7 @@ services:
       - ./mlruns:/app/mlruns
       - walker-data:/app/data
     depends_on:
+      - walker-postgres
       - walker-mlflow
       - walker-prometheus
     networks:
@@ -44,7 +46,9 @@ services:
 
   # MLflow Tracking Server
   walker-mlflow:
-    image: ghcr.io/mlflow/mlflow:latest
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
     container_name: walker-mlflow
     hostname: walker-mlflow
     ports:
@@ -53,15 +57,17 @@ services:
       - mlflow-data:/mlflow
       - ./mlruns:/mlruns
     environment:
-      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow/mlflow.db
+      - MLFLOW_BACKEND_STORE_URI=postgresql://walker_user:walker_secure_2024@walker-postgres:5432/mlflow_db
       - MLFLOW_DEFAULT_ARTIFACT_ROOT=/mlflow/artifacts
     command: >
       mlflow server 
-        --backend-store-uri sqlite:///mlflow/mlflow.db 
+        --backend-store-uri postgresql://walker_user:walker_secure_2024@walker-postgres:5432/mlflow_db 
         --default-artifact-root /mlflow/artifacts 
         --host 0.0.0.0 
         --port 5000 
         --serve-artifacts
+    depends_on:
+      - walker-postgres
     networks:
       - walker-network
     restart: unless-stopped
