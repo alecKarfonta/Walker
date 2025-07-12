@@ -2971,7 +2971,6 @@ class TrainingEnvironment:
                             population_size=self.num_agents,
                             evolution_config=evolution_config
                         )
-                        print(f"🔬 Started MLflow run: {session_name}")
                     
                     # Initialize metrics collector (MLflow already established)
                     if self.metrics_collector:

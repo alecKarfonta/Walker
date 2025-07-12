@@ -127,7 +127,8 @@ class MetricsCollector:
                              population_size: int = 30,
                              evolution_config: Optional[Dict] = None):
         """
-        Start a new training session with evaluation tracking.
+        Prepare the metrics collector for a new training session.
+        Note: MLflow run should be started by the TrainingEnvironment, not here.
         
         Args:
             session_name: Name for the training session
@@ -135,20 +136,23 @@ class MetricsCollector:
             evolution_config: Evolution configuration parameters
         """
         try:
-            if self.enable_mlflow and self.mlflow_integration:
-                run_id = self.mlflow_integration.start_training_run(
-                    run_name=session_name,
-                    population_size=population_size,
-                    evolution_config=evolution_config
-                )
-                print(f"📊 Started MLflow tracking for session: {session_name}")
-                return run_id
+            # FIXED: Don't start MLflow run here - TrainingEnvironment handles that
+            # This prevents duplicate run creation
             
-            print(f"📊 Started evaluation tracking for session: {session_name}")
+            if self.enable_mlflow and self.mlflow_integration:
+                # Just verify that there's an active run
+                if hasattr(self.mlflow_integration, 'current_run') and self.mlflow_integration.current_run:
+                    run_id = self.mlflow_integration.current_run.info.run_id
+                    print(f"📊 Metrics collector connected to MLflow run: {run_id}")
+                    return run_id
+                else:
+                    print(f"⚠️  No active MLflow run found. TrainingEnvironment should start the run first.")
+            
+            print(f"📊 Metrics collector ready for session: {session_name}")
             return None
             
         except Exception as e:
-            print(f"⚠️  Error starting training session: {e}")
+            print(f"⚠️  Error preparing training session: {e}")
             return None
     
     def collect_metrics_async(self,
@@ -437,7 +441,7 @@ class MetricsCollector:
                 for metric_name, value in all_metrics.items():
                     if isinstance(value, (int, float, np.number)) and not np.isnan(float(value)):
                         # Use the existing MLflow integration method for proper logging
-                        self.mlflow_integration.log_population_metrics(metrics.generation, {metric_name.split('/')[-1]: value})
+                        self.mlflow_integration.log_population_metrics(metrics.generation, {metric_name.split('/')[-1]: value}, metrics.step_count)
             
             # Print success message with organized sections count
             section_counts = {
@@ -477,24 +481,70 @@ class MetricsCollector:
                     learning_system = agent._learning_system
                     
                     # Get loss history from the agent if available
+                    loss_found = False
+                    
+                    # Method 1: Check agent's loss history (from training stats)
                     if hasattr(agent, '_loss_history') and agent._loss_history:
                         current_loss = agent._loss_history[-1] if agent._loss_history else 0.0
                         loss_metrics['network_loss'] = float(current_loss)
+                        loss_found = True
                         
                         # Calculate moving average loss for smoother visualization
                         if len(agent._loss_history) >= 5:
                             recent_losses = agent._loss_history[-5:]
                             loss_metrics['network_loss_avg_5'] = float(sum(recent_losses) / len(recent_losses))
                     
+                    # Method 2: Check learning system's loss history if agent history is empty
+                    if not loss_found and hasattr(learning_system, '_loss_history') and learning_system._loss_history:
+                        current_loss = learning_system._loss_history[-1] if learning_system._loss_history else 0.0
+                        loss_metrics['network_loss'] = float(current_loss)
+                        loss_found = True
+                        
+                        # Calculate moving average loss for smoother visualization
+                        if len(learning_system._loss_history) >= 5:
+                            recent_losses = learning_system._loss_history[-5:]
+                            loss_metrics['network_loss_avg_5'] = float(sum(recent_losses) / len(recent_losses))
+                    
+                    # Method 3: Default to 0.0 if no loss found (early training)
+                    if not loss_found:
+                        loss_metrics['network_loss'] = 0.0
+                    
                     # Get Q-value history if available
+                    q_value_found = False
+                    
+                    # Method 1: Check agent's Q-value history (from training stats)
                     if hasattr(agent, '_qval_history') and agent._qval_history:
                         current_qval = agent._qval_history[-1] if agent._qval_history else 0.0
                         loss_metrics['network_mean_q_value'] = float(current_qval)
+                        q_value_found = True
                         
                         # Calculate moving average Q-value
                         if len(agent._qval_history) >= 5:
                             recent_qvals = agent._qval_history[-5:]
                             loss_metrics['network_mean_q_value_avg_5'] = float(sum(recent_qvals) / len(recent_qvals))
+                    
+                    # Method 2: Get Q-values directly from the learning system if agent history is empty
+                    if not q_value_found and hasattr(learning_system, 'q_network'):
+                        try:
+                            # Get a sample Q-value from the current state
+                            current_state = agent.get_state_representation() if hasattr(agent, 'get_state_representation') else None
+                            if current_state is not None and len(current_state) == 29:  # Correct state size
+                                import torch
+                                learning_system.q_network.eval()
+                                with torch.no_grad():
+                                    state_tensor = torch.FloatTensor(current_state).unsqueeze(0).to(learning_system.device)
+                                    q_values, _ = learning_system.q_network(state_tensor)
+                                    current_qval = float(q_values.mean().item())
+                                    loss_metrics['network_mean_q_value'] = current_qval
+                                    q_value_found = True
+                                learning_system.q_network.train()
+                        except Exception as e:
+                            # If direct Q-value extraction fails, continue without Q-values
+                            pass
+                    
+                    # Method 3: Default to 0.0 if no Q-values found (early training)
+                    if not q_value_found:
+                        loss_metrics['network_mean_q_value'] = 0.0
                     
                     # Get epsilon value for exploration tracking
                     if hasattr(learning_system, 'epsilon'):
@@ -1017,124 +1067,122 @@ class MetricsCollector:
                     # Create minimal comprehensive metrics for MLflow logging
                     if self.enable_mlflow and self.mlflow_integration:
                         try:
-                            # CRITICAL FIX: Ensure we're using the correct MLflow run context in this thread
-                            # MLflow uses thread-local storage, so we need to explicitly set the context
+                            # CRITICAL FIX: Use the same run ID as the main thread to consolidate all metrics
+                            # MLflow uses thread-local storage, so we need to explicitly continue the existing run
                             if hasattr(self.mlflow_integration, 'current_run') and self.mlflow_integration.current_run:
                                 # Get the run ID from the main thread's MLflow integration
                                 main_thread_run_id = self.mlflow_integration.current_run.info.run_id
                                 
-                                # Use MLflow context manager to ensure we're logging to the correct run
-                                import mlflow
-                                with mlflow.start_run(run_id=main_thread_run_id):
-                                    # Calculate proper step for time series visualization
-                                    # Use timestamp-based step for proper time series in MLflow
-                                    step_counter = int((data['timestamp'] - 1752340000) / 10)  # 10-second intervals from baseline
+                                                                # FIXED: Don't start a new run context - use MLflow integration methods instead
+                                # This prevents the "Run already active" error and ensures all metrics go to the same run
+                                
+                                # The step count will be passed directly to the MLflow integration method
+                                
+                                # Capture individual agent loss/training data
+                                individual_losses = self._capture_loss_from_snapshots(agents_snapshot)
+                                
+                                # NEW: Calculate population-level training statistics
+                                population_training_stats = self._calculate_population_training_stats(individual_losses)
+                                
+                                # Log basic population metrics with organized sections
+                                population_data = {
+                                    'generation': data['generation'],
+                                    'step_count': data['step_count'],
+                                }
+                                
+                                # SECTION 1: POPULATION HEALTH & FITNESS
+                                fitness_metrics = {
+                                    'population_health/avg_fitness': data['population_stats'].get('average_fitness', 0.0),
+                                    'population_health/best_fitness': data['population_stats'].get('best_fitness', 0.0),
+                                    'population_health/worst_fitness': data['population_stats'].get('worst_fitness', 0.0),
+                                    'population_health/fitness_variance': data['population_stats'].get('fitness_variance', 0.0),
+                                    'population_health/population_size': len(agents_snapshot),
+                                    'population_health/diversity_score': data['population_stats'].get('diversity', 0.0),
+                                }
+                                
+                                # SECTION 2: LEARNING PROGRESS & TRAINING
+                                training_metrics = {}
+                                if population_training_stats:
+                                    training_metrics.update({
+                                        'learning_progress/total_training_runs': population_training_stats.get('total_training_runs', 0),
+                                        'learning_progress/avg_training_runs_per_agent': population_training_stats.get('avg_training_runs_per_agent', 0.0),
+                                        'learning_progress/agents_actively_training': population_training_stats.get('total_agents_with_training', 0),
+                                        'learning_progress/training_frequency_hz': population_training_stats.get('avg_training_frequency', 0.0),
+                                        'learning_progress/experience_buffer_total': population_training_stats.get('total_experience_buffer_size', 0),
+                                    })
+                                
+                                # NEW: EXPERIENCE BUFFER MONITORING - Track when training should occur
+                                buffer_metrics = {}
+                                if individual_losses:
+                                    all_buffer_sizes = [loss_metrics.get('network_experience_buffer_size', 0) for loss_metrics in individual_losses.values()]
+                                    if all_buffer_sizes:
+                                        training_threshold = 32  # Minimum experiences needed to start training
+                                        max_buffer_capacity = 2000  # Typical buffer capacity
+                                        
+                                        agents_ready_for_training = len([size for size in all_buffer_sizes if size >= training_threshold])
+                                        agents_with_full_buffers = len([size for size in all_buffer_sizes if size >= max_buffer_capacity * 0.8])
+                                        
+                                        buffer_metrics.update({
+                                            'learning_progress/buffer_avg_size': sum(all_buffer_sizes) / len(all_buffer_sizes),
+                                            'learning_progress/buffer_max_size': max(all_buffer_sizes),
+                                            'learning_progress/buffer_min_size': min(all_buffer_sizes),
+                                            'learning_progress/agents_ready_for_training': agents_ready_for_training,
+                                            'learning_progress/agents_ready_ratio': agents_ready_for_training / len(all_buffer_sizes),
+                                            'learning_progress/agents_with_full_buffers': agents_with_full_buffers,
+                                            'learning_progress/buffer_utilization_avg': (sum(all_buffer_sizes) / len(all_buffer_sizes)) / max_buffer_capacity,
+                                            'learning_progress/training_threshold': training_threshold,
+                                        })
+                                
+                                training_metrics.update(buffer_metrics)
+                                
+                                # SECTION 3: EXPLORATION & EXPLOITATION
+                                exploration_metrics = {}
+                                if individual_losses:
+                                    all_epsilons = [loss_metrics.get('network_epsilon', 0) for loss_metrics in individual_losses.values() if 'network_epsilon' in loss_metrics]
+                                    if all_epsilons:
+                                        exploration_metrics.update({
+                                            'exploration/epsilon_mean': sum(all_epsilons) / len(all_epsilons),
+                                            'exploration/epsilon_std': float(np.std(all_epsilons)),
+                                            'exploration/epsilon_min': min(all_epsilons),
+                                            'exploration/epsilon_max': max(all_epsilons),
+                                            'exploration/agents_exploring_ratio': len([e for e in all_epsilons if e > 0.1]) / len(all_epsilons),
+                                            'exploration/agents_exploiting_ratio': len([e for e in all_epsilons if e <= 0.1]) / len(all_epsilons),
+                                        })
+                                
+                                # SECTION 4: NETWORK PERFORMANCE
+                                network_metrics = {}
+                                if individual_losses:
+                                    all_losses = [loss_metrics.get('network_loss', 0) for loss_metrics in individual_losses.values() if 'network_loss' in loss_metrics]
+                                    all_q_values = [loss_metrics.get('network_mean_q_value', 0) for loss_metrics in individual_losses.values() if 'network_mean_q_value' in loss_metrics]
                                     
-                                    # Capture individual agent loss/training data
-                                    individual_losses = self._capture_loss_from_snapshots(agents_snapshot)
-                                    
-                                    # NEW: Calculate population-level training statistics
-                                    population_training_stats = self._calculate_population_training_stats(individual_losses)
-                                    
-                                    # Log basic population metrics with organized sections
-                                    population_data = {
-                                        'generation': data['generation'],
-                                        'step_count': data['step_count'],
-                                    }
-                                    
-                                    # SECTION 1: POPULATION HEALTH & FITNESS
-                                    fitness_metrics = {
-                                        'population_health/avg_fitness': data['population_stats'].get('average_fitness', 0.0),
-                                        'population_health/best_fitness': data['population_stats'].get('best_fitness', 0.0),
-                                        'population_health/worst_fitness': data['population_stats'].get('worst_fitness', 0.0),
-                                        'population_health/fitness_variance': data['population_stats'].get('fitness_variance', 0.0),
-                                        'population_health/population_size': len(agents_snapshot),
-                                        'population_health/diversity_score': data['population_stats'].get('diversity', 0.0),
-                                    }
-                                    
-                                    # SECTION 2: LEARNING PROGRESS & TRAINING
-                                    training_metrics = {}
-                                    if population_training_stats:
-                                        training_metrics.update({
-                                            'learning_progress/total_training_runs': population_training_stats.get('total_training_runs', 0),
-                                            'learning_progress/avg_training_runs_per_agent': population_training_stats.get('avg_training_runs_per_agent', 0.0),
-                                            'learning_progress/agents_actively_training': population_training_stats.get('total_agents_with_training', 0),
-                                            'learning_progress/training_frequency_hz': population_training_stats.get('avg_training_frequency', 0.0),
-                                            'learning_progress/experience_buffer_total': population_training_stats.get('total_experience_buffer_size', 0),
+                                    if all_losses:
+                                        network_metrics.update({
+                                            'network_performance/avg_loss': sum(all_losses) / len(all_losses),
+                                            'network_performance/loss_std': float(np.std(all_losses)),
+                                            'network_performance/networks_training': len(all_losses),
                                         })
                                     
-                                    # NEW: EXPERIENCE BUFFER MONITORING - Track when training should occur
-                                    buffer_metrics = {}
-                                    if individual_losses:
-                                        all_buffer_sizes = [loss_metrics.get('network_experience_buffer_size', 0) for loss_metrics in individual_losses.values()]
-                                        if all_buffer_sizes:
-                                            training_threshold = 32  # Minimum experiences needed to start training
-                                            max_buffer_capacity = 2000  # Typical buffer capacity
-                                            
-                                            agents_ready_for_training = len([size for size in all_buffer_sizes if size >= training_threshold])
-                                            agents_with_full_buffers = len([size for size in all_buffer_sizes if size >= max_buffer_capacity * 0.8])
-                                            
-                                            buffer_metrics.update({
-                                                'learning_progress/buffer_avg_size': sum(all_buffer_sizes) / len(all_buffer_sizes),
-                                                'learning_progress/buffer_max_size': max(all_buffer_sizes),
-                                                'learning_progress/buffer_min_size': min(all_buffer_sizes),
-                                                'learning_progress/agents_ready_for_training': agents_ready_for_training,
-                                                'learning_progress/agents_ready_ratio': agents_ready_for_training / len(all_buffer_sizes),
-                                                'learning_progress/agents_with_full_buffers': agents_with_full_buffers,
-                                                'learning_progress/buffer_utilization_avg': (sum(all_buffer_sizes) / len(all_buffer_sizes)) / max_buffer_capacity,
-                                                'learning_progress/training_threshold': training_threshold,
-                                            })
-                                    
-                                    training_metrics.update(buffer_metrics)
-                                    
-                                    # SECTION 3: EXPLORATION & EXPLOITATION
-                                    exploration_metrics = {}
-                                    if individual_losses:
-                                        all_epsilons = [loss_metrics.get('network_epsilon', 0) for loss_metrics in individual_losses.values() if 'network_epsilon' in loss_metrics]
-                                        if all_epsilons:
-                                            exploration_metrics.update({
-                                                'exploration/epsilon_mean': sum(all_epsilons) / len(all_epsilons),
-                                                'exploration/epsilon_std': float(np.std(all_epsilons)),
-                                                'exploration/epsilon_min': min(all_epsilons),
-                                                'exploration/epsilon_max': max(all_epsilons),
-                                                'exploration/agents_exploring_ratio': len([e for e in all_epsilons if e > 0.1]) / len(all_epsilons),
-                                                'exploration/agents_exploiting_ratio': len([e for e in all_epsilons if e <= 0.1]) / len(all_epsilons),
-                                            })
-                                    
-                                    # SECTION 4: NETWORK PERFORMANCE
-                                    network_metrics = {}
-                                    if individual_losses:
-                                        all_losses = [loss_metrics.get('network_loss', 0) for loss_metrics in individual_losses.values() if 'network_loss' in loss_metrics]
-                                        all_q_values = [loss_metrics.get('network_mean_q_value', 0) for loss_metrics in individual_losses.values() if 'network_mean_q_value' in loss_metrics]
-                                        
-                                        if all_losses:
-                                            network_metrics.update({
-                                                'network_performance/avg_loss': sum(all_losses) / len(all_losses),
-                                                'network_performance/loss_std': float(np.std(all_losses)),
-                                                'network_performance/networks_training': len(all_losses),
-                                            })
-                                        
-                                        if all_q_values:
-                                            network_metrics.update({
-                                                'network_performance/avg_q_value': sum(all_q_values) / len(all_q_values),
-                                                'network_performance/q_value_std': float(np.std(all_q_values)),
-                                            })
-                                    
-                                    # SECTION 5: SYSTEM PERFORMANCE
-                                    system_metrics = {
-                                        'system_performance/simulation_step': data['step_count'],
-                                        'system_performance/generation': data['generation'],
-                                        'system_performance/timestamp': data['timestamp'],
-                                    }
-                                    
-                                    # Add system resource usage if available
-                                    if 'process_memory_mb' in data:
-                                        system_metrics.update({
-                                            'system_performance/process_memory_mb': data.get('process_memory_mb', 0),
-                                            'system_performance/process_cpu_percent': data.get('process_cpu_percent', 0),
-                                            'system_performance/system_memory_percent': data.get('system_memory_percent', 0),
+                                    if all_q_values:
+                                        network_metrics.update({
+                                            'network_performance/avg_q_value': sum(all_q_values) / len(all_q_values),
+                                            'network_performance/q_value_std': float(np.std(all_q_values)),
                                         })
-                                    
+                                
+                                # SECTION 5: SYSTEM PERFORMANCE
+                                system_metrics = {
+                                    'system_performance/simulation_step': data['step_count'],
+                                    'system_performance/generation': data['generation'],
+                                    'system_performance/timestamp': data['timestamp'],
+                                }
+                                
+                                # Add system resource usage if available
+                                if 'process_memory_mb' in data:
+                                    system_metrics.update({
+                                        'system_performance/process_memory_mb': data.get('process_memory_mb', 0),
+                                        'system_performance/process_cpu_percent': data.get('process_cpu_percent', 0),
+                                        'system_performance/system_memory_percent': data.get('system_memory_percent', 0),
+                                    })
+                                
                                     # Combine all organized metrics
                                     all_metrics = {}
                                     all_metrics.update(fitness_metrics)
@@ -1143,10 +1191,15 @@ class MetricsCollector:
                                     all_metrics.update(network_metrics)
                                     all_metrics.update(system_metrics)
                                     
-                                    # Log all organized metrics with proper step
+                                    # FIXED: Use MLflow integration's log_population_metrics method to batch all metrics
+                                    # This ensures all metrics appear in the same run without context conflicts
+                                    valid_metrics = {}
                                     for metric_name, value in all_metrics.items():
                                         if isinstance(value, (int, float, np.number)) and not np.isnan(float(value)):
-                                            mlflow.log_metric(metric_name, float(value), step=step_counter)
+                                            valid_metrics[metric_name] = float(value)
+                                    
+                                    if valid_metrics:
+                                        self.mlflow_integration.log_population_metrics(data['generation'], valid_metrics, data['step_count'])
                                     
                                     # Print success message with organized sections count
                                     section_counts = {
@@ -1158,7 +1211,7 @@ class MetricsCollector:
                                     }
                                     
                                     total_metrics = sum(section_counts.values())
-                                    print(f"📊 Logged {total_metrics} organized metrics to MLflow:")
+                                    print(f"📊 Logged {total_metrics} organized metrics to MLflow run {main_thread_run_id[:8]}:")
                                     for section, count in section_counts.items():
                                         if count > 0:
                                             print(f"   📈 {section}: {count} metrics")
@@ -1206,7 +1259,7 @@ class MetricsCollector:
                         # Debug first few agents with details
                         if buffer_size > 0 or agents_with_systems <= 3:
                             steps = agent_data.get('steps', 0)
-                            print(f"🔍 DEBUG Agent {str(agent_id)[:8]}: Buffer={buffer_size}, Steps={steps}, Learning_system_type={type(learning_system).__name__}")
+                            #print(f"🔍 DEBUG Agent {str(agent_id)[:8]}: Buffer={buffer_size}, Steps={steps}, Learning_system_type={type(learning_system).__name__}")
                     else:
                         agents_without_systems += 1
                         if agents_without_systems <= 3:  # Log first few
@@ -1225,8 +1278,27 @@ class MetricsCollector:
                         # Try to get stats from recent training (if the agent has loss history)
                         if hasattr(learning_system, '_loss_history') and learning_system._loss_history:
                             recent_loss = learning_system._loss_history[-1]  # Most recent loss
+                        else:
+                            # If no loss history yet, keep default value of 0.0
+                            recent_loss = 0.0
                         if hasattr(learning_system, '_qval_history') and learning_system._qval_history:
                             recent_mean_q_value = learning_system._qval_history[-1]  # Most recent Q-value
+                        
+                        # FIXED: If no Q-value history yet, try to get current Q-value from network
+                        if recent_mean_q_value == 0.0 and hasattr(learning_system, 'q_network'):
+                            try:
+                                # Get a sample Q-value from a default state
+                                import torch
+                                learning_system.q_network.eval()
+                                with torch.no_grad():
+                                    # Use a simple default state for Q-value sampling
+                                    default_state = torch.zeros(1, 29).to(learning_system.device)
+                                    q_values, _ = learning_system.q_network(default_state)
+                                    recent_mean_q_value = float(q_values.mean().item())
+                                learning_system.q_network.train()
+                            except Exception:
+                                # If Q-value extraction fails, keep it as 0.0
+                                recent_mean_q_value = 0.0
                         
                         # Calculate training frequency (runs per minute)
                         training_frequency = 0.0

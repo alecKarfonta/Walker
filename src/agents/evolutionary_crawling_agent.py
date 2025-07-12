@@ -256,7 +256,7 @@ class EvolutionaryCrawlingAgent:
             self._training_count += 1
             
             # Only log every 10th training session to reduce spam
-            if self._training_count % 10 == 0:
+            if self._training_count % 100 == 0:
                 loss = training_stats.get('loss', 0.0) if training_stats else 0.0
                 q_val = training_stats.get('mean_q_value', 0.0) if training_stats else 0.0  # FIXED: Use correct key name
                 epsilon = getattr(self._learning_system, 'epsilon', 0.0)

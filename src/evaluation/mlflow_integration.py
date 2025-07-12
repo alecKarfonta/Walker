@@ -68,41 +68,50 @@ class MLflowIntegration:
         self.current_run = None
         self.run_start_time = None
         
-        # Initialize system metrics globally once
-        self._initialize_system_metrics()
+        # FIXED: Don't initialize system metrics globally during __init__
+        # This was causing MLflow to auto-create runs before we start our actual training run
+        # Instead, we'll enable system metrics AFTER starting a run
         
         print(f"✅ MLflow integration initialized")
         print(f"   Tracking URI: {tracking_uri}")
         print(f"   Experiment: {experiment_name}")
+        print(f"   System metrics: Will be enabled after run starts")
     
     def _initialize_system_metrics(self):
-        """Initialize MLflow system metrics monitoring once globally."""
+        """Initialize MLflow system metrics monitoring once globally - ONLY AFTER a run is active."""
         with self._system_metrics_lock:
             if not self._system_metrics_enabled:
                 try:
+                    # CRITICAL: Only enable system metrics if there's an active run
+                    # This prevents MLflow from auto-creating runs for system metrics
+                    if mlflow.active_run() is None:
+                        print("⚠️  No active run found. System metrics will be enabled after run starts.")
+                        return
+                    
                     print("📊 Initializing MLflow system metrics monitoring...")
                     
                     # Set environment variable for global system metrics
                     os.environ["MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING"] = "true"
                     
                     # Configure system metrics collection settings BEFORE enabling
-                    mlflow.config.set_system_metrics_sampling_interval(10)  # Sample every 10 seconds
-                    mlflow.config.set_system_metrics_samples_before_logging(1)  # Log immediately
-                    mlflow.config.set_system_metrics_node_id("walker_training_node")
+                    mlflow.set_system_metrics_sampling_interval(10)  # Sample every 10 seconds
+                    mlflow.set_system_metrics_samples_before_logging(1)  # Log immediately
                     
                     # Enable system metrics globally - this starts the background thread
-                    mlflow.config.enable_system_metrics_logging()
+                    # Since we have an active run, MLflow won't create additional runs
+                    mlflow.enable_system_metrics_logging()
                     
                     self._system_metrics_enabled = True
                     
                     print(f"✅ MLflow system metrics monitoring initialized:")
                     print(f"   • Sampling interval: 10 seconds")
-                    print(f"   • Node ID: walker_training_node") 
+                    print(f"   • Samples before logging: 1")
                     print(f"   • Background thread: persistent")
                     print(f"   • Metrics location: 'System Metrics' tab in MLflow UI")
+                    print(f"   • Active run: {mlflow.active_run().info.run_id}")
                     
-                    # Register cleanup on exit
-                    atexit.register(self._cleanup_system_metrics)
+                            # Don't register automatic cleanup - let it run persistently
+        # atexit.register(self._cleanup_system_metrics)
                     
                 except Exception as e:
                     print(f"❌ Error initializing system metrics: {e}")
@@ -112,7 +121,7 @@ class MLflowIntegration:
         """Clean up system metrics monitoring on exit."""
         try:
             if self._system_metrics_enabled:
-                mlflow.config.disable_system_metrics_logging()
+                mlflow.disable_system_metrics_logging()
                 print("🔄 System metrics monitoring disabled")
         except Exception as e:
             print(f"⚠️ Error disabling system metrics: {e}")
@@ -140,14 +149,18 @@ class MLflowIntegration:
                 print(f"🔄 Ending previous MLflow run: {self.current_run.info.run_id}")
                 mlflow.end_run()
             
-            # Start run with system metrics enabled (they're already running globally)
+            # Start run without log_system_metrics parameter (we handle system metrics globally)
+            # FIXED: Remove log_system_metrics=True to prevent MLflow from auto-creating additional runs
             self.current_run = mlflow.start_run(
-                run_name=run_name,
-                log_system_metrics=True  # Enable for this specific run
+                run_name=run_name
             )
             
             print(f"🔬 Started MLflow run: {run_name}")
             print(f"📈 System metrics will be logged automatically to the 'System Metrics' section")
+            
+            # FIXED: Now that we have an active run, initialize system metrics
+            # This prevents MLflow from auto-creating runs for system metrics
+            self._initialize_system_metrics()
             
             # Log initial parameters
             mlflow.log_param("population_size", population_size)
@@ -203,13 +216,14 @@ class MLflowIntegration:
         except Exception as e:
             print(f"⚠️  Error logging individual robot metrics: {e}")
     
-    def log_population_metrics(self, generation: int, metrics: Dict[str, Any]):
+    def log_population_metrics(self, generation: int, metrics: Dict[str, Any], step_count: Optional[int] = None):
         """
         Log population-level metrics.
         
         Args:
             generation: Generation number
             metrics: Dictionary of population metrics
+            step_count: Actual simulation step count (preferred over generation)
         """
         try:
             if self.current_run is None:
@@ -218,10 +232,9 @@ class MLflowIntegration:
                 print(f"⚠️  No active MLflow run for population metrics. Current run must be started first.")
                 return
             
-            # Calculate proper step for time series visualization
-            # Use timestamp-based step for consistent time series in MLflow
-            current_time = time.time()
-            step_counter = int((current_time - 1752340000) / 10)  # 10-second intervals from baseline
+            # FIXED: Use actual world step count for meaningful time series
+            # Fall back to generation if step_count not provided
+            step_counter = step_count if step_count is not None else generation
             
             # Log population metrics
             for metric_name, value in metrics.items():
@@ -342,7 +355,7 @@ class MLflowIntegration:
     def disable_system_metrics_logging(self):
         """Disable MLflow's automatic system metrics logging."""
         try:
-            mlflow.config.disable_system_metrics_logging()
+            mlflow.disable_system_metrics_logging()
             print(f"✅ MLflow automatic system metrics logging disabled")
         except Exception as e:
             print(f"⚠️ Could not disable MLflow system metrics logging: {e}")
