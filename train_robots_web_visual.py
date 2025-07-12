@@ -74,7 +74,7 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Create training environment instance
-env = TrainingEnvironment()
+env = TrainingEnvironment(enable_evaluation=True)
 
 # Register all routes
 register_routes(app, env)

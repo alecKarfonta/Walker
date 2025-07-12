@@ -6,6 +6,13 @@ from typing import List, Dict, Set, Tuple, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import math
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
+
+
 
 class EcosystemRole(Enum):
     HERBIVORE = "herbivore"
@@ -760,7 +767,7 @@ class EcosystemDynamics:
                 EcosystemRole.SCAVENGER: "scavenging"
             }.get(predator_role, "consuming")
             
-            print(f"🍖 {str(predator_id)[:8]} is {predation_type} {str(prey_id)[:8]} "
+            logger.debug(f"🍖 {str(predator_id)[:8]} is {predation_type} {str(prey_id)[:8]} "
                   f"(energy: +{energy_gained:.2f}, prey health: {agent_health[prey_id]['health']:.2f})")
             
             return energy_gained, prey_id, prey_position

@@ -1,4 +1,3 @@
-
 import sys
 import os
 
@@ -63,15 +62,17 @@ class TrainingEnvironment:
                 # Initialize MLflow integration first
                 from src.evaluation.mlflow_integration import MLflowIntegration
                 self.mlflow_integration = MLflowIntegration(
-                    tracking_uri="sqlite:///experiments/walker_experiments.db",
+                    tracking_uri="postgresql://walker_user:walker_secure_2024@walker-postgres:5432/mlflow_db",
                     experiment_name="walker_robot_training"
                 )
                 
                 self.metrics_collector = MetricsCollector(
-                    enable_mlflow=True,
+                    enable_mlflow=True,  # Enable MLflow for metrics collector
                     enable_file_export=True,
                     export_directory="evaluation_exports"
                 )
+                # Use the new method to set the shared MLflow integration
+                self.metrics_collector.set_mlflow_integration(self.mlflow_integration, enable=True)
                 
                 self.dashboard_exporter = DashboardExporter(
                     port=2322,
@@ -1770,7 +1771,7 @@ class TrainingEnvironment:
             while accumulator >= self.dt:
                 physics_start = time.time()
                 with self._physics_lock:  # Protect ALL Box2D operations
-                    try:
+
                         # Process any pending destructions first
                         self._process_destruction_queue()
                         
@@ -1850,15 +1851,7 @@ class TrainingEnvironment:
                                     
                                     # AI OPTIMIZATION: Use different step modes based on AI update schedule
                                     if should_update_ai:
-                                        # CRITICAL FIX: Add missing action selection call
-                                        # Get current state and choose action using neural network
-                                        current_state = agent.get_state_representation()
-                                        action_index = agent.choose_action(current_state)
-                                        
-                                        # Apply the chosen action
-                                        agent.apply_action(action_index)
-                                        
-                                        # Full AI update with learning
+                                        # Let agent handle its own action selection and timing internally
                                         agent.step(self.dt)
                                     else:
                                         # Physics-only update - continue previous action without AI decision
@@ -1938,11 +1931,6 @@ class TrainingEnvironment:
                                 if len(self.ai_optimization_stats[key]) > 100:
                                     self.ai_optimization_stats[key] = self.ai_optimization_stats[key][-100:]
                                     
-                    except Exception as e:
-                        print(f"❌ Critical error in physics loop: {e}")
-                        import traceback
-                        traceback.print_exc()
-                
                 # Decrement accumulator
                 accumulator -= self.dt
                 self.step_count += 1
@@ -1993,74 +1981,37 @@ class TrainingEnvironment:
                     cpu_percent = process.cpu_percent()
                     active_agents = len([a for a in self.agents if not getattr(a, '_destroyed', False)])
                     
-                    # DETAILED OBJECT COUNTING in health check
+                    # Basic health check - reduced detail
                     total_buffers = 0
-                    max_buffer_size = 0
                     agents_with_learning = 0
-                    total_neural_networks = 0
-                    total_attention_records = 0
-                    total_physics_bodies = 0
-                    total_joints = 0
                     total_food_sources = 0
-                    total_obstacles = 0
                     
                     for agent in self.agents:
                         if getattr(agent, '_destroyed', False):
                             continue
                         
-                        # Count physics bodies per agent
-                        if hasattr(agent, 'body') and agent.body:
-                            total_physics_bodies += 1
-                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
-                            total_physics_bodies += 1
-                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
-                            total_physics_bodies += 1
-                        if hasattr(agent, 'wheels') and agent.wheels:
-                            total_physics_bodies += len(agent.wheels)
-                        if hasattr(agent, 'joints') and agent.joints:
-                            total_joints += len(agent.joints)
-                            
                         if hasattr(agent, '_learning_system') and agent._learning_system:
                             agents_with_learning += 1
-                            total_neural_networks += 1
                             
                             # Count memory buffer
                             if hasattr(agent._learning_system, 'memory') and hasattr(agent._learning_system.memory, 'buffer'):
                                 buffer_size = len(agent._learning_system.memory.buffer)
                                 total_buffers += buffer_size
-                                max_buffer_size = max(max_buffer_size, buffer_size)
-                            
-                            # Count attention records  
-                            if hasattr(agent._learning_system, 'attention_history'):
-                                attention_size = len(agent._learning_system.attention_history)
-                                total_attention_records += attention_size
                     
                     # Count ecosystem objects
                     if hasattr(self, 'ecosystem_dynamics') and hasattr(self.ecosystem_dynamics, 'food_sources'):
                         total_food_sources = len(self.ecosystem_dynamics.food_sources)
                     
-                    # Count environmental objects
-                    if hasattr(self, 'environmental_system') and hasattr(self.environmental_system, 'obstacles'):
-                        total_obstacles = len(self.environmental_system.obstacles)
-                    
-                    print(f"💚 HEALTH CHECK: Memory={memory_mb:.1f}MB, CPU={cpu_percent:.1f}%, Agents={active_agents}, Step={self.step_count}")
-                    print(f"   🧠 Learning agents: {agents_with_learning}, Neural networks: {total_neural_networks}")
-                    print(f"   💾 Total buffer entries: {total_buffers}, Max buffer: {max_buffer_size}")
-                    print(f"   🎯 Total attention records: {total_attention_records}")
-                    print(f"   🌍 Physics bodies: {total_physics_bodies}, Joints: {total_joints}")
-                    print(f"   🍽️ Food sources: {total_food_sources}, Obstacles: {total_obstacles}")
-                    print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
-                    print(f"   🌿 Ecosystem events: {len(getattr(self, 'consumption_events', []))}, Death events: {len(getattr(self, 'death_events', []))}")
-                    # Ray casting logging removed for performance
+                    print(f"💚 Health: {memory_mb:.0f}MB, {cpu_percent:.0f}%CPU, {active_agents} agents, {agents_with_learning} learning, {total_buffers} total buffer entries, {total_food_sources} food sources")
                     
                     # Alert if memory is too high
-                    if memory_mb > 1200:  # TRAINING FIX: Increased threshold from 800MB to 1200MB
-                        print(f"⚠️ HIGH MEMORY USAGE: {memory_mb:.1f}MB - triggering conservative cleanup")
+                    if memory_mb > 1200:
+                        print(f"⚠️ HIGH MEMORY: {memory_mb:.0f}MB - triggering cleanup")
                         self._cleanup_performance_data()
                         self._cleanup_attention_networks()
                         
                 except Exception as e:
-                    print(f"💚 HEALTH CHECK: Step={self.step_count}, Agents={len(self.agents)} (Error getting system stats: {e})")
+                    print(f"💚 Health: Step={self.step_count}, Agents={len(self.agents)} (Error: {e})")
                 last_health_check = current_time
             
             # Performance cleanup every minute (increased frequency)
@@ -2069,20 +2020,9 @@ class TrainingEnvironment:
             #    self.last_performance_cleanup = current_time
             
             
-            # Debug logging every 15 seconds (increased from 10 for less spam)
-            if current_time - last_debug_time > 60.0:
-                print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active, Gen={self.evolution_engine.generation}")
-                if self.agents:
-                    # Debug output for the first agent
-                    try:
-                        first_agent = self.agents[0]
-                        if not getattr(first_agent, '_destroyed', False) and first_agent.body:
-                            print(f"   Agent sample: pos=({first_agent.body.position.x:.2f}, {first_agent.body.position.y:.2f}), "
-                                  f"vel=({first_agent.body.linearVelocity.x:.2f}, {first_agent.body.linearVelocity.y:.2f}), "
-                                  f"reward={first_agent.total_reward:.2f}, steps={first_agent.steps}")
-                    except Exception as e:
-                        print(f"⚠️  Error in debug output: {e}")
-                        
+            # Debug logging every 2 minutes for cleaner logs
+            if current_time - last_debug_time > 120.0:
+                print(f"🔧 Step {self.step_count}: {len(self.agents)} agents, Gen {self.evolution_engine.generation}")
                 last_debug_time = current_time
             
             if current_time - last_stats_time > self.stats_update_interval:
@@ -2108,40 +2048,9 @@ class TrainingEnvironment:
                 
                 last_stats_time = current_time
             
-            # MLflow logging every 60 seconds
+            # MLflow logging now handled by MetricsCollector to avoid duplication
+            # Just handle periodic elite robot saving every 60 seconds
             if current_time - last_mlflow_log > 60.0:
-                if self.enable_evaluation and hasattr(self, 'mlflow_integration') and self.mlflow_integration:
-                    try:
-                        # Log population metrics
-                        generation = self.evolution_engine.generation
-                        population_metrics = {
-                            'generation': generation,
-                            'population_size': len(self.agents),
-                            'avg_fitness': sum(a.get_evolutionary_fitness() for a in self.agents) / len(self.agents) if self.agents else 0,
-                            'best_fitness': max(a.get_evolutionary_fitness() for a in self.agents) if self.agents else 0,
-                            'diversity': self.evolution_engine.diversity_history[-1] if self.evolution_engine.diversity_history else 0,
-                            'step_count': self.step_count
-                        }
-                        self.mlflow_integration.log_population_metrics(generation, population_metrics)
-                        print(f"📊 Logged population metrics to MLflow (Gen {generation})")
-                        
-                        # Log individual robot metrics for top 3 performers
-                        if self.agents:
-                            sorted_agents = sorted(self.agents, key=lambda a: a.get_evolutionary_fitness(), reverse=True)
-                            for i, agent in enumerate(sorted_agents[:3]):
-                                individual_metrics = {
-                                    'fitness': agent.get_evolutionary_fitness(),
-                                    'total_reward': agent.total_reward,
-                                    'steps': agent.steps,
-                                    'position_x': agent.body.position.x if agent.body else 0                                }
-                                self.mlflow_integration.log_individual_robot_metrics(
-                                    f"top_{i+1}_{str(agent.id)[:8]}", individual_metrics, self.step_count
-                                )
-                        
-                    except Exception as e:
-                        print(f"⚠️  Error logging to MLflow: {e}")
-                
-                # Periodic elite robot saving
                 try:
                     self._save_elite_robots_periodically()
                 except Exception as e:
@@ -3045,10 +2954,10 @@ class TrainingEnvironment:
         if not self.is_running:
             print("🔄 Starting training loop thread...")
             
-            # Start evaluation services
+            # CRITICAL FIX: Start MLflow run BEFORE starting training thread to prevent timing issues
             if self.enable_evaluation:
                 try:
-                    # Start MLflow tracking session (only via our direct integration)
+                    # Start MLflow tracking session FIRST (before training thread)
                     if self.mlflow_integration:
                         session_name = f"training_session_{int(time.time())}"
                         evolution_config = {
@@ -3064,16 +2973,8 @@ class TrainingEnvironment:
                         )
                         print(f"🔬 Started MLflow run: {session_name}")
                     
-                    # Start metrics collector WITHOUT MLflow (we handle MLflow separately)
+                    # Initialize metrics collector (MLflow already established)
                     if self.metrics_collector:
-                        session_name = f"training_session_{int(time.time())}"
-                        evolution_config = {
-                            'population_size': self.num_agents,
-                            'elite_size': self.evolution_config.elite_size,
-                            'mutation_rate': self.evolution_config.mutation_rate,
-                            'crossover_rate': self.evolution_config.crossover_rate
-                        }
-                        # Note: Not calling start_training_session to avoid MLflow conflict
                         print(f"📊 Metrics collector ready for session: {session_name}")
                     
                     if self.dashboard_exporter:
@@ -3083,6 +2984,7 @@ class TrainingEnvironment:
                 except Exception as e:
                     print(f"⚠️  Error starting evaluation services: {e}")
             
+            # NOW start the training thread (after MLflow is established)
             self.thread = threading.Thread(target=self.training_loop)
             self.thread.daemon = True
             self.thread.start()
@@ -4172,16 +4074,9 @@ class TrainingEnvironment:
             
             # Memory pool handles its own cleanup automatically
             
-            # DETAILED MEMORY TRACKING LOGS
-            print(f"🧹 MEMORY TRACKING - Performance cleanup completed:")
-            print(f"   📊 Active agents: {len(self.agents)}")
-            print(f"   📊 Robot stats entries: {len(self.robot_stats)}")
-            print(f"   📊 Total action history entries: {total_action_history}")
-            print(f"   📊 Total replay buffer entries: {total_replay_buffer}")
-            print(f"   📊 Total attention history entries: {total_attention_history}")
-            print(f"   📊 Agents with large buffers (>1k): {agents_with_large_buffers}")
-            print(f"   📊 Avg replay buffer per agent: {total_replay_buffer / max(1, len(self.agents)):.1f}")
-            print(f"   📊 Avg attention per agent: {total_attention_history / max(1, len(self.agents)):.1f}")
+            # Summary logging - less verbose
+            if agents_with_large_buffers > 0 or total_replay_buffer > 50000:
+                print(f"🧹 Cleanup: {len(self.agents)} agents, {total_replay_buffer} buffer entries, {agents_with_large_buffers} large buffers")
             
             # AGGRESSIVE: Clean up attention network specific data
             attention_networks_cleaned = 0
@@ -4213,8 +4108,9 @@ class TrainingEnvironment:
                                 maxlen=3000  # TRAINING FIX: Increased max from 1000 to 3000
                             )
             
-            if attention_networks_cleaned > 0:
-                print(f"🧹 Aggressively cleaned {attention_networks_cleaned} attention networks")
+            # Only log if significant cleanup occurred
+            if attention_networks_cleaned > 5:
+                print(f"🧹 Cleaned {attention_networks_cleaned} attention networks")
             
         except Exception as e:
             print(f"⚠️ Error during performance cleanup: {e}")
