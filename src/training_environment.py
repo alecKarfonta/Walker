@@ -33,7 +33,7 @@ class TrainingEnvironment:
     Manages physics simulation and evolution of diverse crawling robots.
     Enhanced with comprehensive evaluation framework.
     """
-    def __init__(self, num_agents=30, enable_evaluation=False):  # PERFORMANCE FIX: Reduced from 60 to 30 to improve FPS
+    def __init__(self, num_agents=30, enable_evaluation=False): 
         self.num_agents = num_agents
         # CRITICAL FIX: Disable sleeping at the world level to prevent static bodies from going to sleep
         self.world = b2.b2World(gravity=(0, -9.8), doSleep=False)
@@ -323,13 +323,7 @@ class TrainingEnvironment:
         # Attention network specific cleanup
         self.last_attention_cleanup = time.time()
         self.attention_cleanup_interval = 300.0  # Less frequent - every 30 seconds
-        
-        # Web interface throttling
-        self.last_web_interface_update = time.time()
-        self.web_interface_update_interval = 0.05  # 20 FPS instead of 60 FPS
-        self.web_data_cache = {}
-        self.web_cache_valid = False
-        
+                
         # Health bar rendering toggle (PERFORMANCE OPTIMIZATION)
         self.show_health_bars = False  # Default: enabled, can be toggled off for performance
         self.enable_visualization = True  # Default: show robot visualization, can be disabled for max speed
@@ -1241,18 +1235,7 @@ class TrainingEnvironment:
                 for dead_agent in dead_agents:
                     # Agents handle their own networks - no extraction needed
                     
-                    # CRITICAL: Return dead agent to memory pool IMMEDIATELY so it can be reused
-                    if self.robot_memory_pool:
-                        try:
-                            self.robot_memory_pool.return_robot(dead_agent)
-                            print(f"♻️ Returned dead agent {dead_agent.id} to memory pool immediately")
-                        except Exception as e:
-                            print(f"⚠️ Failed to return dead agent {dead_agent.id} to memory pool: {e}")
-                            # Fallback: add to destruction queue
-                            self._agents_pending_destruction.append(dead_agent)
-                    else:
-                        # No memory pool available, use destruction queue
-                        self._agents_pending_destruction.append(dead_agent)
+                    self.robot_memory_pool.return_robot(dead_agent)
                     
                     # Remove from active agents list
                     if dead_agent in self.agents:
@@ -1319,51 +1302,36 @@ class TrainingEnvironment:
         # 🌍 DYNAMIC WORLD: Spawn near current leftmost (beginning) position
         spawn_position = self._get_current_spawn_position()
         
-        print(f"🐣 Respawning dead agent at current world beginning: ({spawn_position[0]:.1f}, {spawn_position[1]:.1f})")
+        logger.info(f"🐣 Respawning dead agent at current world beginning: ({spawn_position[0]:.1f}, {spawn_position[1]:.1f})")
         
         # Create random physical parameters (fresh genetics)
         from src.agents.physical_parameters import PhysicalParameters
         random_params = PhysicalParameters.random_parameters()
         
         # Use memory pool if available for efficient reuse with size mutations
-        if self.robot_memory_pool:
-            new_agent = self.robot_memory_pool.acquire_robot(
-                position=spawn_position,
-                physical_params=random_params,
-                apply_size_mutations=True  # Enable size mutations during respawning
-            )
-            logger.info(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
-        else:
-            # Fallback: Create new agent directly using EvolutionaryCrawlingAgent
-            from src.agents.evolutionary_crawling_agent import EvolutionaryCrawlingAgent
-            new_agent = EvolutionaryCrawlingAgent(
-                world=self.world,
-                agent_id=None,  # Generate new UUID automatically
-                position=spawn_position,
-                category_bits=self.AGENT_CATEGORY,
-                mask_bits=self.GROUND_CATEGORY | self.OBSTACLE_CATEGORY,  # Collide with ground AND obstacles
-                physical_params=random_params
-            )
-            logger.warning(f"🆕 Created new replacement agent {new_agent.id} (no memory pool)")
+        new_agent = self.robot_memory_pool.acquire_robot(
+            position=spawn_position,
+            physical_params=random_params,
+            apply_size_mutations=True  # Enable size mutations during respawning
+        )
+        logger.info(f"♻️ Acquired replacement agent {new_agent.id} from memory pool with size mutations")
+
         
         # Add training environment reference and register with reward signal adapter
         if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
-            try:
-                # Add training environment reference to agent
-                new_agent._training_env = self
-                
-                agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
-                self.reward_signal_adapter.register_agent(
-                    new_agent.id,
-                    agent_type,
-                    metadata={
-                        'physical_params': str(new_agent.physical_params) if hasattr(new_agent, 'physical_params') else None,
-                        'created_at': time.time(),
-                        'source': 'replacement'
-                    }
-                )
-            except Exception as e:
-                print(f"⚠️ Failed to register replacement agent {new_agent.id} with reward signal adapter: {e}")
+            # Add training environment reference to agent
+            new_agent._training_env = self
+            
+            agent_type = getattr(new_agent, 'learning_approach', 'evolutionary')
+            self.reward_signal_adapter.register_agent(
+                new_agent.id,
+                agent_type,
+                metadata={
+                    'physical_params': str(new_agent.physical_params) if hasattr(new_agent, 'physical_params') else None,
+                    'created_at': time.time(),
+                    'source': 'replacement'
+                }
+            )
         
         # Agents are standalone - no training environment injection needed
         
@@ -1372,47 +1340,44 @@ class TrainingEnvironment:
     
     def _initialize_single_agent_ecosystem(self, agent):
         """Initialize ecosystem data for a single new agent."""
-        try:
-            agent_id = agent.id
+        agent_id = agent.id
+        
+        # Extract and properly normalize fitness traits from agent's physical parameters
+        motor_speed = getattr(agent.physical_params, 'motor_speed', 5.0)
+        motor_torque = getattr(agent.physical_params, 'motor_torque', 50.0)
+        learning_rate = getattr(agent.physical_params, 'learning_rate', 0.1)
+        
+        fitness_traits = {
+            'speed': min(1.0, motor_speed / 15.0),  # Normalize motor_speed (typically 3-12) to 0-1
+            'strength': min(1.0, motor_torque / 200.0),  # Normalize motor_torque (typically 30-180) to 0-1  
+            'cooperation': min(1.0, learning_rate * 50.0)  # Boost learning_rate (typically 0.005-0.02) to meaningful range
+        }
+        
+        # Assign ecosystem role
+        role = self.ecosystem_dynamics.assign_ecosystem_role(agent_id, fitness_traits)
+        
+        # Initialize agent status tracking
+        self.agent_statuses[agent_id] = {
+            'role': role.value,
+            'status': 'idle',
+            'last_status_change': time.time(),
+            'energy': 1.0,
+            'speed_factor': 1.0,
+            # Alliances and territories removed
+        }
+        
+        self.agent_health[agent_id] = {
+            'health': 1.0,
+            'energy': 1.0,
+            'last_updated': time.time()
+        }
+        
+        # Initialize energy level for resource consumption
+        self.agent_energy_levels[agent_id] = 1.0
+        
+        # Track birth time for survival statistics
+        self.survival_stats['agent_birth_times'][agent_id] = time.time()
             
-            # Extract and properly normalize fitness traits from agent's physical parameters
-            motor_speed = getattr(agent.physical_params, 'motor_speed', 5.0)
-            motor_torque = getattr(agent.physical_params, 'motor_torque', 50.0)
-            learning_rate = getattr(agent.physical_params, 'learning_rate', 0.1)
-            
-            fitness_traits = {
-                'speed': min(1.0, motor_speed / 15.0),  # Normalize motor_speed (typically 3-12) to 0-1
-                'strength': min(1.0, motor_torque / 200.0),  # Normalize motor_torque (typically 30-180) to 0-1  
-                'cooperation': min(1.0, learning_rate * 50.0)  # Boost learning_rate (typically 0.005-0.02) to meaningful range
-            }
-            
-            # Assign ecosystem role
-            role = self.ecosystem_dynamics.assign_ecosystem_role(agent_id, fitness_traits)
-            
-            # Initialize agent status tracking
-            self.agent_statuses[agent_id] = {
-                'role': role.value,
-                'status': 'idle',
-                'last_status_change': time.time(),
-                'energy': 1.0,
-                'speed_factor': 1.0,
-                # Alliances and territories removed
-            }
-            
-            self.agent_health[agent_id] = {
-                'health': 1.0,
-                'energy': 1.0,
-                'last_updated': time.time()
-            }
-            
-            # Initialize energy level for resource consumption
-            self.agent_energy_levels[agent_id] = 1.0
-            
-            # Track birth time for survival statistics
-            self.survival_stats['agent_birth_times'][agent_id] = time.time()
-            
-        except Exception as e:
-            print(f"❌ Error initializing ecosystem data for agent {agent_id}: {e}")
 
     def _track_limb_distribution(self):
         """Track and log the distribution of limb counts among agents."""
@@ -1506,6 +1471,7 @@ class TrainingEnvironment:
             print(f"❌ Error tracking limb distribution: {e}")
             import traceback
             traceback.print_exc()
+            raise e
 
     def _update_statistics(self):
         """Update population statistics with enhanced safety checks."""
@@ -1587,10 +1553,11 @@ class TrainingEnvironment:
                 self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
                 
             except Exception as e:
-                print(f"⚠️  Error updating stats for agent {agent_id}: {e}")
+                logger.error(f"⚠️  Error updating stats for agent {agent_id}: {e}")
                 # Remove the problematic agent from stats
                 if agent_id in self.robot_stats:
                     del self.robot_stats[agent_id]
+                raise e
         
         # Update population statistics with safety checks
         if self.robot_stats:
@@ -1605,7 +1572,7 @@ class TrainingEnvironment:
                         fitness = agent.get_evolutionary_fitness()
                         fitnesses.append(fitness)
                     except Exception as e:
-                        print(f"⚠️  Error getting fitness for agent {agent.id}: {e}")
+                        logger.warning(f"⚠️  Error getting fitness for agent {agent.id}: {e}")
                 
                 # Get evolution summary
                 evolution_summary = self.evolution_engine.get_evolution_summary()
@@ -1651,7 +1618,7 @@ class TrainingEnvironment:
                 }
                 
             except Exception as e:
-                print(f"⚠️  Error updating population statistics: {e}")
+                logger.error(f"⚠️  Error updating population statistics: {e}")
                 # Fallback to minimal stats
                 self.population_stats = {
                     'generation': 1,
@@ -1670,6 +1637,7 @@ class TrainingEnvironment:
                         'total_q_updates': 0
                     }
                 }
+                raise e
 
     def _safe_destroy_agent(self, agent):
         """Safely destroy an agent with proper error handling, using memory pool if available."""
@@ -1681,10 +1649,10 @@ class TrainingEnvironment:
             if self.robot_memory_pool:
                 try:
                     self.robot_memory_pool.return_robot(agent)
-                    print(f"♻️ Returned agent {agent.id} to memory pool")
+                    logger.info(f"♻️ Returned agent {agent.id} to memory pool")
                     return
                 except Exception as e:
-                    print(f"⚠️ Failed to return agent {agent.id} to memory pool: {e}")
+                    logger.warning(f"⚠️ Failed to return agent {agent.id} to memory pool: {e}")
                     # Fall through to manual destruction
             
             # CRITICAL FIX: Release neural network back to Learning Manager before manual destruction
@@ -1694,9 +1662,9 @@ class TrainingEnvironment:
                     performance_score = max(0.0, getattr(agent, 'total_reward', 0.0) / max(1, getattr(agent, 'steps', 1)))
                     # Release network back to pool for reuse
                     self.learning_manager.release_agent_network(agent.id, performance_score)
-                    print(f"🧠 Released network from manually destroyed agent {agent.id} (performance: {performance_score:.3f})")
+                    logger.info(f"🧠 Released network from manually destroyed agent {agent.id} (performance: {performance_score:.3f})")
                 except Exception as e:
-                    print(f"⚠️ Failed to release network from agent {agent.id}: {e}")
+                    logger.warning(f"⚠️ Failed to release network from agent {agent.id}: {e}")
             
             # Manual destruction (fallback when no memory pool)
             # Mark as destroyed first to prevent further operations
@@ -1736,7 +1704,7 @@ class TrainingEnvironment:
                     try:
                         self.world.DestroyBody(body)
                     except Exception as e:
-                        print(f"⚠️  Error destroying body for agent {agent.id}: {e}")
+                        logger.warning(f"⚠️  Error destroying body for agent {agent.id}: {e}")
             
             # Clear references to prevent access to destroyed objects
             agent.wheels = []
@@ -1747,10 +1715,10 @@ class TrainingEnvironment:
             agent.lower_arm_joint = None
             agent.wheel_joints = []
             
-            print(f"✅ Successfully destroyed agent {agent.id} (manual destruction)")
+            logger.info(f"✅ Successfully destroyed agent {agent.id} (manual destruction)")
             
         except Exception as e:
-            print(f"❌ Critical error destroying agent {getattr(agent, 'id', 'unknown')}: {e}")
+            logger.error(f"❌ Critical error destroying agent {getattr(agent, 'id', 'unknown')}: {e}")
             import traceback
             traceback.print_exc()
 
@@ -1768,7 +1736,7 @@ class TrainingEnvironment:
                     self._safe_destroy_agent(agent)
                     
             except Exception as e:
-                print(f"❌ Error processing destruction queue: {e}")
+                logger.error(f"❌ Error processing destruction queue: {e}")
 
     def training_loop(self):
         """Main simulation loop with enhanced safety."""
@@ -1787,10 +1755,7 @@ class TrainingEnvironment:
         last_health_check = time.time()
         last_mlflow_log = time.time()
         
-        step_count = 0
-        
-        # CRITICAL SAFEGUARD: Use instance emergency shutdown state
-        self._emergency_shutdown_state['last_emergency_check'] = last_time
+        step_count = 0        
 
         while self.is_running:
             frame_start_time = time.time()
@@ -1800,73 +1765,6 @@ class TrainingEnvironment:
             
             # Add frame time to the accumulator
             accumulator += frame_time
-            
-            # CRITICAL SAFEGUARD: Emergency shutdown detection
-            if current_time - self._emergency_shutdown_state['last_emergency_check'] >= 5.0:  # Check every 5 seconds
-                try:
-                    import psutil
-                    import os
-                    process = psutil.Process(os.getpid())
-                    memory_mb = process.memory_info().rss / 1024 / 1024
-                    
-                    # Count physics bodies
-                    physics_body_count = 0
-                    for agent in self.agents:
-                        if hasattr(agent, 'body') and agent.body:
-                            physics_body_count += 1
-                        if hasattr(agent, 'upper_arm') and agent.upper_arm:
-                            physics_body_count += 1
-                        if hasattr(agent, 'lower_arm') and agent.lower_arm:
-                            physics_body_count += 1
-                        if hasattr(agent, 'wheels') and agent.wheels:
-                            physics_body_count += len(agent.wheels)
-                    
-                    # Add dynamic world bodies
-                    if self.dynamic_world_manager:
-                        status = self.dynamic_world_manager.get_world_status()
-                        physics_body_count += status.get('total_obstacles', 0)
-                    
-                    # Check emergency conditions
-                    emergency_triggered = False
-                    
-                    if memory_mb > self._emergency_shutdown_state['max_memory_mb']:
-                        print(f"🚨 EMERGENCY: Memory usage {memory_mb:.1f}MB exceeds limit {self._emergency_shutdown_state['max_memory_mb']}MB")
-                        emergency_triggered = True
-                    
-                    if physics_body_count > self._emergency_shutdown_state['max_physics_bodies']:
-                        print(f"🚨 EMERGENCY: Physics bodies {physics_body_count} exceeds limit {self._emergency_shutdown_state['max_physics_bodies']}")
-                        emergency_triggered = True
-                    
-                    if frame_time > 0.5:  # Frame took more than 500ms
-                        self._emergency_shutdown_state['consecutive_slow_frames'] += 1
-                        print(f"🐌 SLOW FRAME: {frame_time:.2f}s ({self._emergency_shutdown_state['consecutive_slow_frames']}/{self._emergency_shutdown_state['max_consecutive_slow_frames']})")
-                        
-                        if self._emergency_shutdown_state['consecutive_slow_frames'] >= self._emergency_shutdown_state['max_consecutive_slow_frames']:
-                            print(f"🚨 EMERGENCY: {self._emergency_shutdown_state['consecutive_slow_frames']} consecutive slow frames")
-                            emergency_triggered = True
-                    else:
-                        self._emergency_shutdown_state['consecutive_slow_frames'] = 0
-                    
-                    if emergency_triggered:
-                        print("🚨 EMERGENCY CONDITIONS DETECTED - CONTINUING WITH WARNINGS ONLY")
-                        print("⚠️ System performance degraded but allowing simulation to continue")
-                        # DISABLED: Emergency shutdown - only log warnings, don't stop system
-                        # Optionally trigger cleanup without stopping
-                        if self.dynamic_world_manager and memory_mb > 1500:  # Only cleanup if memory is very high
-                            print("🧹 High memory detected - cleaning up dynamic world...")
-                            try:
-                                self.dynamic_world_manager.cleanup_all_tiles()
-                            except Exception as e:
-                                print(f"⚠️ Error during dynamic world cleanup: {e}")
-                        
-                        # Reset slow frame counter to prevent spam
-                        self._emergency_shutdown_state['consecutive_slow_frames'] = 0
-                    
-                    self._emergency_shutdown_state['last_emergency_check'] = current_time
-                    
-                except Exception as e:
-                    print(f"⚠️ Error in emergency check: {e}")
-                    self._emergency_shutdown_state['last_emergency_check'] = current_time
             
             # Fixed-step physics updates with enhanced thread safety
             while accumulator >= self.dt:
@@ -2073,7 +1971,7 @@ class TrainingEnvironment:
             # Create obstacle physics bodies periodically (every 10 seconds)
             if not hasattr(self, 'last_obstacle_update'):
                 self.last_obstacle_update = current_time
-            if current_time - self.last_obstacle_update > 10.0:
+            if current_time - self.last_obstacle_update > 20.0:
                 self._create_obstacle_physics_bodies()
                 self.last_obstacle_update = current_time
             
@@ -2166,21 +2064,13 @@ class TrainingEnvironment:
                 last_health_check = current_time
             
             # Performance cleanup every minute (increased frequency)
-            if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
-                self._cleanup_performance_data()
-                self.last_performance_cleanup = current_time
+            #if current_time - self.last_performance_cleanup > self.performance_cleanup_interval:
+           #     self._cleanup_performance_data()
+            #    self.last_performance_cleanup = current_time
             
-            # PERFORMANCE: Frequent attention network cleanup every 30 seconds
-            if current_time - self.last_attention_cleanup > self.attention_cleanup_interval:
-                self._cleanup_attention_networks()
-                self.last_attention_cleanup = current_time
-                
-            # Invalidate web cache periodically
-            if current_time - self.last_web_interface_update > 0.1:  # Invalidate after 100ms
-                self.web_cache_valid = False
             
             # Debug logging every 15 seconds (increased from 10 for less spam)
-            if current_time - last_debug_time > 15.0:
+            if current_time - last_debug_time > 60.0:
                 print(f"🔧 Physics step {self.step_count}: {len(self.agents)} agents active, Gen={self.evolution_engine.generation}")
                 if self.agents:
                     # Debug output for the first agent
@@ -2269,12 +2159,8 @@ class TrainingEnvironment:
             # Process evolution request if safe
             if self._evolution_requested and not self._is_evolving:
                 self._evolution_requested = False
-                try:
-                    self.trigger_evolution()
-                except Exception as e:
-                    print(f"❌ Evolution failed: {e}")
-                    import traceback
-                    traceback.print_exc()
+                self.trigger_evolution()
+
             
             # Calculate total frame time and store performance data
             total_frame_time = time.time() - frame_start_time
@@ -3285,6 +3171,7 @@ class TrainingEnvironment:
 
     def trigger_evolution(self):
         """Trigger evolutionary generation advancement with comprehensive safety."""
+        logger.info("🧬 === EVOLUTION TRIGGER ===")
         # Check if evolution is already in progress
         with self._evolution_lock:
             if self._is_evolving:
@@ -3466,11 +3353,6 @@ class TrainingEnvironment:
         
         self.agents.append(cloned_agent)
         print(f"👯 Cloned best agent {best_agent.id} to new agent {cloned_agent.id} (fitness: {best_agent.get_evolutionary_fitness():.3f}). Total agents: {len(self.agents)}")
-
-    def evolve_population(self):
-        """Legacy method - use trigger_evolution() instead."""
-        print("⚠️  evolve_population() is deprecated. Using trigger_evolution() instead.")
-        self.trigger_evolution()
 
     def _init_robot_stats(self):
         """Initialize robot statistics with safety checks."""
