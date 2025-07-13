@@ -217,6 +217,10 @@ class EvolutionaryCrawlingAgent:
         if prev_state is None:
             return
         
+        # IMMOBILIZATION SAFEGUARD: Don't learn when immobilized (low energy)
+        if hasattr(self, '_is_immobilized') and getattr(self, '_is_immobilized', False):
+            return  # Skip learning for immobilized agents
+        
         if self._learning_system is None:
             raise RuntimeError(f"Agent {self.id}: No learning system assigned!")
         
@@ -228,44 +232,102 @@ class EvolutionaryCrawlingAgent:
     
     def _maybe_train_network(self):
         """Train the neural network when conditions are met."""
-        if (not self._learning_system or 
-            not hasattr(self._learning_system, 'memory') or 
-            not self._learning_system.memory or
-            not hasattr(self._learning_system.memory, 'buffer')):
+        # CRITICAL FIX: Recovery mechanism for agents that lose their learning systems
+        if not self._learning_system:
+            if not hasattr(self, '_learning_system_recovery_attempts'):
+                self._learning_system_recovery_attempts = 0
+            
+            # Try to recover the learning system
+            if self._learning_system_recovery_attempts < 3:  # Limit recovery attempts
+                try:
+                    print(f"🔄 RECOVERY: Agent {self.id[:8]} lost learning system - attempting recovery (attempt {self._learning_system_recovery_attempts + 1})")
+                    self._initialize_attention_learning()
+                    self._learning_system_recovery_attempts += 1
+                    
+                    if self._learning_system:
+                        print(f"✅ RECOVERY: Agent {self.id[:8]} successfully recovered learning system")
+                    else:
+                        print(f"❌ RECOVERY: Agent {self.id[:8]} failed to recover learning system")
+                        return
+                except Exception as e:
+                    print(f"❌ RECOVERY: Agent {self.id[:8]} learning system recovery failed: {e}")
+                    self._learning_system_recovery_attempts += 1
+                    return
+            else:
+                # Too many failed attempts - just log and return
+                if not hasattr(self, '_recovery_failed_logged'):
+                    print(f"❌ RECOVERY FAILED: Agent {self.id[:8]} cannot recover learning system after 3 attempts")
+                    self._recovery_failed_logged = True
+                return
+        
+        # Check if memory exists
+        if not hasattr(self._learning_system, 'memory'):
+            if not hasattr(self, '_no_memory_warned'):
+                print(f"❌ TRAINING BLOCKED: Agent {self.id[:8]} learning system has no memory attribute")
+                self._no_memory_warned = True
             return
-            
-        buffer_size = len(self._learning_system.memory.buffer)
         
-        # Train when we have enough experiences and haven't trained recently
+        if not self._learning_system.memory:
+            if not hasattr(self, '_memory_none_warned'):
+                print(f"❌ TRAINING BLOCKED: Agent {self.id[:8]} memory is None")
+                self._memory_none_warned = True
+            return
+        
+        # FIXED: Use len() directly on memory object instead of accessing .buffer
+        # PrioritizedReplayBuffer implements __len__ method
+        try:
+            buffer_size = len(self._learning_system.memory)
+        except Exception as e:
+            if not hasattr(self, '_buffer_access_warned'):
+                print(f"❌ TRAINING BLOCKED: Agent {self.id[:8]} cannot access buffer size: {e}")
+                print(f"   Memory type: {type(self._learning_system.memory)}")
+                print(f"   Memory attributes: {dir(self._learning_system.memory)}")
+                self._buffer_access_warned = True
+            return
+        
+        # SIMPLIFIED TRAINING LOGIC: Train more frequently for faster learning
         min_buffer_size = 32  # Need at least 32 experiences
-        train_interval = 10   # Train every 10 new experiences
         
-        if not hasattr(self, '_last_training_buffer_size'):
-            self._last_training_buffer_size = 0
-            
-        experiences_since_training = buffer_size - self._last_training_buffer_size
+        # STEP-BASED TRAINING: Much more reliable than buffer-size tracking
+        # Train every N steps instead of tracking buffer size changes
+        train_frequency = 5  # Train every 5 steps when buffer is full enough
         
-        if buffer_size >= min_buffer_size and experiences_since_training >= train_interval:
+        if buffer_size >= min_buffer_size and self.steps % train_frequency == 0:
             # Train the network
-            training_stats = self._learning_system.learn()
-            self._last_training_buffer_size = buffer_size
-            
-            # Increment training count
-            if not hasattr(self, '_training_count'):
-                self._training_count = 0
-            self._training_count += 1
-            
-            # Only log every 10th training session to reduce spam
-            if self._training_count % 100 == 0:
-                loss = training_stats.get('loss', 0.0) if training_stats else 0.0
-                q_val = training_stats.get('mean_q_value', 0.0) if training_stats else 0.0  # FIXED: Use correct key name
-                epsilon = getattr(self._learning_system, 'epsilon', 0.0)
+            try:
+                training_stats = self._learning_system.learn()
                 
-                print(f"🧠 Agent {str(self.id)[:8]}: Training #{self._training_count} - Loss: {loss:.4f}, Q-val: {q_val:.3f}, ε: {epsilon:.3f}, Buffer: {buffer_size}")
-            
-            return training_stats
+                # Increment training count
+                if not hasattr(self, '_training_count'):
+                    self._training_count = 0
+                self._training_count += 1
+                
+                # LOGGING: Simple training progress
+                if training_stats:
+                    loss = training_stats.get('loss', 0.0)
+                    q_val = training_stats.get('mean_q_value', 0.0)
+                    
+                    # Only log occasionally to avoid spam
+                    if self._training_count % 10 == 1:  # Log every 10th training session
+                        print(f"🧠 Agent {self.id[:8]}: Training #{self._training_count} (attempts: {self._learning_system_recovery_attempts if hasattr(self, '_learning_system_recovery_attempts') else 0}) - Loss: {loss:.4f}, Q-val: {q_val:.3f}, Buffer: {buffer_size}")
+                
+            except Exception as e:
+                print(f"❌ TRAINING ERROR: Agent {self.id[:8]} training failed: {e}")
+                # Don't crash - just skip this training step
+                import traceback
+                traceback.print_exc()
         
-        return None
+        # DIAGNOSTIC: Log buffer status occasionally
+        if self.steps % 100 == 0 and buffer_size > 0:
+            print(f"📊 Agent {self.id[:8]}: Buffer {buffer_size}/{min_buffer_size}, Training every {train_frequency} steps")
+    
+    def get_training_count(self) -> int:
+        """Get the number of training runs completed by this agent."""
+        return getattr(self, '_training_count', 0)
+    
+    def get_q_updates(self) -> int:
+        """Get the number of Q-learning updates (training runs) for compatibility with metrics."""
+        return self.get_training_count()
 
     
     def get_debug_info(self) -> Dict[str, Any]:
@@ -275,19 +337,19 @@ class EvolutionaryCrawlingAgent:
             'generation': self.generation,
             'steps': self.steps,
             'total_reward': self.total_reward,
-            'num_arms': self.physical_params.num_arms,
-            'segments_per_limb': self.physical_params.segments_per_limb,
-            'learning_system_assigned': self._learning_system is not None,
-            # UI COMPATIBILITY: Add missing fields that the UI expects
-            'agent_id': self.id,  # UI expects 'agent_id' field
-            'position': (self.body.position.x, self.body.position.y) if self.body else (0, 0),
-            'velocity': (self.body.linearVelocity.x, self.body.linearVelocity.y) if self.body else (0, 0),
-            'body_angle': self.body.angle if self.body else 0,
-            'current_action': getattr(self, 'current_action_tuple', None),
-            'num_limbs': self.physical_params.num_arms,
-            'state_size': self.state_size,
-            'action_size': self.action_size,
-            'learning_approach': self.learning_approach,
+            'current_action': self.current_action,
+            'current_action_tuple': self.current_action_tuple,
+            'learning_system': str(type(self._learning_system)) if self._learning_system else None,
+            'physical_params': {
+                'num_arms': self.physical_params.num_arms,
+                'segments_per_limb': self.physical_params.segments_per_limb,
+                'motor_torque': self.physical_params.motor_torque,
+                'motor_speed': self.physical_params.motor_speed
+            },
+            'morphology': {
+                'total_joints': self.physical_params.num_arms * self.physical_params.segments_per_limb,
+                'action_space_size': len(self.actions) if hasattr(self, 'actions') else 0
+            }
         }
 
     # UI COMPATIBILITY: Add backward compatibility methods that the UI and other systems expect
@@ -468,14 +530,36 @@ class EvolutionaryCrawlingAgent:
         if not hasattr(self, 'world') or not hasattr(self.world, '_training_env'):
             raise RuntimeError(f"Agent {self.id}: No training environment available for Learning Manager access")
         
-        learning_manager = getattr(self.world._training_env, 'learning_manager', None)
+        training_env = getattr(self.world, '_training_env', None)
+        learning_manager = getattr(training_env, 'learning_manager', None) if training_env else None
         if not learning_manager:
             raise RuntimeError(f"Agent {self.id}: Learning Manager is required but not available in training environment")
         
+        # CRITICAL FIX: Calculate correct action space size for Learning Manager
+        # The action_size property might not be set yet during initialization
+        total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+        actions = self._generate_dynamic_action_space_static(total_joints)
+        correct_action_size = len(actions)
+        
+        # 🔧 DIAGNOSTIC LOGGING: Track action space calculations
+        print(f"🔧 DIAGNOSTIC: Agent {self.id[:8]} ({self.physical_params.num_arms} limbs × {self.physical_params.segments_per_limb} segments)")
+        print(f"🔧 DIAGNOSTIC: {total_joints} joints → {correct_action_size} actions")
+        
+        # Verify action space calculation
+        if correct_action_size <= 5:
+            print(f"⚠️  WARNING: Agent {self.id[:8]} has very small action space ({correct_action_size} actions) - may indicate calculation error")
+        
         # Use Learning Manager's pooling system - this is the ONLY way to get networks
-        self._learning_system = learning_manager._acquire_attention_network(self.id, self.action_size, self.state_size)
+        self._learning_system = learning_manager._acquire_attention_network(self.id, correct_action_size, self.state_size)
         if not self._learning_system:
             raise RuntimeError(f"Agent {self.id}: Learning Manager failed to provide network - cannot proceed without learning system")
+        
+        # 🔧 DIAGNOSTIC LOGGING: Verify network assignment
+        if hasattr(self._learning_system, 'action_dim'):
+            actual_action_dim = self._learning_system.action_dim
+            print(f"🔧 DIAGNOSTIC: Agent {self.id[:8]} received network with {actual_action_dim} actions (requested {correct_action_size})")
+            if actual_action_dim != correct_action_size:
+                print(f"❌ CRITICAL: Action space mismatch! Agent {self.id[:8]} requested {correct_action_size} but got {actual_action_dim}")
         
         print(f"🧠 Agent {self.id}: Got attention network from Learning Manager pool")
 
@@ -758,8 +842,8 @@ class EvolutionaryCrawlingAgent:
 
     def evolve_with(self, other: 'EvolutionaryCrawlingAgent', 
                    mutation_rate: float = 0.1) -> 'EvolutionaryCrawlingAgent':
-        """Create offspring through crossover and mutation with attention learning transfer."""
-        # Crossover physical parameters
+        """Create offspring through crossover and mutation with proper network handling."""
+        # Crossover physical parameters (may create new morphology)
         if random.random() < 0.7:
             child_params = self.physical_params.crossover(other.physical_params)
             child_params = child_params.mutate(mutation_rate)
@@ -781,28 +865,47 @@ class EvolutionaryCrawlingAgent:
             learning_approach="attention_deep_q_learning"  # Always attention learning
         )
         
-        # Transfer attention neural network weights
+        # CRITICAL FIX: Only transfer network weights if action spaces match
         try:
-            if hasattr(self, '_learning_system') and self._learning_system and hasattr(child, '_learning_system') and child._learning_system:
-                # Transfer neural network weights from parent to child
-                child._learning_system.q_network.load_state_dict(self._learning_system.q_network.state_dict())
-                child._learning_system.target_network.load_state_dict(self._learning_system.target_network.state_dict())
-                print(f"🧠 Transferred attention network: {self.id[:6]} → {child.id[:6]}")
+            if (hasattr(self, '_learning_system') and self._learning_system and 
+                hasattr(child, '_learning_system') and child._learning_system):
+                
+                # Check if action spaces are compatible  
+                parent_action_size = getattr(self._learning_system, 'action_dim', 0)
+                child_action_size = getattr(child._learning_system, 'action_dim', 0)
+                
+                if parent_action_size == child_action_size:
+                    # Safe to transfer - action spaces match
+                    child._learning_system.q_network.load_state_dict(self._learning_system.q_network.state_dict())
+                    child._learning_system.target_network.load_state_dict(self._learning_system.target_network.state_dict())
+                    
+                    # Transfer learning parameters with some variation
+                    child._learning_system.epsilon = min(0.9, self._learning_system.epsilon * 1.05)  # Slightly more exploration
+                    child._learning_system.steps_done = max(0, self._learning_system.steps_done - 50)  # Reset some progress
+                    
+                    print(f"🧠 Transferred attention network: {self.id[:6]} → {child.id[:6]} (action_size: {parent_action_size})")
+                else:
+                    # Action spaces don't match - let child use fresh network from Learning Manager
+                    print(f"🔄 Child {child.id[:6]} has different action space ({parent_action_size} → {child_action_size}) - using fresh network")
+            else:
+                print(f"⚠️ Cannot transfer network in crossover - one or both agents missing learning system")
+                
         except Exception as e:
             print(f"⚠️ Error transferring attention learning in crossover: {e}")
+            # Child will use its fresh network from Learning Manager
         
         child.crossover_count = 1
         return child
 
     def clone_with_mutation(self, mutation_rate: float = 0.1) -> 'EvolutionaryCrawlingAgent':
-        """Create a mutated clone with attention learning transfer."""
-        # Mutate physical parameters
+        """Create a mutated clone with proper network handling for different morphologies."""
+        # Mutate physical parameters (may change morphology)
         mutated_params = self.physical_params.mutate(mutation_rate)
         
         # Create lineage tracking
         child_lineage = self.parent_lineage + [self.id]
         
-        # Create cloned agent
+        # Create cloned agent with potentially different morphology
         clone = EvolutionaryCrawlingAgent(
             world=self.world,
             agent_id=None,  # Generate new UUID
@@ -814,15 +917,34 @@ class EvolutionaryCrawlingAgent:
             learning_approach="attention_deep_q_learning"  # Always attention learning
         )
         
-        # Transfer attention neural network weights
+        # CRITICAL FIX: Only transfer network weights if action spaces match
         try:
-            if hasattr(self, '_learning_system') and self._learning_system and hasattr(clone, '_learning_system') and clone._learning_system:
-                # Transfer neural network weights from parent to clone
-                clone._learning_system.q_network.load_state_dict(self._learning_system.q_network.state_dict())
-                clone._learning_system.target_network.load_state_dict(self._learning_system.target_network.state_dict())
-                print(f"🧠 Cloned attention network: {self.id[:6]} → {clone.id[:6]}")
+            if (hasattr(self, '_learning_system') and self._learning_system and 
+                hasattr(clone, '_learning_system') and clone._learning_system):
+                
+                # Check if action spaces are compatible
+                parent_action_size = getattr(self._learning_system, 'action_dim', 0)
+                clone_action_size = getattr(clone._learning_system, 'action_dim', 0)
+                
+                if parent_action_size == clone_action_size:
+                    # Safe to transfer - action spaces match
+                    clone._learning_system.q_network.load_state_dict(self._learning_system.q_network.state_dict())
+                    clone._learning_system.target_network.load_state_dict(self._learning_system.target_network.state_dict())
+                    
+                    # Transfer learning parameters
+                    clone._learning_system.epsilon = self._learning_system.epsilon * 1.1  # Slightly more exploration
+                    clone._learning_system.steps_done = max(0, self._learning_system.steps_done - 100)  # Reset some progress
+                    
+                    print(f"🧠 Cloned attention network: {self.id[:6]} → {clone.id[:6]} (action_size: {parent_action_size})")
+                else:
+                    # Action spaces don't match - let clone use fresh network from Learning Manager
+                    print(f"🔄 Clone {clone.id[:6]} has different action space ({parent_action_size} → {clone_action_size}) - using fresh network")
+            else:
+                print(f"⚠️ Cannot transfer network in cloning - one or both agents missing learning system")
+                
         except Exception as e:
-            print(f"⚠️ Error transferring attention learning in cloning: {e}")
+            print(f"⚠️ Error in network transfer during cloning: {e}")
+            # Clone will use its fresh network from Learning Manager
         
         clone.mutation_count = self.mutation_count + 1
         return clone
@@ -936,15 +1058,21 @@ class EvolutionaryCrawlingAgent:
                 segment_width = self.physical_params.arm_width * segment_width_ratio * scale * (1.0 + random.uniform(-variation, variation))
                 
                 if segment_index == 0:
-                    segment_pos = (
-                        self.body.position[0] + arm_attach_x - segment_length * np.cos(self.physical_params.arm_angle_offset),
-                        self.body.position[1] + arm_attach_y + segment_length * np.sin(self.physical_params.arm_angle_offset)
-                    )
+                    if self.body:
+                        segment_pos = (
+                            self.body.position[0] + arm_attach_x - segment_length * np.cos(self.physical_params.arm_angle_offset),
+                            self.body.position[1] + arm_attach_y + segment_length * np.sin(self.physical_params.arm_angle_offset)
+                        )
+                    else:
+                        segment_pos = (arm_attach_x, arm_attach_y)
                 else:
-                    segment_pos = (
-                        prev_body.position[0] + segment_length,
-                        prev_body.position[1]
-                    )
+                    if prev_body:
+                        segment_pos = (
+                            prev_body.position[0] + segment_length,
+                            prev_body.position[1]
+                        )
+                    else:
+                        segment_pos = (0, 0)
                 
                 segment_density, segment_friction = self._get_specialized_limb_properties()
                 segment_vertices = self._create_specialized_segment_shape(
@@ -1079,7 +1207,7 @@ class EvolutionaryCrawlingAgent:
                 
                 # Calculate world position with angle offset
                 local_pos = (wheel_pos[0], wheel_pos[1] + wheel_angle * 0.2)  # Slight height adjustment for angled wheels
-                world_pos = self.body.GetWorldPoint(local_pos)
+                world_pos = self.body.GetWorldPoint(local_pos) if self.body else local_pos
                 
                 # Create wheel body with dynamic properties
                 wheel_density = self.physical_params.wheel_density * wheel_stiffness
@@ -1185,39 +1313,180 @@ class EvolutionaryCrawlingAgent:
                     self.wheel_joints.append(joint)
 
     def apply_action_to_joints(self, action_tuple: Tuple) -> None:
-        """Apply action tuple to the robot's joints."""
+        """
+        Apply continuous action tuple to the robot's joints with enhanced coordination.
+        
+        This improved version:
+        1. Supports continuous action values (not just binary)
+        2. Maintains full motor effectiveness for complex robots
+        3. Adds coordination smoothing between joints
+        4. Provides better diagnostic information
+        """
+        # DIAGNOSTIC LOGGING: Check for critical failures
         if not hasattr(self, 'limb_joints') or not self.limb_joints:
+            print(f"❌ CRITICAL: Agent {self.id[:8]} has no limb_joints!")
             return
         
+        if not action_tuple:
+            print(f"❌ CRITICAL: Agent {self.id[:8]} received empty action_tuple!")
+            return
+        
+        # Log first action application for debugging
+        if not hasattr(self, '_action_debug_logged'):
+            print(f"🔧 DEBUG: Agent {self.id[:8]} first continuous action application:")
+            print(f"   💪 Limb joints: {len(self.limb_joints)} limbs")
+            print(f"   🎯 Action tuple: {action_tuple}")
+            print(f"   📊 Action range: {min(action_tuple):.3f} to {max(action_tuple):.3f}")
+            self._action_debug_logged = True
+        
+        joints_activated = 0
         joint_index = 0
+        total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+        
+        # Track joint coordination for smoother movement
+        joint_activations = []
         
         for limb_idx, limb_joints in enumerate(self.limb_joints):
+            limb_activations = []
+            
             for segment_idx, joint in enumerate(limb_joints):
                 if joint_index < len(action_tuple) and joint:
-                    action_value = action_tuple[joint_index]
+                    action_value = float(action_tuple[joint_index])
                     
+                    # Get joint parameters
                     if segment_idx < len(self.physical_params.joint_torques):
-                        torque = self.physical_params.joint_torques[segment_idx]
-                        speed = self.physical_params.joint_speeds[segment_idx]
+                        base_torque = self.physical_params.joint_torques[segment_idx]
+                        base_speed = self.physical_params.joint_speeds[segment_idx]
                     else:
-                        torque = self.physical_params.motor_torque
-                        speed = self.physical_params.motor_speed
+                        base_torque = self.physical_params.motor_torque
+                        base_speed = self.physical_params.motor_speed
                     
-                    if action_value != 0:
-                        # STABILITY FIX: Reduce action intensity for complex robots
-                        total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
-                        if total_joints > 10:  # Complex robots need gentler movements
-                            action_intensity = max(0.3, 10.0 / total_joints)
-                            action_value *= action_intensity
+                    # ENHANCED: Apply continuous action value directly (no binary constraints)
+                    # Removed previous stability fixes that reduced effectiveness
+                    if abs(action_value) > 0.01:  # Small threshold to avoid micro-movements
+                        # Scale motor speed by action value (continuous control)
+                        motor_speed = action_value * base_speed
                         
-                        joint.motorSpeed = action_value * speed
+                        # Apply torque scaling for very small actions (fine control)
+                        if abs(action_value) < 0.3:
+                            # Reduce torque for fine movements to prevent instability
+                            torque_multiplier = 0.5 + (abs(action_value) / 0.3) * 0.5
+                            torque = base_torque * torque_multiplier
+                        else:
+                            # Full torque for strong movements
+                            torque = base_torque
+                        
+                        # Apply to joint
+                        joint.motorSpeed = motor_speed
                         joint.maxMotorTorque = torque
                         joint.enableMotor = True
+                        joints_activated += 1
+                        
+                        limb_activations.append(abs(action_value))
+                        
+                        # Log detailed activation for first few times
+                        if not hasattr(self, '_joint_activation_logged'):
+                            print(f"🔧 DEBUG: Agent {self.id[:8]} activated joint {joint_index}")
+                            print(f"   ⚡ Continuous action: {action_value:.3f}")
+                            print(f"   🚀 Motor speed: {motor_speed:.3f}")
+                            print(f"   💪 Torque: {torque:.1f}")
                     else:
-                        joint.motorSpeed = 0
+                        # Disable motor for very small actions
+                        joint.motorSpeed = 0.0
                         joint.enableMotor = False
+                        limb_activations.append(0.0)
                 
                 joint_index += 1
+            
+            joint_activations.append(limb_activations)
+        
+        # COORDINATION ANALYSIS: Track coordination quality
+        if joints_activated > 0:
+            # Calculate coordination metrics
+            coordination_score = self._calculate_coordination_score(joint_activations)
+            
+            # Store coordination data for reward system
+            if not hasattr(self, 'coordination_history'):
+                self.coordination_history = []
+            
+            self.coordination_history.append({
+                'joints_activated': joints_activated,
+                'coordination_score': coordination_score,
+                'action_variance': float(np.var(action_tuple)) if len(action_tuple) > 1 else 0.0,
+                'total_energy': sum(abs(a) for a in action_tuple)
+            })
+            
+            # Keep only recent coordination data
+            if len(self.coordination_history) > 100:
+                self.coordination_history = self.coordination_history[-50:]
+            
+            # Mark first successful continuous action
+            if not hasattr(self, '_joint_activation_logged'):
+                print(f"✅ Agent {self.id[:8]} continuous action applied:")
+                print(f"   🎯 {joints_activated}/{total_joints} joints activated")
+                print(f"   🤝 Coordination score: {coordination_score:.3f}")
+                self._joint_activation_logged = True
+        
+        # MOVEMENT DETECTION: Enhanced tracking
+        self._update_movement_tracking(joints_activated, action_tuple)
+        
+        # DIAGNOSTICS: Alert for potential issues
+        if joints_activated == 0 and max(abs(a) for a in action_tuple) > 0.1:
+            if not hasattr(self, '_no_joints_warned'):
+                print(f"⚠️  WARNING: Agent {self.id[:8]} strong action but NO joints activated!")
+                print(f"   🎯 Action range: {min(action_tuple):.3f} to {max(action_tuple):.3f}")
+                self._no_joints_warned = True
+    
+    def _calculate_coordination_score(self, joint_activations: List[List[float]]) -> float:
+        """Calculate coordination quality score for joint activations."""
+        if not joint_activations:
+            return 0.0
+        
+        total_score = 0.0
+        scored_limbs = 0
+        
+        for limb_activations in joint_activations:
+            if len(limb_activations) <= 1:
+                continue
+            
+            # Proximal-to-distal coordination (natural movement pattern)
+            proximal_distal_score = 0.0
+            for i in range(len(limb_activations) - 1):
+                proximal = limb_activations[i]
+                distal = limb_activations[i + 1]
+                
+                # Reward gradual decrease in activation from proximal to distal
+                if proximal > 0.1 and distal > 0.1:
+                    if proximal >= distal * 0.7:  # Proximal should be stronger or similar
+                        proximal_distal_score += 0.5
+                    
+                    # Reward smooth activation differences
+                    activation_diff = abs(proximal - distal)
+                    if activation_diff < 0.4:  # Smooth transition
+                        proximal_distal_score += 0.3
+            
+            total_score += proximal_distal_score
+            scored_limbs += 1
+        
+        return total_score / max(1, scored_limbs)
+    
+    def _update_movement_tracking(self, joints_activated: int, action_tuple: Tuple):
+        """Update movement tracking with enhanced metrics."""
+        if not hasattr(self, 'movement_activity'):
+            self.movement_activity = []
+        
+        self.movement_activity.append({
+            'timestamp': time.time(),
+            'joints_activated': joints_activated,
+            'action_tuple': action_tuple,
+            'action_energy': sum(abs(a) for a in action_tuple),
+            'max_action': max(abs(a) for a in action_tuple),
+            'coordination_quality': getattr(self, '_last_coordination_score', 0.0)
+        })
+        
+        # Keep only recent activity
+        if len(self.movement_activity) > 100:
+            self.movement_activity = self.movement_activity[-50:]
 
     def _generate_dynamic_action_space(self) -> List[Tuple]:
         """Generate action space based on robot morphology."""
@@ -1226,29 +1495,113 @@ class EvolutionaryCrawlingAgent:
     
     @staticmethod
     def _generate_dynamic_action_space_static(total_joints: int) -> List[Tuple]:
-        """Static method to generate action space based on joint count."""
+        """
+        Generate enhanced action space with continuous values and coordination patterns.
+        
+        This new approach provides:
+        1. Continuous joint speeds (not just binary)
+        2. Sophisticated coordination patterns
+        3. Morphology-aware action combinations
+        4. Progressive complexity scaling
+        """
         actions = []
         
-        # Add "no movement" action
-        actions.append((0,) * total_joints)
+        # 1. BASELINE ACTIONS
+        # Rest position (all joints at 0)
+        actions.append((0.0,) * total_joints)
         
-        # Single joint movements
+        # 2. SINGLE JOINT CONTINUOUS ACTIONS
+        # Use multiple speed levels for each joint
+        speed_levels = [0.25, 0.5, 0.75, 1.0]  # Fine-grained control
         for joint_idx in range(total_joints):
-            action = [0] * total_joints
-            action[joint_idx] = 1
-            actions.append(tuple(action))
-            
-            action = [0] * total_joints
-            action[joint_idx] = -1
-            actions.append(tuple(action))
+            for speed in speed_levels:
+                # Positive direction
+                action = [0.0] * total_joints
+                action[joint_idx] = speed
+                actions.append(tuple(action))
+                
+                # Negative direction
+                action = [0.0] * total_joints
+                action[joint_idx] = -speed
+                actions.append(tuple(action))
         
-        # Simple combinations for first two joints
+        # 3. COORDINATED LIMB PATTERNS
         if total_joints >= 2:
-            actions.append(tuple([1, 1] + [0] * (total_joints - 2)))
-            actions.append(tuple([-1, -1] + [0] * (total_joints - 2)))
-            actions.append(tuple([1, -1] + [0] * (total_joints - 2)))
-            actions.append(tuple([-1, 1] + [0] * (total_joints - 2)))
+            # Proximal-to-distal waves (natural movement patterns)
+            for intensity in [0.5, 0.8]:
+                # Forward wave
+                wave_action = []
+                for i in range(total_joints):
+                    wave_strength = intensity * (1.0 - i * 0.1)  # Decreasing intensity
+                    wave_action.append(max(0.1, wave_strength))
+                actions.append(tuple(wave_action))
+                
+                # Backward wave
+                wave_action = []
+                for i in range(total_joints):
+                    wave_strength = intensity * (1.0 - i * 0.1)
+                    wave_action.append(-max(0.1, wave_strength))
+                actions.append(tuple(wave_action))
         
+        # 4. ALTERNATING PATTERNS (like walking gaits)
+        if total_joints >= 4:
+            # Alternating limb activation
+            for base_speed in [0.4, 0.7]:
+                # Even joints forward, odd joints backward
+                alt_action = []
+                for i in range(total_joints):
+                    if i % 2 == 0:
+                        alt_action.append(base_speed)
+                    else:
+                        alt_action.append(-base_speed * 0.8)
+                actions.append(tuple(alt_action))
+                
+                # Reverse alternating pattern
+                alt_action = []
+                for i in range(total_joints):
+                    if i % 2 == 0:
+                        alt_action.append(-base_speed)
+                    else:
+                        alt_action.append(base_speed * 0.8)
+                actions.append(tuple(alt_action))
+        
+        # 5. LIMB-SPECIFIC COORDINATION
+        # For multi-limb robots, coordinate within each limb
+        if total_joints >= 6:  # Multiple limbs
+            segments_per_limb = 3 if total_joints >= 9 else 2
+            num_limbs = total_joints // segments_per_limb
+            
+            for limb_idx in range(min(num_limbs, 3)):  # Max 3 limbs for action space
+                # Limb-specific actions
+                limb_action = [0.0] * total_joints
+                start_joint = limb_idx * segments_per_limb
+                end_joint = min(start_joint + segments_per_limb, total_joints)
+                
+                # Coordinated limb extension
+                for joint_offset in range(end_joint - start_joint):
+                    joint_idx = start_joint + joint_offset
+                    # Proximal joints stronger than distal
+                    strength = 0.8 - (joint_offset * 0.15)
+                    limb_action[joint_idx] = strength
+                actions.append(tuple(limb_action))
+                
+                # Coordinated limb contraction
+                limb_action = [0.0] * total_joints
+                for joint_offset in range(end_joint - start_joint):
+                    joint_idx = start_joint + joint_offset
+                    strength = 0.8 - (joint_offset * 0.15)
+                    limb_action[joint_idx] = -strength
+                actions.append(tuple(limb_action))
+        
+        # 6. STABILIZATION PATTERNS
+        # Gentle all-joint coordination for stability
+        for overall_intensity in [0.2, 0.4]:
+            # All joints slight forward
+            actions.append((overall_intensity,) * total_joints)
+            # All joints slight backward
+            actions.append((-overall_intensity,) * total_joints)
+        
+        print(f"📈 Generated {len(actions)} continuous actions for {total_joints} joints")
         return actions
         
 
@@ -1296,7 +1649,7 @@ class EvolutionaryCrawlingAgent:
             print(f"⚠️ Error in destroy() for agent {getattr(self, 'id', 'unknown')}: {e}")
             self._destroyed = True 
 
-    def _get_coordination_reward(self) -> float:
+    def _get_coordination_reward(self, displacement: float) -> float:
         """Calculate advanced coordination reward for multi-limb robots."""
         try:
             if not hasattr(self, 'limb_joints') or not self.limb_joints:
@@ -1306,76 +1659,50 @@ class EvolutionaryCrawlingAgent:
             total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
             
             # 1. INTER-LIMB COORDINATION REWARD
-            # Reward for symmetric limb movement patterns  
-            if self.physical_params.num_arms >= 2:
-                limb_speeds = []
-                for limb_joints in self.limb_joints:
-                    limb_speed = 0.0
-                    for joint in limb_joints:
+            # Reward for coordinating multiple limbs together
+            if self.physical_params.num_arms > 1:
+                coordination_reward = 0.0
+                
+                # Compare activity across limbs
+                limb_activities = []
+                segments_per_limb = self.physical_params.segments_per_limb
+                
+                for limb_idx in range(self.physical_params.num_arms):
+                    limb_activity = 0.0
+                    start_joint = limb_idx * segments_per_limb
+                    end_joint = min(start_joint + segments_per_limb, len(self.limb_joints[0]) if self.limb_joints else 0)
+                    
+                    limb_joints = self.limb_joints[limb_idx] if limb_idx < len(self.limb_joints) else []
+                    for joint_idx in range(len(limb_joints)):
+                        joint = limb_joints[joint_idx]
                         if joint:
-                            limb_speed += abs(joint.motorSpeed)
-                    limb_speeds.append(limb_speed)
-                
-                if len(limb_speeds) >= 2:
-                    # Reward for balanced limb usage (avoid over-reliance on one limb)
-                    speed_variance = np.var(limb_speeds) if len(limb_speeds) > 1 else 0
-                    if speed_variance < 1.0:  # Low variance = good balance
-                        total_coordination_reward += 0.04
+                            limb_activity += abs(joint.motorSpeed)
                     
-                    # Bonus for symmetric movement (front limbs similar, back limbs similar)
-                    if len(limb_speeds) == 2:  # Two limbs
-                        speed_diff = abs(limb_speeds[0] - limb_speeds[1])
-                        if speed_diff < 0.5:  # Similar speeds
-                            total_coordination_reward += 0.03
-            
-            # 2. INTRA-LIMB COORDINATION REWARD  
-            # Reward for smooth joint chains within each limb
-            for limb_joints in self.limb_joints:
-                if len(limb_joints) >= 2:
-                    joint_speeds = [abs(joint.motorSpeed) if joint else 0 for joint in limb_joints]
-                    
-                    # Reward for proximal-to-distal coordination (base joint leads, tip follows)
-                    if len(joint_speeds) >= 2:
-                        base_speed = joint_speeds[0]
-                        tip_speed = joint_speeds[-1]
-                        
-                        # Natural coordination: base joint slightly more active
-                        if 0.1 < base_speed < 3.0 and 0.1 < tip_speed < 2.0:
-                            if base_speed >= tip_speed * 0.8:  # Base leads or matches
-                                total_coordination_reward += 0.02
-            
-            # 3. COMPLEXITY BONUS/PENALTY
-            # More complex robots get bonus for successful coordination
-            # But penalty if they're just flailing around
-            if total_joints > 6:  # Complex robots (more than 6 joints)
-                active_joints = sum(1 for limb_joints in self.limb_joints 
-                                  for joint in limb_joints 
-                                  if joint and abs(joint.motorSpeed) > 0.1)
+                    limb_activities.append(limb_activity)
                 
-                joint_usage_ratio = active_joints / total_joints
+                # Reward for balanced limb usage
+                if limb_activities and max(limb_activities) > 0.1:
+                    activity_balance = 1.0 - (max(limb_activities) - min(limb_activities)) / max(limb_activities)
+                    coordination_reward += activity_balance * 0.015  # Max 0.015
                 
-                # Reward for using reasonable portion of joints (not all or none)
-                if 0.3 <= joint_usage_ratio <= 0.8:
-                    complexity_bonus = 0.03 * (total_joints / 18.0)  # Scale with complexity
-                    total_coordination_reward += complexity_bonus
-                elif joint_usage_ratio < 0.2:  # Under-utilizing complex morphology
-                    total_coordination_reward -= 0.02
-                elif joint_usage_ratio > 0.9:  # Over-activating (likely inefficient)
-                    total_coordination_reward -= 0.01
+                total_coordination_reward += coordination_reward
             
-            # 4. MORPHOLOGY-SPECIFIC REWARDS
-            # Reward based on limb specialization
-            if hasattr(self.physical_params, 'limb_specialization'):
-                if self.physical_params.limb_specialization == "climbing":
-                    # Climbing robots benefit from alternating limb patterns
-                    # (Implementation would check for alternating patterns)
-                    total_coordination_reward += 0.01
-                elif self.physical_params.limb_specialization == "digging":
-                    # Digging robots benefit from synchronized power strokes
-                    # (Implementation would check for synchronized patterns)
-                    total_coordination_reward += 0.01
+            # 2. ENHANCED COORDINATION REWARD
+            # Use the new sophisticated coordination reward system
+            enhanced_coordination_reward = self._get_enhanced_coordination_reward(displacement)
+            total_coordination_reward += enhanced_coordination_reward
             
-            # Cap the coordination reward to prevent it from dominating
+            # 3. PROGRESSIVE MOVEMENT REWARD
+            # Replace simple displacement with progressive reward
+            progressive_movement_reward = self._get_progressive_movement_reward(displacement)
+            total_coordination_reward += progressive_movement_reward
+            
+            # 4. MULTI-LIMB BONUS
+            # Extra reward for multi-limb robots that achieve good coordination
+            if self.physical_params.num_arms > 1 and displacement > 0.01:
+                multi_limb_bonus = min(0.02, self.physical_params.num_arms * 0.005)
+                total_coordination_reward += multi_limb_bonus
+            
             return np.clip(total_coordination_reward, -0.05, 0.08)
             
         except Exception as e:
@@ -1417,3 +1744,166 @@ class EvolutionaryCrawlingAgent:
             
         except Exception as e:
             return 0.0 
+
+    def _get_enhanced_coordination_reward(self, displacement: float) -> float:
+        """
+        Enhanced coordination reward system that promotes effective multi-limb movement.
+        
+        This reward system specifically addresses the joint activation problem by:
+        1. Rewarding coordinated joint usage patterns
+        2. Penalizing inefficient energy expenditure
+        3. Promoting smooth, progressive movement
+        4. Encouraging exploration of complex coordination patterns
+        """
+        try:
+            if not hasattr(self, 'coordination_history') or not self.coordination_history:
+                return 0.0
+            
+            total_coordination_reward = 0.0
+            recent_coordination = self.coordination_history[-5:]  # Last 5 coordination events
+            
+            # 1. JOINT ACTIVATION EFFICIENCY REWARD
+            # Reward for activating an appropriate number of joints
+            if recent_coordination:
+                avg_joints_activated = sum(c['joints_activated'] for c in recent_coordination) / len(recent_coordination)
+                total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+                
+                # Optimal joint usage ratio depends on robot complexity
+                if total_joints <= 4:  # Simple robots
+                    optimal_ratio = 0.5  # Use about half the joints
+                elif total_joints <= 8:  # Medium complexity
+                    optimal_ratio = 0.4  # Use 40% of joints
+                else:  # Complex robots
+                    optimal_ratio = 0.3  # Use 30% of joints efficiently
+                
+                actual_ratio = avg_joints_activated / total_joints
+                
+                # Reward for being near optimal ratio
+                ratio_diff = abs(actual_ratio - optimal_ratio)
+                if ratio_diff < 0.2:  # Within 20% of optimal
+                    efficiency_reward = 0.02 * (0.2 - ratio_diff) * 5  # Max 0.02 reward
+                    total_coordination_reward += efficiency_reward
+            
+            # 2. COORDINATION QUALITY REWARD
+            # Reward for smooth, coordinated movement patterns
+            if recent_coordination:
+                avg_coordination_score = sum(c['coordination_score'] for c in recent_coordination) / len(recent_coordination)
+                
+                # Scale reward by coordination quality
+                coordination_quality_reward = avg_coordination_score * 0.03  # Max 0.03 for perfect coordination
+                total_coordination_reward += coordination_quality_reward
+            
+            # 3. ENERGY EFFICIENCY REWARD
+            # Reward for achieving displacement with reasonable energy expenditure
+            if displacement > 0.001 and recent_coordination:
+                total_energy = sum(c['total_energy'] for c in recent_coordination)
+                avg_energy = total_energy / len(recent_coordination)
+                
+                # Calculate energy efficiency: movement per unit energy
+                if avg_energy > 0.1:  # Avoid division by zero
+                    energy_efficiency = displacement / avg_energy
+                    
+                    # Reward efficiency, but cap it to prevent exploitation
+                    efficiency_reward = min(0.025, energy_efficiency * 0.01)
+                    total_coordination_reward += efficiency_reward
+            
+            # 4. MOVEMENT PROGRESSION REWARD
+            # Extra reward for consistent forward movement with good coordination
+            if len(recent_coordination) >= 3:
+                # Check if coordination is improving over time
+                early_coord = sum(c['coordination_score'] for c in recent_coordination[:2]) / 2
+                late_coord = sum(c['coordination_score'] for c in recent_coordination[-2:]) / 2
+                
+                if late_coord > early_coord + 0.1:  # Coordination improving
+                    improvement_reward = 0.015  # Small bonus for improvement
+                    total_coordination_reward += improvement_reward
+            
+            # 5. COMPLEXITY BONUS
+            # Bonus for successfully coordinating complex morphologies
+            total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+            if total_joints > 6 and displacement > 0.01:  # Complex robots achieving movement
+                complexity_bonus = min(0.02, (total_joints - 6) * 0.002)  # Scale with complexity
+                total_coordination_reward += complexity_bonus
+            
+            # 6. ANTI-FLAILING PENALTY
+            # Penalize excessive action variance without effective movement
+            if recent_coordination:
+                avg_variance = sum(c['action_variance'] for c in recent_coordination) / len(recent_coordination)
+                
+                # High variance with low displacement suggests flailing
+                if avg_variance > 0.3 and displacement < 0.005:
+                    flailing_penalty = -0.01 * (avg_variance - 0.3)
+                    total_coordination_reward += flailing_penalty
+            
+            # Ensure reasonable bounds
+            total_coordination_reward = max(-0.05, min(0.08, total_coordination_reward))
+            
+            return total_coordination_reward
+            
+        except Exception as e:
+            # Don't let coordination reward calculation break the system
+            return 0.0
+    
+    def _get_progressive_movement_reward(self, displacement: float) -> float:
+        """
+        Progressive movement reward that adapts to robot complexity and encourages learning.
+        
+        This reward system:
+        1. Provides stronger initial rewards for any movement
+        2. Gradually increases standards as robot improves
+        3. Adapts to robot morphology complexity
+        4. Encourages sustained forward progress
+        """
+        try:
+            if displacement <= 0:
+                return 0.0
+            
+            # Base movement reward - stronger for initial learning
+            base_reward = displacement * 8.0  # Increased from 5.0
+            
+            # 1. COMPLEXITY ADAPTATION
+            # Simpler robots should move more easily, complex robots get bonus for any movement
+            total_joints = self.physical_params.num_arms * self.physical_params.segments_per_limb
+            
+            if total_joints <= 4:  # Simple robots
+                complexity_multiplier = 1.0  # Standard reward
+            elif total_joints <= 8:  # Medium complexity
+                complexity_multiplier = 1.2  # 20% bonus for medium complexity
+            else:  # Complex robots
+                complexity_multiplier = 1.5  # 50% bonus for complex robots
+            
+            base_reward *= complexity_multiplier
+            
+            # 2. LEARNING STAGE ADAPTATION
+            # Provide stronger rewards early in learning
+            if hasattr(self, 'steps') and self.steps > 0:
+                learning_stage_multiplier = max(0.5, 1.0 - (self.steps / 10000.0))  # Reduce over time
+                base_reward *= (1.0 + learning_stage_multiplier)
+            
+            # 3. SUSTAINED MOVEMENT BONUS
+            # Reward for maintaining movement over time
+            if hasattr(self, 'last_positions') and len(self.last_positions) >= 5:
+                recent_displacements = []
+                for i in range(1, min(6, len(self.last_positions))):
+                    recent_disp = self.last_positions[-i][0] - self.last_positions[-i-1][0]
+                    recent_displacements.append(recent_disp)
+                
+                if recent_displacements:
+                    avg_recent_displacement = sum(recent_displacements) / len(recent_displacements)
+                    if avg_recent_displacement > 0.001:  # Sustained forward movement
+                        sustained_bonus = min(0.02, avg_recent_displacement * 2.0)
+                        base_reward += sustained_bonus
+            
+            # 4. VELOCITY CONSISTENCY REWARD
+            # Reward for maintaining good velocity
+            if hasattr(self, 'body') and self.body:
+                current_velocity = self.body.linearVelocity.x
+                if current_velocity > 0.1:
+                    velocity_bonus = min(0.015, current_velocity * 0.1)
+                    base_reward += velocity_bonus
+            
+            return base_reward
+            
+        except Exception as e:
+            # Fallback to simple displacement reward
+            return displacement * 5.0

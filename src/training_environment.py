@@ -1230,7 +1230,7 @@ class TrainingEnvironment:
             traceback.print_exc()
     
     def _replace_dead_agents(self, dead_agents):
-        """Replace dead agents while transferring their neural networks to prevent network explosion."""
+        """Replace dead agents by cloning top-performing robots with slight mutations."""
         with self._physics_lock:
             try:
                 for dead_agent in dead_agents:
@@ -1242,8 +1242,8 @@ class TrainingEnvironment:
                     if dead_agent in self.agents:
                         self.agents.remove(dead_agent)
                     
-                    # Create replacement agent
-                    replacement_agent = self._create_replacement_agent()
+                    # Create replacement agent by cloning a top performer
+                    replacement_agent = self._create_replacement_agent_from_clone()
                     if replacement_agent:
                         self.agents.append(replacement_agent)
                         
@@ -1266,10 +1266,155 @@ class TrainingEnvironment:
                             # Fallback: assign random learning approach
                             self._assign_random_learning_approach_single(replacement_agent)
                         
-                        print(f"🐣 Spawned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
+                        print(f"👯 Cloned replacement agent {replacement_agent.id} for dead agent {dead_agent.id}")
                 
             except Exception as e:
                 print(f"❌ Error replacing dead agents: {e}")
+
+    def _get_top_performers_for_cloning(self, count: int = 5):
+        """Get top performing agents for cloning based on multiple fitness metrics."""
+        try:
+            # Get all living agents
+            living_agents = [agent for agent in self.agents if not getattr(agent, '_destroyed', False) and agent.body]
+            
+            if len(living_agents) < 2:
+                print("⚠️ Not enough living agents for cloning, using available agents")
+                return living_agents if living_agents else []
+            
+            # Score agents using multiple metrics for better selection
+            agent_scores = []
+            for agent in living_agents:
+                try:
+                    # Primary metric: total reward (experience and learning progress)
+                    total_reward = getattr(agent, 'total_reward', 0.0)
+                    
+                    # Secondary metric: distance traveled (exploration ability)
+                    if agent.body:
+                        distance = agent.body.position.x - agent.initial_position[0]
+                    else:
+                        distance = 0.0
+                    
+                    # Tertiary metric: survival time (steps alive indicates robustness)
+                    survival_time = getattr(agent, 'steps', 0)
+                    
+                    # Additional metric: food consumption (successful survival)
+                    food_consumed = 0.0
+                    if agent.id in self.robot_stats:
+                        food_consumed = self.robot_stats[agent.id].get('food_consumed', 0.0)
+                    
+                    # Composite score: weighted combination of metrics
+                    composite_score = (
+                        total_reward * 1.0 +           # Learning performance (highest weight)
+                        max(0, distance) * 0.3 +       # Exploration success
+                        survival_time * 0.0001 +       # Robustness (scaled down)
+                        food_consumed * 0.5             # Survival success
+                    )
+                    
+                    agent_scores.append((agent, composite_score))
+                    
+                except Exception as e:
+                    print(f"⚠️ Error scoring agent {agent.id}: {e}")
+                    # Give a minimal score so agent can still be selected if needed
+                    agent_scores.append((agent, 0.001))
+            
+            # Sort by composite score (highest first)
+            agent_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            # Return top performers (at least 1, up to requested count)
+            top_count = min(max(1, count), len(agent_scores))
+            top_performers = [agent for agent, score in agent_scores[:top_count]]
+            
+            # Log the selection for monitoring
+            if len(top_performers) > 0:
+                best_score = agent_scores[0][1]
+                worst_score = agent_scores[-1][1] if len(agent_scores) > 1 else best_score
+                print(f"🏆 Selected {len(top_performers)} top performers for cloning (scores: {best_score:.3f} - {worst_score:.3f})")
+                
+                # Show details for top 3
+                for i, (agent, score) in enumerate(agent_scores[:3]):
+                    reward = getattr(agent, 'total_reward', 0.0)
+                    print(f"   #{i+1}: Agent {str(agent.id)[:8]} - Score: {score:.3f}, Reward: {reward:.3f}")
+            
+            return top_performers
+            
+        except Exception as e:
+            print(f"❌ Error getting top performers for cloning: {e}")
+            # Fallback: return any available living agents
+            return [agent for agent in self.agents if not getattr(agent, '_destroyed', False) and agent.body][:count]
+
+    def _create_replacement_agent_from_clone(self):
+        """Create a new agent by cloning a top performer with slight mutation."""
+        try:
+            # Get top performers for cloning
+            top_performers = self._get_top_performers_for_cloning(count=5)
+            
+            if not top_performers:
+                print("⚠️ No top performers available, creating random agent as fallback")
+                return self._create_replacement_agent()  # Fallback to original method
+            
+            # Select a random top performer to add variety
+            import random
+            selected_performer = random.choice(top_performers)
+            
+            # Determine mutation rate based on performer quality
+            performer_reward = getattr(selected_performer, 'total_reward', 0.0)
+            if performer_reward > 10.0:
+                mutation_rate = 0.03  # Low mutation for very successful agents
+            elif performer_reward > 5.0:
+                mutation_rate = 0.05  # Medium mutation for good agents
+            elif performer_reward > 1.0:
+                mutation_rate = 0.08  # Higher mutation for moderately successful agents
+            else:
+                mutation_rate = 0.12  # Higher mutation for less successful agents
+            
+            # 🌍 DYNAMIC WORLD: Spawn near current leftmost (beginning) position
+            spawn_position = self._get_current_spawn_position()
+            
+            print(f"👯 Cloning top performer {str(selected_performer.id)[:8]} (reward: {performer_reward:.3f}) with {mutation_rate:.2%} mutation")
+            
+            # Clone the selected performer with mutation
+            if hasattr(selected_performer, 'clone_with_mutation'):
+                cloned_agent = selected_performer.clone_with_mutation(mutation_rate)
+                
+                # Update spawn position for the clone
+                cloned_agent.initial_position = spawn_position
+                if hasattr(cloned_agent, 'reset_position'):
+                    cloned_agent.reset_position()
+                elif cloned_agent.body:
+                    cloned_agent.body.position = spawn_position
+                    cloned_agent.body.linearVelocity = (0, 0)
+                    cloned_agent.body.angularVelocity = 0
+                
+                # Add training environment reference and register with reward signal adapter
+                if hasattr(self, 'reward_signal_adapter') and self.reward_signal_adapter:
+                    cloned_agent._training_env = self
+                    
+                    agent_type = getattr(cloned_agent, 'learning_approach', 'evolutionary')
+                    self.reward_signal_adapter.register_agent(
+                        cloned_agent.id,
+                        agent_type,
+                        metadata={
+                            'physical_params': str(cloned_agent.physical_params) if hasattr(cloned_agent, 'physical_params') else None,
+                            'created_at': time.time(),
+                            'source': 'cloned_replacement',
+                            'parent_id': selected_performer.id,
+                            'parent_reward': performer_reward,
+                            'mutation_rate': mutation_rate
+                        }
+                    )
+                
+                print(f"✅ Successfully cloned {str(selected_performer.id)[:8]} → {str(cloned_agent.id)[:8]} (mutation: {mutation_rate:.2%})")
+                return cloned_agent
+            else:
+                print(f"⚠️ Selected performer {selected_performer.id} doesn't support cloning, creating random agent")
+                return self._create_replacement_agent()  # Fallback to original method
+                
+        except Exception as e:
+            print(f"❌ Error creating replacement agent from clone: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to original random agent creation
+            return self._create_replacement_agent()
     
     def _get_current_spawn_position(self):
         """Get the current spawn position near the leftmost (beginning) boundary of the world."""
@@ -1552,6 +1697,13 @@ class TrainingEnvironment:
                         immediate_reward = getattr(agent, 'immediate_reward', 0.0)
                         self.robot_stats[agent_id]['episode_reward'] = immediate_reward
                 self.robot_stats[agent_id]['action_history'] = getattr(agent, 'action_history', [])
+                
+                # UPDATE Q_UPDATES: Get training count from agent for AttentionDeepQLearning
+                if hasattr(agent, 'get_q_updates'):
+                    self.robot_stats[agent_id]['q_updates'] = agent.get_q_updates()
+                else:
+                    # Fallback for older agents
+                    self.robot_stats[agent_id]['q_updates'] = self.robot_stats[agent_id].get('q_updates', 0)
                 
             except Exception as e:
                 logger.error(f"⚠️  Error updating stats for agent {agent_id}: {e}")
@@ -4054,15 +4206,35 @@ class TrainingEnvironment:
             if not hasattr(self, 'last_buffer_maintenance'):
                 self.last_buffer_maintenance = time.time()
             
-            if current_time - self.last_buffer_maintenance > 300.0:  # 5 minutes
+            # CRITICAL FIX: Much more frequent buffer maintenance due to high agent turnover
+            buffer_maintenance_interval = 60.0  # Every 1 minute instead of 5 minutes
+            if time.time() - self.last_buffer_maintenance > buffer_maintenance_interval:
                 if self.learning_manager:
                     try:
-                        maintenance_result = self.learning_manager.maintain_buffers()
-                        if maintenance_result.get('maintenance_performed', False):
-                            print(f"🔧 Network buffer maintenance: +{maintenance_result['networks_added']} networks, {maintenance_result['total_buffered_after']} total buffered")
+                        self.learning_manager._refill_buffers_if_needed()
+                        self.last_buffer_maintenance = time.time()
+                        print(f"🔧 Performed proactive network buffer maintenance")
                     except Exception as e:
                         print(f"⚠️ Error during buffer maintenance: {e}")
-                self.last_buffer_maintenance = current_time
+            
+            # ADDITIONAL: Emergency buffer refill if we detect depletion patterns
+            if not hasattr(self, 'last_emergency_refill'):
+                self.last_emergency_refill = time.time()
+                
+            # Check if we've had recent emergency network creation (indicating depletion)
+            emergency_refill_interval = 30.0  # Check every 30 seconds for emergency situations
+            if time.time() - self.last_emergency_refill > emergency_refill_interval:
+                if self.learning_manager:
+                    try:
+                        # Force an emergency refill if any pool is critically low
+                        self.learning_manager._refill_buffers_if_needed()
+                        self.last_emergency_refill = time.time()
+                    except Exception as e:
+                        print(f"⚠️ Error during emergency buffer refill: {e}")
+            
+            # Clean agent network references for truly inactive agents
+            if cleanup_due:
+                cleaned_count += 1
             
             # Clean up ecosystem data
             if hasattr(self.ecosystem_dynamics, 'food_sources'):

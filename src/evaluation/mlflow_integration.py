@@ -158,9 +158,8 @@ class MLflowIntegration:
             print(f"🔬 Started MLflow run: {run_name}")
             print(f"📈 System metrics will be logged automatically to the 'System Metrics' section")
             
-            # FIXED: Now that we have an active run, initialize system metrics
-            # This prevents MLflow from auto-creating runs for system metrics
-            self._initialize_system_metrics()
+            # TEMPORARY: Disable system metrics initialization to test run context issue
+            # self._initialize_system_metrics()
             
             # Log initial parameters
             mlflow.log_param("population_size", population_size)
@@ -231,6 +230,17 @@ class MLflowIntegration:
                 # The training environment should have already started the run
                 print(f"⚠️  No active MLflow run for population metrics. Current run must be started first.")
                 return
+            
+            # CRITICAL FIX: Ensure the correct run is active in the MLflow context
+            # This prevents MLflow from auto-creating new runs when logging metrics
+            current_active_run = mlflow.active_run()
+            if current_active_run is None or current_active_run.info.run_id != self.current_run.info.run_id:
+                print(f"🔄 Reactivating MLflow run context: {self.current_run.info.run_id}")
+                # End any incorrect active run
+                if current_active_run is not None:
+                    mlflow.end_run()
+                # Start the correct run context
+                mlflow.start_run(run_id=self.current_run.info.run_id)
             
             # FIXED: Use actual world step count for meaningful time series
             # Fall back to generation if step_count not provided

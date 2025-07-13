@@ -148,36 +148,59 @@ class RobotMemoryPool:
                     position: Tuple[float, float],
                     physical_params: Optional[PhysicalParameters] = None,
                     apply_size_mutations: bool = True):
-        """Reset a robot for reuse - PRESERVE neural network and identity for proper memory pool semantics."""
+        """Reset a robot for reuse - handle morphology changes by releasing incompatible networks."""
         robot_id = robot.id  # KEEP the same ID to preserve learning continuity
         
-        # Apply size mutations to existing physical parameters if enabled
+        # Store original morphology for comparison
+        original_num_arms = getattr(robot.physical_params, 'num_arms', 1) if hasattr(robot, 'physical_params') else 1
+        original_segments_per_limb = getattr(robot.physical_params, 'segments_per_limb', 2) if hasattr(robot, 'physical_params') else 2
+        original_action_size = getattr(robot, 'action_size', 9) if hasattr(robot, 'action_size') else 9
+        
+        # Apply size mutations or new physical parameters
         if apply_size_mutations and hasattr(robot, 'physical_params') and robot.physical_params:
-            # CRITICAL FIX: Preserve morphology to maintain action space compatibility
-            # Store current morphology before mutations
-            original_num_arms = robot.physical_params.num_arms
-            original_segments_per_limb = robot.physical_params.segments_per_limb
-            original_action_size = robot.action_size if hasattr(robot, 'action_size') else None
-            
-            # Apply size-only mutations while preserving neural network
-            mutated_params = robot.physical_params.mutate_sizes_only(mutation_rate=0.12)
-            
-            # CRITICAL: Restore morphology parameters to preserve action space
-            mutated_params.num_arms = original_num_arms
-            mutated_params.segments_per_limb = original_segments_per_limb
-            
+            # Apply full mutations INCLUDING morphology changes
+            mutated_params = robot.physical_params.mutate(mutation_rate=0.12)
             robot.physical_params = mutated_params
-            
-            # Verify action space hasn't changed (critical for network compatibility)
-            if original_action_size and hasattr(robot, 'action_size'):
-                if robot.action_size != original_action_size:
-                    print(f"⚠️ WARNING: Action space changed for pooled robot {robot_id}: {original_action_size} → {robot.action_size}")
-            
-            print(f"🧬 Applied size mutations to pooled robot {robot_id} (preserved morphology: {original_num_arms} limbs × {original_segments_per_limb} segments)")
+            print(f"🧬 Applied full mutations to pooled robot {robot_id} (allowing morphology changes)")
         elif physical_params is not None:
             robot.physical_params = physical_params.validate_and_repair()
+            print(f"🔧 Applied new physical parameters to pooled robot {robot_id}")
         
-        # Reset ONLY basic state - PRESERVE neural network and learning
+        # Check if morphology changed (affecting action space)
+        new_num_arms = getattr(robot.physical_params, 'num_arms', 1) if hasattr(robot, 'physical_params') else 1
+        new_segments_per_limb = getattr(robot.physical_params, 'segments_per_limb', 2) if hasattr(robot, 'physical_params') else 2
+        
+        morphology_changed = (new_num_arms != original_num_arms or new_segments_per_limb != original_segments_per_limb)
+        
+        if morphology_changed:
+            # CRITICAL FIX: Release old network and let robot get a new one from Learning Manager
+            if self.learning_manager and hasattr(robot, 'id') and hasattr(robot, '_learning_system') and robot._learning_system:
+                try:
+                    # Calculate performance score for the old network
+                    performance_score = self._calculate_performance_score(robot)
+                    
+                    # Release the old network back to Learning Manager
+                    self.learning_manager.release_agent_network(robot.id, performance_score)
+                    
+                    # Clear the network reference so robot will get a new one
+                    robot._learning_system = None
+                    
+                    print(f"🔄 Released incompatible network from pooled robot {robot_id} due to morphology change ({original_num_arms}×{original_segments_per_limb} → {new_num_arms}×{new_segments_per_limb})")
+                    print(f"🆕 Robot {robot_id} will acquire new network with correct action space when reinitialized")
+                    
+                except Exception as e:
+                    print(f"⚠️ Failed to release network during morphology change: {e}")
+                    # Clear network anyway to prevent dimension mismatch
+                    robot._learning_system = None
+            else:
+                print(f"🔄 Morphology changed for robot {robot_id} - clearing network reference")
+                robot._learning_system = None
+        else:
+            # Morphology unchanged - can preserve network
+            network_info = "preserving learned network (compatible morphology)" if hasattr(robot, '_learning_system') and robot._learning_system else "no network"
+            print(f"✅ Morphology preserved for robot {robot_id} - {network_info}")
+        
+        # Reset ONLY basic state - preserve or clear network as determined above
         robot.total_reward = 0.0
         robot.steps = 0
         setattr(robot, '_destroyed', False)
@@ -191,12 +214,16 @@ class RobotMemoryPool:
             robot.body.angularVelocity = 0
             robot.body.awake = True
         
-        # Log what learning state is being preserved
-        network_info = "no network"
-        if hasattr(robot, '_learning_system') and robot._learning_system:
-            network_info = "preserving learned network"
+        # Force robot to reinitialize its action space and get appropriate network
+        if hasattr(robot, '_generate_dynamic_action_space'):
+            try:
+                robot.actions = robot._generate_dynamic_action_space()
+                robot.action_size = len(robot.actions)
+                print(f"🎯 Recalculated action space for robot {robot_id}: {robot.action_size} actions")
+            except Exception as e:
+                print(f"⚠️ Error recalculating action space for robot {robot_id}: {e}")
         
-        print(f"🔄 Reset pooled robot {robot_id} at ({position[0]:.1f}, {position[1]:.1f}) - {network_info}")
+        print(f"🔄 Reset pooled robot {robot_id} at ({position[0]:.1f}, {position[1]:.1f}) - morphology: {new_num_arms} limbs × {new_segments_per_limb} segments")
     
     def _calculate_performance_score(self, robot) -> float:
         """Calculate performance score for neural network preservation."""

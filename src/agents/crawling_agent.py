@@ -669,6 +669,9 @@ class CrawlingAgent(BaseAgent):
         if prev_state is None:
             return
         
+        # IMMOBILIZATION SAFEGUARD: Don't learn when immobilized (low energy)
+        if hasattr(self, '_is_immobilized') and self._is_immobilized:
+            return  # Skip learning for immobilized agents
         
         self._learning_system.store_experience(prev_state, action, reward, new_state, done)
         

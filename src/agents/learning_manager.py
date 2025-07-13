@@ -30,27 +30,38 @@ class NetworkPool:
     def get_network(self, state_dim: int, action_dim: int) -> Tuple[AttentionDeepQLearning, str]:
         """Get a neural network from the pool or create a new one."""
         with self.lock:
-            # Try to reuse an existing network
+            # Try to reuse an existing network with matching dimensions
             if self.available_networks:
-                network_data = self.available_networks.popleft()
-                network = network_data['network']
-                network_id = network_data['id']
-                is_prebuffered = network_data.get('prebuffered', False)
+                # Find network with matching dimensions
+                for i, network_data in enumerate(self.available_networks):
+                    network = network_data['network']
+                    network_id = network_data['id']
+                    is_prebuffered = network_data.get('prebuffered', False)
+                    
+                    # CRITICAL FIX: Validate network dimensions match request
+                    if (hasattr(network, 'action_dim') and network.action_dim == action_dim and
+                        hasattr(network, 'state_dim') and network.state_dim == state_dim):
+                        
+                        # Remove this network from available pool
+                        del self.available_networks[i]
+                        
+                        # Reset target network sync for transferred networks
+                        network.reset_target_network_sync()
+                        
+                        self.reuse_count += 1
+                        
+                        # Enhanced logging for pre-buffered networks
+                        if is_prebuffered:
+                            logger.info(f"⚡ Used pre-buffered network {network_id} (state={state_dim}, action={action_dim}) (pool: {len(self.available_networks)} remaining)")
+                        else:
+                            logger.info(f"♻️ Reused returned network {network_id} (state={state_dim}, action={action_dim}) (pool: {len(self.available_networks)} remaining)")
+                        
+                        return network, network_id
                 
-                # Reset target network sync for transferred networks
-                network.reset_target_network_sync()
-                
-                self.reuse_count += 1
-                
-                # Enhanced logging for pre-buffered networks
-                if is_prebuffered:
-                    logger.info(f"⚡ Used pre-buffered network {network_id} (pool: {len(self.available_networks)} remaining)")
-                else:
-                    logger.info(f"♻️ Reused returned network {network_id} (pool: {len(self.available_networks)} remaining)")
-                
-                return network, network_id
+                # No compatible network found - log this important event
+                logger.warning(f"🔍 No compatible network found for dimensions {state_dim}x{action_dim} in pool of {len(self.available_networks)} networks")
             
-            # Create new network if pool is empty
+            # Create new network if pool is empty or no compatible network found
             network = AttentionDeepQLearning(
                 state_dim=state_dim,
                 action_dim=action_dim,
@@ -66,7 +77,7 @@ class NetworkPool:
             }
             
             self.creation_count += 1
-            logger.warning(f"🆘 Buffer depleted! Created emergency network {network_id} for action_size={action_dim}")
+            logger.warning(f"🆘 Buffer depleted! Created emergency network {network_id} for state_size={state_dim}, action_size={action_dim}")
             return network, network_id
     
     def return_network(self, network: AttentionDeepQLearning, network_id: str):
@@ -116,88 +127,121 @@ class LearningManager:
         self.elite_networks: Dict[str, AttentionDeepQLearning] = {}
         self.elite_threshold = 0.8  # Top 20% performers
         
-        logger.info("🧠 Learning Manager initialized")
+        # LAZY INITIALIZATION FLAG - prevents initialization order issues
+        self._buffers_initialized = False
+        self._buffer_initialization_attempted = False
         
-        # PRE-INITIALIZE NETWORK BUFFERS to avoid "pool empty" messages
-        self._pre_initialize_network_buffers()
+        logger.info("🧠 Learning Manager initialized")
+        print("🧠 Learning Manager initialized: neural network pooling enabled")
+        
+        # DO NOT pre-initialize here - use lazy initialization on first network request
     
     def _pre_initialize_network_buffers(self):
-        """Pre-create a buffer of neural networks for common action sizes to eliminate 'pool empty' situations."""
+        """Pre-create a buffer of neural networks focused on one-limb robots first to eliminate 'pool empty' situations."""
+        print("🔍 TESTING: _pre_initialize_network_buffers method called!")
         try:
             state_size = 29  # Fixed state size for all agents
             
-            # Pre-create networks for common evolutionary agent action sizes
-            # Based on morphology: 2×joints + 5, where joints range from 2-18
-            common_action_sizes = [
-                9,   # 2 joints (1 limb × 2 segments)
-                11,  # 3 joints  
-                13,  # 4 joints
-                15,  # 5 joints (2 limbs × 2-3 segments) - most common
-                17,  # 6 joints
-                19,  # 7 joints
-                21,  # 8 joints (2 limbs × 3 segments)
-                23,  # 9 joints
-                25,  # 10 joints (3-4 limbs × 2-3 segments)
-                27,  # 11 joints
-                29,  # 12 joints
-                31,  # 13 joints
-                33,  # 14 joints
-                35,  # 15 joints
-                37,  # 16 joints
-                39,  # 17 joints
-                41   # 18 joints (6 limbs × 3 segments) - complex robots
-            ]
-            
-            # Buffer size: Create 3-5 networks per common action size
-            buffer_size_per_action = min(5, max(3, self.max_networks_per_pool // len(common_action_sizes)))
+            # STRATEGY: Focus on one-limb robots first (action_size=9) with 40 networks
+            # Then create smaller amounts for multi-limb robots
+            network_allocation = {
+                9: 40,   # 1 limb × 3 segments = 3 joints → 40 networks (primary focus)
+                11: 8,   # 2 limbs × 2 segments = 4 joints → 8 networks
+                13: 6,   # 2 limbs × 2-3 segments = 5 joints → 6 networks  
+                15: 5,   # 2 limbs × 3 segments = 6 joints → 5 networks
+                17: 4,   # 3 limbs × 2 segments = 6 joints → 4 networks
+                19: 3,   # 3 limbs × 2-3 segments = 7 joints → 3 networks
+                21: 3,   # 3 limbs × 3 segments = 9 joints → 3 networks
+                23: 2,   # 4 limbs × 2-3 segments = 9 joints → 2 networks
+                25: 2,   # 4 limbs × 3 segments = 12 joints → 2 networks
+                27: 2,   # 5 limbs × 2-3 segments = 12 joints → 2 networks
+                29: 1,   # 5 limbs × 3 segments = 15 joints → 1 network
+                31: 1,   # 6 limbs × 2-3 segments = 15 joints → 1 network
+                33: 1,   # 6 limbs × 3 segments = 18 joints → 1 network
+            }
             
             total_networks_created = 0
+            successful_action_sizes = []
+            failed_action_sizes = []
             
-            for action_size in common_action_sizes:
-                pool = self._get_or_create_pool(state_size, action_size)
-                
-                # Pre-create buffer networks for this action size
-                for i in range(buffer_size_per_action):
-                    network = AttentionDeepQLearning(
-                        state_dim=state_size,
-                        action_dim=action_size,
-                        learning_rate=0.001
-                    )
-                    
-                    network_id = f"prebuf_{action_size}_{i}_{str(uuid.uuid4())[:4]}"
-                    
-                    # Add to pool's available networks
-                    with pool.lock:
-                        pool.available_networks.append({
-                            'network': network,
-                            'id': network_id,
-                            'returned_at': time.time(),
-                            'prebuffered': True  # Mark as pre-buffered
-                        })
-                        pool.creation_count += 1
-                        pool.network_history[network_id] = {
-                            'created_at': time.time(),
-                            'reuse_count': 0,
-                            'state_dim': state_size,
-                            'action_dim': action_size,
-                            'prebuffered': True
-                        }
-                    
-                    total_networks_created += 1
+            print(f"🚀 Starting network pre-initialization with focus on one-limb robots...")
             
-            logger.info(f"🚀 Pre-initialized {total_networks_created} neural networks across {len(common_action_sizes)} action sizes")
-            logger.info(f"💾 Buffer: {buffer_size_per_action} networks per action size, ready for instant assignment")
+            for action_size, buffer_count in network_allocation.items():
+                try:
+                    print(f"🔧 Creating {buffer_count} networks for action_size={action_size}...")
+                    
+                    pool = self._get_or_create_pool(state_size, action_size)
+                    
+                    # Pre-create buffer networks for this action size
+                    for i in range(buffer_count):
+                        try:
+                            network = AttentionDeepQLearning(
+                                state_dim=state_size,
+                                action_dim=action_size,
+                                learning_rate=0.001
+                            )
+                            
+                            network_id = f"prebuf_{action_size}_{i}_{str(uuid.uuid4())[:4]}"
+                            
+                            # Add to pool's available networks
+                            with pool.lock:
+                                pool.available_networks.append({
+                                    'network': network,
+                                    'id': network_id,
+                                    'returned_at': time.time(),
+                                    'prebuffered': True  # Mark as pre-buffered
+                                })
+                                pool.creation_count += 1
+                                pool.network_history[network_id] = {
+                                    'created_at': time.time(),
+                                    'reuse_count': 0,
+                                    'state_dim': state_size,
+                                    'action_dim': action_size,
+                                    'prebuffered': True
+                                }
+                            
+                            total_networks_created += 1
+                            
+                        except Exception as network_error:
+                            print(f"❌ Failed to create individual network {i} for action_size={action_size}: {network_error}")
+                            failed_action_sizes.append(f"{action_size}_{i}")
+                            continue
+                    
+                    successful_action_sizes.append(action_size)
+                    print(f"✅ Successfully created {buffer_count} networks for action_size={action_size}")
+                    
+                except Exception as pool_error:
+                    print(f"❌ Failed to create pool for action_size={action_size}: {pool_error}")
+                    failed_action_sizes.append(str(action_size))
+                    continue
             
-            # Log buffer status
-            for action_size in common_action_sizes[:5]:  # Show first 5 for brevity
+            # Print comprehensive summary
+            print(f"🚀 Pre-initialized {total_networks_created} neural networks across {len(successful_action_sizes)} action sizes")
+            print(f"💾 Network allocation: action_size=9 (40 networks), others (1-8 networks each)")
+            
+            # Log buffer status for verification
+            for action_size in [9, 11, 13, 15, 17, 19, 21]:  # Show most common sizes
                 pool_key = self._get_pool_key(state_size, action_size)
                 if pool_key in self.network_pools:
                     available = len(self.network_pools[pool_key].available_networks)
-                    logger.info(f"   📦 Pool {pool_key}: {available} networks ready")
+                    print(f"   📦 Pool {pool_key}: {available} networks ready")
+            
+            # Report any failures
+            if failed_action_sizes:
+                print(f"⚠️  Failed to create networks for: {failed_action_sizes}")
+            
+            # Log to standard logger as well
+            logger.info(f"🚀 Pre-initialized {total_networks_created} neural networks (focus: {network_allocation[9]} networks for action_size=9)")
+            
+            return total_networks_created
                     
         except Exception as e:
+            print(f"❌ CRITICAL: Failed to pre-initialize network buffers: {e}")
+            import traceback
+            traceback.print_exc()
             logger.error(f"❌ Failed to pre-initialize network buffers: {e}")
             # Don't fail initialization if buffer pre-creation fails
+            return 0
     
     def _get_pool_key(self, state_dim: int, action_dim: int) -> str:
         """Get the pool key for networks with specific dimensions."""
@@ -214,17 +258,32 @@ class LearningManager:
         return self.network_pools[pool_key]
     
     def _acquire_attention_network(self, agent_id: str, action_size: int, state_size: int) -> Optional[AttentionDeepQLearning]:
-        """Acquire a neural network for an agent."""
+        """Acquire a neural network for an agent with lazy buffer initialization."""
         try:
+            # LAZY INITIALIZATION: Initialize buffers on first network request
+            if not self._buffers_initialized and not self._buffer_initialization_attempted:
+                self._buffer_initialization_attempted = True
+                try:
+                    print("🚀 LAZY INIT: Pre-initializing network buffers on first request...")
+                    total_created = self._pre_initialize_network_buffers()
+                    self._buffers_initialized = True
+                    print(f"✅ LAZY INIT: Successfully pre-initialized {total_created} networks")
+                except Exception as init_error:
+                    print(f"❌ LAZY INIT: Pre-initialization failed: {init_error}")
+                    import traceback
+                    traceback.print_exc()
+                    # Continue without pre-buffered networks
+                    print("⚠️  Continuing without pre-buffered networks (degraded performance)")
+            
             # Validate state dimensions (fixed)
             if state_size != 29:
                 logger.error(f"Invalid state_size {state_size}, expected 29")
                 return None
             
             # FIXED: Support variable action sizes for different agent morphologies
-            # Action sizes can range from 5 (minimum viable) to 50+ (complex robots)
-            if action_size < 5 or action_size > 100:
-                logger.error(f"Invalid action_size {action_size}, must be between 5 and 100")
+            # Action sizes can range from 5 (minimum viable) to 200+ (complex robots)
+            if action_size < 5 or action_size > 200:
+                logger.error(f"Invalid action_size {action_size}, must be between 5 and 200")
                 return None
             
             # Get appropriate pool
@@ -327,11 +386,11 @@ class LearningManager:
             return elite_network
     
     def _refill_buffers_if_needed(self):
-        """Refill network buffers that have fallen below minimum threshold."""
+        """Proactively refill network buffers when they get low to prevent 'Buffer depleted!' messages."""
         try:
             state_size = 29
-            min_buffer_threshold = 2  # Refill when below 2 networks
-            refill_count = 3  # Add 3 networks when refilling
+            min_buffer_threshold = 5  # Refill when below 5 networks (increased from 2)
+            refill_count = 8  # Add 8 networks when refilling (increased from 3)
             
             # Common action sizes that need buffer maintenance
             common_action_sizes = [9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41]
@@ -348,7 +407,7 @@ class LearningManager:
                         available_count = len(pool.available_networks)
                         
                         if available_count <= min_buffer_threshold:
-                            # Refill the buffer
+                            # Aggressively refill low pools
                             for i in range(refill_count):
                                 network = AttentionDeepQLearning(
                                     state_dim=state_size,
@@ -362,8 +421,7 @@ class LearningManager:
                                     'network': network,
                                     'id': network_id,
                                     'returned_at': time.time(),
-                                    'prebuffered': True,
-                                    'refilled': True
+                                    'refilled': True  # Mark as refilled
                                 })
                                 pool.creation_count += 1
                                 pool.network_history[network_id] = {
@@ -371,16 +429,15 @@ class LearningManager:
                                     'reuse_count': 0,
                                     'state_dim': state_size,
                                     'action_dim': action_size,
-                                    'prebuffered': True,
                                     'refilled': True
                                 }
                                 
                                 total_refilled += 1
                             
-                            logger.info(f"🔄 Refilled buffer for action_size={action_size}: {available_count} → {available_count + refill_count} networks")
-            
+                            logger.info(f"🔄 Refilled pool {pool_key}: {available_count} → {available_count + refill_count} networks")
+                
             if total_refilled > 0:
-                logger.info(f"📈 Buffer maintenance: Refilled {total_refilled} networks across {len([a for a in common_action_sizes if self._get_pool_key(state_size, a) in self.network_pools and len(self.network_pools[self._get_pool_key(state_size, a)].available_networks) > min_buffer_threshold])} pools")
+                logger.info(f"📈 Buffer maintenance: Refilled {total_refilled} networks across pools to prevent depletion")
                 
         except Exception as e:
             logger.error(f"❌ Failed to refill network buffers: {e}")

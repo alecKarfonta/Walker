@@ -589,12 +589,12 @@ class EcosystemDynamics:
         } 
 
     def _get_consumption_efficiency(self, role: EcosystemRole, food_type: str) -> float:
-        """Get consumption efficiency based on agent role and food type - CARNIVORES AND SCAVENGERS ARE PURE ROBOT CONSUMERS"""
+        """Get consumption efficiency based on agent role and food type - IMPROVED for survival balance"""
         efficiency_matrix = {
             EcosystemRole.HERBIVORE: {"plants": 1.0, "seeds": 0.9, "insects": 0.3, "meat": 0.8},  # Can eat meat at good efficiency
-            EcosystemRole.CARNIVORE: {"meat": 0.0, "insects": 0.0, "plants": 0.0, "seeds": 0.0},  # PURE PREDATORS - NO environmental food
+            EcosystemRole.CARNIVORE: {"meat": 0.6, "insects": 0.4, "plants": 0.0, "seeds": 0.0},  # IMPROVED: Can eat meat and insects for survival
             EcosystemRole.OMNIVORE: {"plants": 0.8, "insects": 0.8, "seeds": 0.7, "meat": 0.8},  # Good at everything
-            EcosystemRole.SCAVENGER: {"meat": 0.0, "insects": 0.0, "plants": 0.0, "seeds": 0.0},  # PURE SCAVENGERS - NO environmental food
+            EcosystemRole.SCAVENGER: {"meat": 0.7, "insects": 0.5, "plants": 0.2, "seeds": 0.2},  # IMPROVED: Can eat meat/insects efficiently, some plants
             EcosystemRole.SYMBIONT: {"plants": 1.0, "seeds": 0.9, "insects": 0.6, "meat": 0.4}   # Plant specialists but flexible
         }
         

@@ -437,11 +437,16 @@ class MetricsCollector:
             all_metrics.update(system_metrics)
             
             if self.mlflow_integration:
-                # Log all organized metrics with proper step
+                # FIXED: Log all organized metrics as a batch instead of one at a time
+                # This prevents MLflow from creating additional runs or losing run context
+                valid_metrics = {}
                 for metric_name, value in all_metrics.items():
                     if isinstance(value, (int, float, np.number)) and not np.isnan(float(value)):
-                        # Use the existing MLflow integration method for proper logging
-                        self.mlflow_integration.log_population_metrics(metrics.generation, {metric_name.split('/')[-1]: value}, metrics.step_count)
+                        valid_metrics[metric_name] = float(value)
+                
+                # Log all metrics in a single batch call
+                if valid_metrics:
+                    self.mlflow_integration.log_population_metrics(metrics.generation, valid_metrics, metrics.step_count)
             
             # Print success message with organized sections count
             section_counts = {
@@ -950,10 +955,24 @@ class MetricsCollector:
         }
     
     def _create_agents_snapshot(self, agents: List[Any]) -> List[Dict[str, Any]]:
-        """Create a lightweight snapshot of agents for background processing."""
-        snapshot = []
+        """Create a snapshot of agent data for background processing."""
+        agents_snapshot = []
+        
         for agent in agents:
             try:
+                # Get movement activity if available
+                movement_activity = getattr(agent, 'movement_activity', [])
+                recent_activity = movement_activity[-5:] if movement_activity else []
+                
+                # Calculate movement metrics
+                is_moving = len(recent_activity) > 0
+                has_moved = any(activity['joints_activated'] > 0 for activity in recent_activity)
+                avg_joints_activated = np.mean([activity['joints_activated'] for activity in recent_activity]) if recent_activity else 0
+                
+                # Check joint availability
+                has_joints = hasattr(agent, 'limb_joints') and agent.limb_joints
+                joint_count = sum(len(limb_joints) for limb_joints in agent.limb_joints) if has_joints else 0
+                
                 agent_data = {
                     'id': str(agent.id),
                     'total_reward': getattr(agent, 'total_reward', 0.0),
@@ -962,38 +981,52 @@ class MetricsCollector:
                     'action_history': getattr(agent, 'action_history', [])[-20:],  # Last 20 actions
                     'has_body': hasattr(agent, 'body') and agent.body is not None,
                     'has_q_table': hasattr(agent, 'q_table'),
-                    'physical_params': {
-                        'motor_torque': getattr(agent.physical_params, 'motor_torque', 150.0) if hasattr(agent, 'physical_params') else 150.0
+                    'has_learning_system': hasattr(agent, '_learning_system') and agent._learning_system is not None,
+                    'buffer_size': self._get_agent_buffer_size(agent),
+                    'generation': getattr(agent, 'generation', 0),
+                    'limb_count': getattr(agent.physical_params, 'num_arms', 1) if hasattr(agent, 'physical_params') and agent.physical_params else 1,
+                    'segment_count': getattr(agent.physical_params, 'segments_per_limb', 2) if hasattr(agent, 'physical_params') and agent.physical_params else 2,
+                    'action_size': getattr(agent, 'action_size', 0),
+                    
+                    # NEW: Movement detection metrics
+                    'movement_metrics': {
+                        'is_moving': is_moving,
+                        'has_moved': has_moved,
+                        'avg_joints_activated': avg_joints_activated,
+                        'recent_activity_count': len(recent_activity),
+                        'last_activity_time': recent_activity[-1]['timestamp'] if recent_activity else 0
                     },
-                    # NEW: Include learning system for training run tracking
-                    'learning_system': getattr(agent, '_learning_system', None),
-                    # NEW: Capture loss and Q-value histories from agent if available  
-                    'loss_history': getattr(agent, '_loss_history', []),
-                    'qval_history': getattr(agent, '_qval_history', [])
+                    
+                    # NEW: Joint activity metrics
+                    'joint_activity': {
+                        'has_joints': has_joints,
+                        'joint_count': joint_count,
+                        'expected_joints': (getattr(agent.physical_params, 'num_arms', 1) * getattr(agent.physical_params, 'segments_per_limb', 2)) if hasattr(agent, 'physical_params') and agent.physical_params else 2
+                    }
                 }
                 
-                # Add position data if available
-                if agent_data['has_body']:
-                    try:
-                        agent_data['position'] = {'x': agent.body.position.x, 'y': agent.body.position.y}
-                        agent_data['angle'] = agent.body.angle
-                        agent_data['initial_position'] = getattr(agent, 'initial_position', [0, 0])
-                    except:
-                        agent_data['has_body'] = False
+                agents_snapshot.append(agent_data)
                 
-                # Add Q-learning data if available
-                if agent_data['has_q_table']:
-                    try:
-                        agent_data['q_convergence'] = agent.q_table.get_convergence_estimate() if hasattr(agent.q_table, 'get_convergence_estimate') else 0.0
-                        agent_data['q_table_size'] = len(getattr(agent.q_table, 'q_values', {}))
-                    except:
-                        agent_data['has_q_table'] = False
-                
-                snapshot.append(agent_data)
             except Exception as e:
-                print(f"⚠️  Error creating snapshot for agent: {e}")
-                
-        return snapshot
+                print(f"⚠️  Error creating agent snapshot for {getattr(agent, 'id', 'unknown')}: {e}")
+                continue
+        
+        return agents_snapshot
+    
+    def _get_agent_buffer_size(self, agent) -> int:
+        """Get the buffer size from an agent's learning system."""
+        try:
+            if hasattr(agent, '_learning_system') and agent._learning_system:
+                learning_system = agent._learning_system
+                if hasattr(learning_system, 'memory'):
+                    # Try different buffer access methods
+                    if hasattr(learning_system.memory, 'buffer'):
+                        return len(learning_system.memory.buffer)
+                    elif hasattr(learning_system.memory, '__len__'):
+                        return len(learning_system.memory)
+            return 0
+        except Exception:
+            return 0
     
     def _collect_system_metrics_data(self) -> Dict[str, Any]:
         """Collect system metrics data for background logging to MLflow."""
@@ -1073,7 +1106,7 @@ class MetricsCollector:
                                 # Get the run ID from the main thread's MLflow integration
                                 main_thread_run_id = self.mlflow_integration.current_run.info.run_id
                                 
-                                                                # FIXED: Don't start a new run context - use MLflow integration methods instead
+                                # FIXED: Don't start a new run context - use MLflow integration methods instead
                                 # This prevents the "Run already active" error and ensures all metrics go to the same run
                                 
                                 # The step count will be passed directly to the MLflow integration method
@@ -1089,6 +1122,15 @@ class MetricsCollector:
                                     'generation': data['generation'],
                                     'step_count': data['step_count'],
                                 }
+                                
+                                # Calculate aggregate learning metrics
+                                learning_metrics = self._calculate_snapshot_learning_metrics(agents_snapshot)
+                                
+                                # NEW: MOVEMENT DETECTION ALERTING - Check if agents are actually moving
+                                movement_issues = self._detect_movement_issues(agents_snapshot)
+                                if movement_issues:
+                                    for issue in movement_issues:
+                                        print(f"🚨 MOVEMENT ALERT: {issue}")
                                 
                                 # SECTION 1: POPULATION HEALTH & FITNESS
                                 fitness_metrics = {
@@ -1183,38 +1225,38 @@ class MetricsCollector:
                                         'system_performance/system_memory_percent': data.get('system_memory_percent', 0),
                                     })
                                 
-                                    # Combine all organized metrics
-                                    all_metrics = {}
-                                    all_metrics.update(fitness_metrics)
-                                    all_metrics.update(training_metrics)
-                                    all_metrics.update(exploration_metrics)
-                                    all_metrics.update(network_metrics)
-                                    all_metrics.update(system_metrics)
-                                    
-                                    # FIXED: Use MLflow integration's log_population_metrics method to batch all metrics
-                                    # This ensures all metrics appear in the same run without context conflicts
-                                    valid_metrics = {}
-                                    for metric_name, value in all_metrics.items():
-                                        if isinstance(value, (int, float, np.number)) and not np.isnan(float(value)):
-                                            valid_metrics[metric_name] = float(value)
-                                    
-                                    if valid_metrics:
-                                        self.mlflow_integration.log_population_metrics(data['generation'], valid_metrics, data['step_count'])
-                                    
-                                    # Print success message with organized sections count
-                                    section_counts = {
-                                        'Population Health': len(fitness_metrics),
-                                        'Learning Progress': len(training_metrics),
-                                        'Exploration': len(exploration_metrics),
-                                        'Network Performance': len(network_metrics),
-                                        'System Performance': len(system_metrics)
-                                    }
-                                    
-                                    total_metrics = sum(section_counts.values())
-                                    print(f"📊 Logged {total_metrics} organized metrics to MLflow run {main_thread_run_id[:8]}:")
-                                    for section, count in section_counts.items():
-                                        if count > 0:
-                                            print(f"   📈 {section}: {count} metrics")
+                                # Combine all organized metrics
+                                all_metrics = {}
+                                all_metrics.update(fitness_metrics)
+                                all_metrics.update(training_metrics)
+                                all_metrics.update(exploration_metrics)
+                                all_metrics.update(network_metrics)
+                                all_metrics.update(system_metrics)
+                                
+                                # FIXED: Use MLflow integration's log_population_metrics method to batch all metrics
+                                # This ensures all metrics appear in the same run without context conflicts
+                                valid_metrics = {}
+                                for metric_name, value in all_metrics.items():
+                                    if isinstance(value, (int, float, np.number)) and not np.isnan(float(value)):
+                                        valid_metrics[metric_name] = float(value)
+                                
+                                if valid_metrics:
+                                    self.mlflow_integration.log_population_metrics(data['generation'], valid_metrics, data['step_count'])
+                                
+                                # Print success message with organized sections count
+                                section_counts = {
+                                    'Population Health': len(fitness_metrics),
+                                    'Learning Progress': len(training_metrics),
+                                    'Exploration': len(exploration_metrics),
+                                    'Network Performance': len(network_metrics),
+                                    'System Performance': len(system_metrics)
+                                }
+                                
+                                total_metrics = sum(section_counts.values())
+                                print(f"📊 Logged {total_metrics} organized metrics to MLflow run {main_thread_run_id[:8]}:")
+                                for section, count in section_counts.items():
+                                    if count > 0:
+                                        print(f"   📈 {section}: {count} metrics")
                         except Exception as e:
                             print(f"⚠️ Error logging background metrics to MLflow: {e}")
                             import traceback
@@ -1228,6 +1270,50 @@ class MetricsCollector:
             except Exception as e:
                 print(f"⚠️ Error in background collection worker main loop: {e}")
                 time.sleep(5.0)
+
+    def _detect_movement_issues(self, agents_snapshot: List[Dict[str, Any]]) -> List[str]:
+        """Detect movement issues in the agent population."""
+        issues = []
+        
+        if not agents_snapshot:
+            return issues
+            
+        # Count agents with movement issues
+        total_agents = len(agents_snapshot)
+        non_moving_agents = 0
+        no_joints_agents = 0
+        no_actions_agents = 0
+        
+        for agent_data in agents_snapshot:
+            movement_metrics = agent_data.get('movement_metrics', {})
+            joint_activity = agent_data.get('joint_activity', {})
+            
+            # Check if agent is moving
+            if not movement_metrics.get('is_moving', False) and not movement_metrics.get('has_moved', False):
+                non_moving_agents += 1
+            
+            # Check if agent has joints
+            if not joint_activity.get('has_joints', False):
+                no_joints_agents += 1
+            
+            # Check if agent is applying actions
+            # The 'action_applied' field is not directly available in the snapshot,
+            # so we'll rely on the 'has_moved' and 'avg_joints_activated' for a more robust check.
+            # If an agent is not moving and has no joints, it's likely not applying actions.
+            if not movement_metrics.get('is_moving', False) and not joint_activity.get('has_joints', False):
+                no_actions_agents += 1
+        
+        # Generate alerts for critical issues
+        if non_moving_agents > total_agents * 0.8:  # 80% of agents not moving
+            issues.append(f"{non_moving_agents}/{total_agents} agents not moving (>{int(80)}% population)")
+        
+        if no_joints_agents > total_agents * 0.5:  # 50% of agents have no joints
+            issues.append(f"{no_joints_agents}/{total_agents} agents have no limb_joints")
+        
+        if no_actions_agents > total_agents * 0.5:  # 50% of agents not applying actions
+            issues.append(f"{no_actions_agents}/{total_agents} agents not applying actions")
+        
+        return issues
 
     def _capture_loss_from_snapshots(self, agents_snapshot: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
         """Capture loss values from agent snapshots."""
@@ -1243,84 +1329,42 @@ class MetricsCollector:
             for agent_data in agents_snapshot:
                 try:
                     agent_id = agent_data.get('id')
-                    learning_system = agent_data.get('learning_system')
+                    # FIXED: Use correct field name from snapshot
+                    has_learning_system = agent_data.get('has_learning_system', False)
                     
                     # DEBUG: Check learning system status
-                    if learning_system:
+                    if has_learning_system:
                         agents_with_systems += 1
                         
-                        # Check buffer size for debugging
-                        buffer_size = 0
-                        if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
-                            buffer_size = len(learning_system.memory.buffer)
-                            total_buffer_size += buffer_size
-                            max_buffer_size = max(max_buffer_size, buffer_size)
+                        # For snapshot-based analysis, we can't access the actual learning system
+                        # But we can still track that agents have them
+                        buffer_size = agent_data.get('buffer_size', 0)
+                        total_buffer_size += buffer_size
+                        max_buffer_size = max(max_buffer_size, buffer_size)
                         
                         # Debug first few agents with details
                         if buffer_size > 0 or agents_with_systems <= 3:
                             steps = agent_data.get('steps', 0)
-                            #print(f"🔍 DEBUG Agent {str(agent_id)[:8]}: Buffer={buffer_size}, Steps={steps}, Learning_system_type={type(learning_system).__name__}")
+                            #print(f"🔍 DEBUG Agent {str(agent_id)[:8]}: Buffer={buffer_size}, Steps={steps}, Has_learning_system=True")
+                        
+                        # For agents with learning systems, create basic loss metrics
+                        # Since we can't access the actual learning system from snapshots,
+                        # we'll use default values but mark them as having systems
+                        individual_losses[agent_id] = {
+                            'network_loss': 0.0,  # Can't get from snapshot
+                            'network_mean_q_value': 0.0,  # Can't get from snapshot
+                            'network_training_runs': 0,  # Can't get from snapshot
+                            'network_last_training_time': 0.0,  # Can't get from snapshot
+                            'network_training_frequency': 0.0,  # Can't get from snapshot
+                            'network_epsilon': agent_data.get('epsilon', 0.0),
+                            'network_experience_buffer_size': buffer_size,
+                            'has_learning_system': True,  # This is what matters for metrics
+                        }
                     else:
                         agents_without_systems += 1
                         if agents_without_systems <= 3:  # Log first few
                             steps = agent_data.get('steps', 0)
                             print(f"❌ DEBUG Agent {str(agent_id)[:8]}: NO LEARNING SYSTEM (steps={steps})")
-                    
-                    if learning_system and hasattr(learning_system, 'training_runs'):
-                        # Extract current training statistics
-                        training_runs = getattr(learning_system, 'training_runs', 0)
-                        last_training_time = getattr(learning_system, 'last_training_time', 0.0)
-                        
-                        # Get recent training statistics if available
-                        recent_loss = 0.0
-                        recent_mean_q_value = 0.0
-                        
-                        # Try to get stats from recent training (if the agent has loss history)
-                        if hasattr(learning_system, '_loss_history') and learning_system._loss_history:
-                            recent_loss = learning_system._loss_history[-1]  # Most recent loss
-                        else:
-                            # If no loss history yet, keep default value of 0.0
-                            recent_loss = 0.0
-                        if hasattr(learning_system, '_qval_history') and learning_system._qval_history:
-                            recent_mean_q_value = learning_system._qval_history[-1]  # Most recent Q-value
-                        
-                        # FIXED: If no Q-value history yet, try to get current Q-value from network
-                        if recent_mean_q_value == 0.0 and hasattr(learning_system, 'q_network'):
-                            try:
-                                # Get a sample Q-value from a default state
-                                import torch
-                                learning_system.q_network.eval()
-                                with torch.no_grad():
-                                    # Use a simple default state for Q-value sampling
-                                    default_state = torch.zeros(1, 29).to(learning_system.device)
-                                    q_values, _ = learning_system.q_network(default_state)
-                                    recent_mean_q_value = float(q_values.mean().item())
-                                learning_system.q_network.train()
-                            except Exception:
-                                # If Q-value extraction fails, keep it as 0.0
-                                recent_mean_q_value = 0.0
-                        
-                        # Calculate training frequency (runs per minute)
-                        training_frequency = 0.0
-                        if last_training_time > 0:
-                            time_since_first = last_training_time - (last_training_time - (training_runs * 30))  # Rough estimate
-                            if time_since_first > 0:
-                                training_frequency = training_runs / (time_since_first / 60.0)  # runs per minute
-                        
-                        # FIXED: Correctly access experience buffer size
-                        buffer_size = 0
-                        if hasattr(learning_system, 'memory') and hasattr(learning_system.memory, 'buffer'):
-                            buffer_size = len(learning_system.memory.buffer)
-                        
-                        individual_losses[agent_id] = {
-                            'network_loss': recent_loss,
-                            'network_mean_q_value': recent_mean_q_value,
-                            'network_training_runs': training_runs,
-                            'network_last_training_time': last_training_time,
-                            'network_training_frequency': training_frequency,
-                            'network_epsilon': getattr(learning_system, 'epsilon', 0.0),
-                            'network_experience_buffer_size': buffer_size,
-                        }
                         
                 except Exception as e:
                     print(f"⚠️ Error capturing training data for agent {agent_data.get('id', 'unknown')}: {e}")
