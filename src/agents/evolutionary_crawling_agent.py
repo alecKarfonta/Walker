@@ -11,6 +11,7 @@ from copy import deepcopy
 import random
 import uuid
 import time
+from collections import deque
 
 from .physical_parameters import PhysicalParameters
 
@@ -285,12 +286,12 @@ class EvolutionaryCrawlingAgent:
                 self._buffer_access_warned = True
             return
         
-        # SIMPLIFIED TRAINING LOGIC: Train more frequently for faster learning
+        # OPTIMIZATION: Balanced training frequency for responsive learning
         min_buffer_size = 32  # Need at least 32 experiences
         
         # STEP-BASED TRAINING: Much more reliable than buffer-size tracking
         # Train every N steps instead of tracking buffer size changes
-        train_frequency = 5  # Train every 5 steps when buffer is full enough
+        train_frequency = 50  # Train every 50 steps (balanced for responsiveness)
         
         if buffer_size >= min_buffer_size and self.steps % train_frequency == 0:
             # Train the network

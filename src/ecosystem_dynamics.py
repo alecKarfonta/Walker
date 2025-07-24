@@ -72,9 +72,9 @@ class EcosystemDynamics:
         self.last_zone_update = time.time()
         self.zone_update_interval = 120.0  # Update zones every 2 minutes
         
-        # Minimum distances to prevent instant rewards
-        self.min_distance_from_agents = 25.0  # INCREASED from 6m to 25m minimum distance
-        self.min_distance_between_food = 15.0  # INCREASED from 12m to 15m between food sources
+        # Minimum distances to prevent instant rewards - REDUCED for better accessibility
+        self.min_distance_from_agents = 8.0  # REDUCED from 25m to 8m for better accessibility
+        self.min_distance_between_food = 10.0  # REDUCED from 15m to 10m between food sources
         
         # Ecosystem parameters
         self.carrying_capacity = 150  # Increased for larger world
@@ -461,6 +461,96 @@ class EcosystemDynamics:
         
         # Ensure all zones have adequate food (but not too close to agents)
         self._maintain_zone_integrity(agent_positions)
+        
+        # NEW: Generate additional food sources in gaps between existing food
+        self._generate_gap_food_sources(agent_positions)
+
+    def _generate_gap_food_sources(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
+        """Generate additional food sources in gaps between existing food sources."""
+        try:
+            # Get all food source x-coordinates and sort them
+            food_x_positions = [food.position[0] for food in self.food_sources]
+            food_x_positions.sort()
+            
+            # Find gaps larger than 30 units (significant gaps)
+            gaps = []
+            for i in range(len(food_x_positions) - 1):
+                gap_size = food_x_positions[i + 1] - food_x_positions[i]
+                if gap_size > 30.0:  # Only fill gaps larger than 30 units
+                    gap_start = food_x_positions[i]
+                    gap_end = food_x_positions[i + 1]
+                    gaps.append((gap_start, gap_end, gap_size))
+            
+            # Also check for gaps at the edges where agents might be
+            agent_x_positions = [pos[1][0] for pos in agent_positions]
+            min_agent_x = min(agent_x_positions) if agent_x_positions else -100
+            max_agent_x = max(agent_x_positions) if agent_x_positions else 100
+            
+            # Check left edge gap
+            if food_x_positions and min_agent_x < food_x_positions[0] - 20:
+                gaps.append((min_agent_x, food_x_positions[0], food_x_positions[0] - min_agent_x))
+            
+            # Check right edge gap
+            if food_x_positions and max_agent_x > food_x_positions[-1] + 20:
+                gaps.append((food_x_positions[-1], max_agent_x, max_agent_x - food_x_positions[-1]))
+            
+            # Generate food sources in each gap
+            food_added = 0
+            for gap_start, gap_end, gap_size in gaps:
+                # Calculate how many food sources to add in this gap
+                num_food_sources = max(1, int(gap_size / 25.0))  # One food source every 25 units
+                
+                for i in range(num_food_sources):
+                    # Position food source within the gap
+                    food_x = gap_start + (gap_size * (i + 1)) / (num_food_sources + 1)
+                    food_y = random.uniform(1.0, 6.0)  # Reasonable height for robots to reach
+                    
+                    # Check if this position is far enough from agents
+                    too_close_to_agent = False
+                    for agent_id, agent_pos in agent_positions:
+                        distance_to_agent = math.sqrt((food_x - agent_pos[0])**2 + (food_y - agent_pos[1])**2)
+                        if distance_to_agent < self.min_distance_from_agents:
+                            too_close_to_agent = True
+                            break
+                    
+                    if too_close_to_agent:
+                        continue  # Skip this position
+                    
+                    # Check if this position is far enough from existing food
+                    too_close_to_food = False
+                    for existing_food in self.food_sources:
+                        distance_to_food = math.sqrt((food_x - existing_food.position[0])**2 + 
+                                                   (food_y - existing_food.position[1])**2)
+                        if distance_to_food < self.min_distance_between_food:
+                            too_close_to_food = True
+                            break
+                    
+                    if too_close_to_food:
+                        continue  # Skip this position
+                    
+                    # Create gap food source
+                    food_type = random.choice(["plants", "seeds", "insects"])
+                    base_amount = 50.0 + random.uniform(0, 30.0)
+                    max_capacity = base_amount * 1.8
+                    regen_rate = 0.4 + random.uniform(0, 0.3)
+                    
+                    gap_food = FoodSource(
+                        position=(food_x, food_y),
+                        food_type=food_type,
+                        amount=base_amount,
+                        regeneration_rate=regen_rate,
+                        max_capacity=max_capacity,
+                        source="gap_fill"  # Mark as gap-filling food source
+                    )
+                    
+                    self.food_sources.append(gap_food)
+                    food_added += 1
+            
+            if food_added > 0:
+                print(f"🌱 Added {food_added} gap-filling food sources to improve accessibility")
+                
+        except Exception as e:
+            print(f"❌ Error generating gap food sources: {e}")
 
     def _maintain_zone_integrity(self, agent_positions: List[Tuple[str, Tuple[float, float]]]):
         """Ensure food zones maintain their intended food density while respecting agent distances."""

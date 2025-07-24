@@ -86,7 +86,7 @@ class MetricsCollector:
         # Metrics storage
         self.metrics_history: List[ComprehensiveMetrics] = []
         self.last_evaluation_time = 0.0
-        self.evaluation_interval = 10.0  # Evaluate every 10 seconds (faster for better visibility)
+        self.evaluation_interval = 5.0  # Evaluate every 5 seconds (faster for better visibility)
         
         # Thread safety
         self.metrics_lock = threading.Lock()

@@ -167,9 +167,14 @@ class EnhancedRobotAttentionDQN(nn.Module):
         if state_size != 29:
             raise ValueError(f"EnhancedRobotAttentionDQN requires exactly 29 state dimensions, got {state_size}")
         
-        # FIXED: Support variable action dimensions for different agent morphologies
-        if action_size < 5 or action_size > 100:
-            raise ValueError(f"EnhancedRobotAttentionDQN action dimensions must be between 5 and 100, got {action_size}")
+        # REMOVED: Arbitrary action size limit - modern networks can handle large action spaces
+        # Research shows action embeddings and proper architecture can handle 1000+ actions
+        if action_size < 5:
+            raise ValueError(f"EnhancedRobotAttentionDQN action dimensions must be at least 5, got {action_size}")
+        
+        # WARNING: Very large action spaces (>500) may require action embedding techniques
+        if action_size > 500:
+            logger.warning(f"Large action space detected ({action_size}). Consider implementing action embeddings for better performance.")
         
         if embed_dim != 128:
             raise ValueError(f"EnhancedRobotAttentionDQN requires exactly 128 embed dimensions, got {embed_dim}")
@@ -343,10 +348,15 @@ class AttentionDeepQLearning:
             raise ValueError(f"AttentionDeepQLearning requires exactly 29 state dimensions, got {state_dim}. "
                            f"This must match agent.get_state_representation() with ray sensing.")
         
-        # FIXED: Support variable action dimensions for different agent morphologies
-        if action_dim < 5 or action_dim > 100:
-            raise ValueError(f"AttentionDeepQLearning action dimensions must be between 5 and 100, got {action_dim}. "
+        # REMOVED: Arbitrary action size limit - modern networks can handle large action spaces
+        # Research shows action embeddings and proper architecture can handle 1000+ actions
+        if action_dim < 5:
+            raise ValueError(f"AttentionDeepQLearning action dimensions must be at least 5, got {action_dim}. "
                            f"This allows for different robot morphologies with varying joint counts.")
+        
+        # WARNING: Very large action spaces (>500) may require action embedding techniques
+        if action_dim > 500:
+            logger.warning(f"Large action space detected ({action_dim}). Consider implementing action embeddings for better performance.")
         
         if learning_rate <= 0:
             raise ValueError(f"Learning rate must be positive, got {learning_rate}")
@@ -360,8 +370,8 @@ class AttentionDeepQLearning:
         # Enhanced Q-Learning hyperparameters
         self.gamma = 0.99
         self.epsilon = 1.0
-        self.epsilon_min = 0.1
-        self.epsilon_decay = 0.9995
+        self.epsilon_min = 0.05  # Reduced from 0.1 to ensure more exploration
+        self.epsilon_decay = 0.9998  # Slightly slower decay
         self.batch_size = 32
         self.target_update_freq = 500
         self.steps_done = 0
@@ -370,10 +380,22 @@ class AttentionDeepQLearning:
         self.training_runs = 0
         self.last_training_time = 0.0
         
-        # Epsilon cycling to prevent permanent local minima
-        self.epsilon_cycle_steps = 10000
-        self.epsilon_reset_value = 0.3
+        # Epsilon cycling to prevent permanent local minina - Made more aggressive
+        self.epsilon_cycle_steps = 5000  # Reduced from 10000 for more frequent cycling
+        self.epsilon_reset_value = 0.4  # Increased from 0.3 for more exploration
         self.last_epsilon_reset = 0
+        
+        # NEW: Adaptive epsilon based on performance
+        self.performance_window = []
+        self.performance_threshold = 0.1  # If performance doesn't improve, boost epsilon
+        self.adaptive_epsilon_boost = 0.2
+        
+        # NEW: Diversity boost mechanism for stagnation
+        self.diversity_boost_threshold = 0.01  # Performance improvement threshold
+        self.diversity_boost_window = 50  # Check last 50 training runs
+        self.diversity_boost_magnitude = 0.3  # How much to boost epsilon
+        self.last_diversity_boost = 0
+        self.diversity_boost_cooldown = 1000  # Minimum steps between boosts
         
         # Prioritized Experience Replay
         self.use_prioritized_replay = True
@@ -529,12 +551,44 @@ class AttentionDeepQLearning:
         if self.epsilon > self.epsilon_min:
             self.epsilon *= self.epsilon_decay
         
+        # Adaptive epsilon based on performance stagnation
+        current_performance = float(np.mean(rewards.cpu().numpy()))
+        self.performance_window.append(current_performance)
+        if len(self.performance_window) > 100:  # Keep last 100 performance samples
+            self.performance_window.pop(0)
+        
+        # Check for performance stagnation and boost epsilon if needed
+        if len(self.performance_window) >= 50:
+            recent_performance = np.mean(self.performance_window[-25:])
+            older_performance = np.mean(self.performance_window[-50:-25])
+            performance_improvement = recent_performance - older_performance
+            
+            if performance_improvement < self.performance_threshold and self.epsilon < 0.3:
+                self.epsilon = min(0.5, self.epsilon + self.adaptive_epsilon_boost)
+                logger.info(f"Performance stagnation detected (improvement: {performance_improvement:.4f}), boosting epsilon to {self.epsilon:.3f}")
+        
         # Epsilon cycling to prevent permanent local minima
         if self.steps_done - self.last_epsilon_reset >= self.epsilon_cycle_steps:
             old_epsilon = self.epsilon
             self.epsilon = self.epsilon_reset_value
             self.last_epsilon_reset = self.steps_done
             logger.info(f"Epsilon cycling: {old_epsilon:.3f} → {self.epsilon:.3f} (step {self.steps_done})")
+        
+        # Diversity boost mechanism for severe stagnation
+        if (self.steps_done - self.last_diversity_boost >= self.diversity_boost_cooldown and 
+            len(self.performance_window) >= self.diversity_boost_window):
+            
+            # Check for severe stagnation (very low performance improvement)
+            recent_perf = np.mean(self.performance_window[-self.diversity_boost_window//2:])
+            older_perf = np.mean(self.performance_window[-self.diversity_boost_window:-self.diversity_boost_window//2])
+            performance_change = recent_perf - older_perf
+            
+            if abs(performance_change) < self.diversity_boost_threshold:
+                # Severe stagnation detected - inject diversity
+                old_epsilon = self.epsilon
+                self.epsilon = min(0.7, self.epsilon + self.diversity_boost_magnitude)
+                self.last_diversity_boost = self.steps_done
+                logger.info(f"Diversity boost: performance stagnant ({performance_change:.5f}), epsilon {old_epsilon:.3f} → {self.epsilon:.3f}")
         
         # Update target network
         if self.steps_done % self.target_update_freq == 0:

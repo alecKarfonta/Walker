@@ -47,9 +47,10 @@ class RobotMemoryPool:
         }
         
         # Pre-allocate minimum robots
-        self._initialize_pool()
+        # LAZY INITIALIZATION: Don't create robots during init to avoid Learning Manager dependency issues
+        self._pool_initialized = False
         
-        print(f"🏊 RobotMemoryPool initialized: {self.min_pool_size}-{self.max_pool_size} robots")
+        print(f"🏊 RobotMemoryPool initialized: {self.min_pool_size}-{self.max_pool_size} robots (lazy initialization)")
     
     def _initialize_pool(self):
         """Pre-allocate minimum number of robots."""
@@ -77,6 +78,13 @@ class RobotMemoryPool:
                      apply_size_mutations: bool = True):
         """Acquire a robot from the pool with optional size mutations."""
         try:
+            # LAZY INITIALIZATION: Initialize pool on first request
+            if not self._pool_initialized:
+                print("🚀 LAZY INIT: Initializing robot pool on first request...")
+                self._initialize_pool()
+                self._pool_initialized = True
+                print(f"✅ LAZY INIT: Robot pool initialized with {len(self.available_robots)} robots")
+            
             # Try to reuse an existing robot
             if self.available_robots:
                 robot = self.available_robots.popleft()

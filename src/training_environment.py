@@ -324,7 +324,25 @@ class TrainingEnvironment:
         # Attention network specific cleanup
         self.last_attention_cleanup = time.time()
         self.attention_cleanup_interval = 300.0  # Less frequent - every 30 seconds
-                
+        
+        # 🚨 CRITICAL: Physics Body Tracking and Memory Leak Prevention
+        self.physics_body_tracker = {
+            'total_bodies': 0,
+            'agent_bodies': 0,
+            'ground_bodies': 0,
+            'obstacle_bodies': 0,
+            'other_bodies': 0,
+            'expected_agent_bodies': 0,  # Based on 30 agents
+            'body_history': [],  # Track body count over time
+            'last_cleanup_check': time.time(),
+            'cleanup_check_interval': 30.0,  # Check every 30 seconds
+            'memory_leak_threshold': 100,  # Alert if bodies exceed expected by this much
+            'max_history_size': 100  # Keep last 100 measurements
+        }
+        
+        # Calculate expected body count for 30 agents
+        self._calculate_expected_body_count()
+        
         # Health bar rendering toggle (PERFORMANCE OPTIMIZATION)
         self.show_health_bars = False  # Default: enabled, can be toggled off for performance
         self.enable_visualization = True  # Default: show robot visualization, can be disabled for max speed
@@ -1797,6 +1815,9 @@ class TrainingEnvironment:
         if not agent or getattr(agent, '_destroyed', False):
             return  # Already destroyed
             
+        # 🚨 CRITICAL: Track physics bodies before destruction
+        self._track_physics_bodies()
+            
         try:
             # Return agent to memory pool if available (preserves learning)
             if self.robot_memory_pool:
@@ -1926,6 +1947,9 @@ class TrainingEnvironment:
 
                         # Process any pending destructions first
                         self._process_destruction_queue()
+                        
+                        # 🚨 CRITICAL: Track physics bodies for memory leak detection
+                        self._track_physics_bodies()
                         
                         # Step the physics world only if not evolving
                         if not self._is_evolving:
@@ -4165,7 +4189,7 @@ class TrainingEnvironment:
                     hasattr(agent._learning_system.memory, 'buffer')):
                     buffer_size = len(agent._learning_system.memory.buffer)
                     total_replay_buffer += buffer_size
-                    if buffer_size > 1000:
+                    if buffer_size > 2000:  # Increased threshold to match buffer capacity
                         agents_with_large_buffers += 1
                 
                 # Track attention history sizes
@@ -4326,3 +4350,244 @@ class TrainingEnvironment:
                 
         except Exception as e:
             print(f"⚠️ Error in attention network cleanup: {e}")
+
+    def _calculate_expected_body_count(self):
+        """Calculate expected physics body count for 30 agents."""
+        try:
+            # Base calculation: 30 agents
+            expected_per_agent = 0
+            
+            # Count bodies per agent based on typical morphology
+            # Main body: 1
+            # Limbs: num_arms * segments_per_limb (typically 1-6 arms, 2-3 segments each)
+            # Wheels: 2-4 wheels per agent
+            # Average: 1 body + 3 limbs + 2 wheels = 6 bodies per agent
+            
+            expected_per_agent = 6  # Conservative estimate
+            
+            # Ground bodies: 1-5 (depending on terrain)
+            ground_bodies = 3
+            
+            # Obstacle bodies: 10-50 (depending on world complexity)
+            obstacle_bodies = 20
+            
+            # Calculate total expected
+            total_expected = (self.num_agents * expected_per_agent) + ground_bodies + obstacle_bodies
+            
+            self.physics_body_tracker['expected_agent_bodies'] = self.num_agents * expected_per_agent
+            self.physics_body_tracker['expected_total_bodies'] = total_expected
+            
+            print(f"📊 Physics Body Tracking: Expected {total_expected} bodies ({self.num_agents} agents × {expected_per_agent} bodies + {ground_bodies} ground + {obstacle_bodies} obstacles)")
+            
+        except Exception as e:
+            print(f"⚠️ Error calculating expected body count: {e}")
+
+    def _track_physics_bodies(self):
+        """Track current physics body count and detect memory leaks."""
+        try:
+            current_time = time.time()
+            
+            # Only check periodically to avoid performance impact
+            if current_time - self.physics_body_tracker['last_cleanup_check'] < self.physics_body_tracker['cleanup_check_interval']:
+                return
+            
+            self.physics_body_tracker['last_cleanup_check'] = current_time
+            
+            # Count all bodies in the world
+            total_bodies = len(self.world.bodies)
+            
+            # Categorize bodies
+            agent_bodies = 0
+            ground_bodies = 0
+            obstacle_bodies = 0
+            other_bodies = 0
+            
+            for body in self.world.bodies:
+                try:
+                    # Check if body belongs to an agent
+                    is_agent_body = False
+                    for agent in self.agents:
+                        if (hasattr(agent, 'body') and agent.body == body) or \
+                           (hasattr(agent, 'wheels') and body in agent.wheels) or \
+                           (hasattr(agent, 'limbs') and any(body in limb_segments for limb_segments in agent.limbs)):
+                            is_agent_body = True
+                            break
+                    
+                    if is_agent_body:
+                        agent_bodies += 1
+                    elif body.userData and hasattr(body.userData, 'type'):
+                        if body.userData.type == 'ground':
+                            ground_bodies += 1
+                        elif body.userData.type == 'obstacle':
+                            obstacle_bodies += 1
+                        else:
+                            other_bodies += 1
+                    else:
+                        # Try to categorize by fixture properties
+                        if body.fixtures and len(body.fixtures) > 0:
+                            fixture = body.fixtures[0]
+                            if fixture.filterData.categoryBits & self.GROUND_CATEGORY:
+                                ground_bodies += 1
+                            elif fixture.filterData.categoryBits & self.AGENT_CATEGORY:
+                                agent_bodies += 1
+                            else:
+                                other_bodies += 1
+                        else:
+                            other_bodies += 1
+                            
+                except Exception as e:
+                    other_bodies += 1
+            
+            # Update tracker
+            self.physics_body_tracker['total_bodies'] = total_bodies
+            self.physics_body_tracker['agent_bodies'] = agent_bodies
+            self.physics_body_tracker['ground_bodies'] = ground_bodies
+            self.physics_body_tracker['obstacle_bodies'] = obstacle_bodies
+            self.physics_body_tracker['other_bodies'] = other_bodies
+            
+            # Add to history
+            self.physics_body_tracker['body_history'].append({
+                'timestamp': current_time,
+                'total': total_bodies,
+                'agent': agent_bodies,
+                'ground': ground_bodies,
+                'obstacle': obstacle_bodies,
+                'other': other_bodies
+            })
+            
+            # Keep history size manageable
+            if len(self.physics_body_tracker['body_history']) > self.physics_body_tracker['max_history_size']:
+                self.physics_body_tracker['body_history'] = self.physics_body_tracker['body_history'][-self.physics_body_tracker['max_history_size']:]
+            
+            # Check for memory leaks
+            expected_total = self.physics_body_tracker['expected_total_bodies']
+            excess_bodies = total_bodies - expected_total
+            
+            if excess_bodies > self.physics_body_tracker['memory_leak_threshold']:
+                print(f"🚨 CRITICAL: Physics Body Memory Leak Detected!")
+                print(f"   Current: {total_bodies} bodies")
+                print(f"   Expected: {expected_total} bodies")
+                print(f"   Excess: {excess_bodies} bodies (threshold: {self.physics_body_tracker['memory_leak_threshold']})")
+                print(f"   Breakdown: {agent_bodies} agent, {ground_bodies} ground, {obstacle_bodies} obstacle, {other_bodies} other")
+                print(f"   Expected agent bodies: {self.physics_body_tracker['expected_agent_bodies']}")
+                
+                # Trigger emergency cleanup
+                self._emergency_physics_cleanup()
+            
+            # Log significant changes
+            elif total_bodies > expected_total * 1.5:  # 50% over expected
+                print(f"⚠️ WARNING: High physics body count: {total_bodies} (expected ~{expected_total})")
+                print(f"   Breakdown: {agent_bodies} agent, {ground_bodies} ground, {obstacle_bodies} obstacle, {other_bodies} other")
+            
+        except Exception as e:
+            print(f"⚠️ Error tracking physics bodies: {e}")
+
+    def _emergency_physics_cleanup(self):
+        """Emergency cleanup of orphaned physics bodies - AGGRESSIVE APPROACH."""
+        try:
+            print("🧹 EMERGENCY: Starting AGGRESSIVE physics body cleanup...")
+            
+            # Get all bodies that are CLEARLY orphaned
+            orphaned_bodies = []
+            
+            for body in self.world.bodies:
+                try:
+                    # CRITICAL FIX: Be more aggressive about identifying orphaned bodies
+                    # Check if this body belongs to an active agent
+                    belongs_to_active_agent = False
+                    
+                    for agent in self.agents:
+                        if not getattr(agent, '_destroyed', False) and agent.body:
+                            # Check if this body is part of the agent's body hierarchy
+                            if body == agent.body:
+                                belongs_to_active_agent = True
+                                break
+                            
+                            # Check limbs (if they exist and are objects with body attributes)
+                            if hasattr(agent, 'limbs') and agent.limbs:
+                                for limb in agent.limbs:
+                                    if hasattr(limb, 'body') and body == limb.body:
+                                        belongs_to_active_agent = True
+                                        break
+                                if belongs_to_active_agent:
+                                    break
+                            
+                            # Check segments (if they exist and are objects with body attributes)
+                            if hasattr(agent, 'segments') and agent.segments:
+                                for segment in agent.segments:
+                                    if hasattr(segment, 'body') and body == segment.body:
+                                        belongs_to_active_agent = True
+                                        break
+                                if belongs_to_active_agent:
+                                    break
+                            
+                            # Check if body is in any limb segments (lists)
+                            if hasattr(agent, 'limbs') and agent.limbs:
+                                for limb in agent.limbs:
+                                    if isinstance(limb, list):
+                                        for segment in limb:
+                                            if hasattr(segment, 'body') and body == segment.body:
+                                                belongs_to_active_agent = True
+                                                break
+                                        if belongs_to_active_agent:
+                                            break
+                                    elif hasattr(limb, 'segments') and limb.segments:
+                                        for segment in limb.segments:
+                                            if hasattr(segment, 'body') and body == segment.body:
+                                                belongs_to_active_agent = True
+                                                break
+                                        if belongs_to_active_agent:
+                                            break
+                                if belongs_to_active_agent:
+                                    break
+                    
+                    # If not belonging to active agent, check if it's environmental
+                    if not belongs_to_active_agent:
+                        # Check if it's a ground body or environmental obstacle
+                        if hasattr(body, 'userData') and body.userData:
+                            if hasattr(body.userData, 'type') and body.userData.type in ['ground', 'obstacle', 'environmental']:
+                                continue  # Keep environmental bodies
+                        
+                        # Check if it's the main ground body (no userData but at ground level)
+                        if body.position.y <= 0.0 and not hasattr(body, 'userData'):
+                            continue  # Keep ground bodies
+                        
+                        # This body is orphaned - add to cleanup list
+                        orphaned_bodies.append(body)
+                        
+                except Exception as e:
+                    print(f"⚠️ Error checking body {body}: {e}")
+                    continue
+            
+            # Destroy orphaned bodies
+            if orphaned_bodies:
+                print(f"🧹 EMERGENCY: Destroying {len(orphaned_bodies)} orphaned physics bodies")
+                for body in orphaned_bodies:
+                    try:
+                        self.world.DestroyBody(body)
+                    except Exception as e:
+                        print(f"⚠️ Error destroying body: {e}")
+                
+                print(f"✅ EMERGENCY: Successfully destroyed {len(orphaned_bodies)} orphaned bodies")
+            else:
+                print("🧹 EMERGENCY: No orphaned bodies found")
+                
+        except Exception as e:
+            print(f"❌ Error in emergency physics cleanup: {e}")
+
+    def get_physics_body_stats(self) -> Dict[str, Any]:
+        """Get current physics body statistics."""
+        try:
+            # Force a tracking update
+            self._track_physics_bodies()
+            
+            return {
+                'current': self.physics_body_tracker.copy(),
+                'history_size': len(self.physics_body_tracker['body_history']),
+                'memory_leak_detected': self.physics_body_tracker['total_bodies'] > self.physics_body_tracker['expected_total_bodies'] + self.physics_body_tracker['memory_leak_threshold']
+            }
+        except Exception as e:
+            return {
+                'error': str(e),
+                'current': self.physics_body_tracker.copy()
+            }

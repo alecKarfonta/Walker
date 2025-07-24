@@ -218,15 +218,27 @@ def live_evaluation():
             for agent in active_agents:
                 try:
                     total_reward = getattr(agent, 'total_reward', 0)
-                    episode_reward = getattr(agent, 'episode_reward', 0)
+                    # FIX: Use immediate_reward from rolling reward system instead of episode_reward
+                    immediate_reward = getattr(agent, 'immediate_reward', 0)
+                    # Also try short-term average for better episode-like metric
+                    short_term_avg = getattr(agent, 'short_term_avg', 0)
                     
                     if total_reward > 0:
                         learning_perf['learning_active'] += 1
                     
                     learning_perf['reward_stats']['total_rewards'].append(total_reward)
-                    learning_perf['reward_stats']['episode_rewards'].append(episode_reward)
+                    # Use short_term_avg as episode-like reward (more stable than immediate)
+                    learning_perf['reward_stats']['episode_rewards'].append(short_term_avg)
                     
+                    # Get learning approach - handle different agent types
                     approach = getattr(agent, 'learning_approach', 'unknown')
+                    if approach == 'unknown':
+                        # Try to infer from agent class
+                        if hasattr(agent, '_learning_system'):
+                            approach = 'attention_deep_q_learning'
+                        else:
+                            approach = 'basic_learning'
+                    
                     learning_perf['learning_approaches'][approach] = learning_perf['learning_approaches'].get(approach, 0) + 1
                     
                 except Exception as e:

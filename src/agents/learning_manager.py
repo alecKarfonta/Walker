@@ -143,7 +143,7 @@ class LearningManager:
             state_size = 29  # Fixed state size for all agents
             
             # STRATEGY: Focus on one-limb robots first (action_size=9) with 40 networks
-            # Then create smaller amounts for multi-limb robots
+            # Then create smaller amounts for multi-limb robots including very complex ones
             network_allocation = {
                 9: 40,   # 1 limb × 3 segments = 3 joints → 40 networks (primary focus)
                 11: 8,   # 2 limbs × 2 segments = 4 joints → 8 networks
@@ -158,6 +158,16 @@ class LearningManager:
                 29: 1,   # 5 limbs × 3 segments = 15 joints → 1 network
                 31: 1,   # 6 limbs × 2-3 segments = 15 joints → 1 network
                 33: 1,   # 6 limbs × 3 segments = 18 joints → 1 network
+                # Add support for very complex robots
+                35: 1,   # 7 limbs × 2-3 segments → 1 network
+                37: 1,   # 7 limbs × 3 segments → 1 network
+                39: 1,   # 8 limbs × 2-3 segments → 1 network
+                41: 1,   # 8 limbs × 3 segments → 1 network
+                # Add common ranges for dynamic action spaces
+                163: 1,  # 6 limbs × 3 segments (complex calculation) → 1 network
+                165: 1,  # Other complex configurations → 1 network
+                167: 1,  # Other complex configurations → 1 network
+                169: 1,  # Other complex configurations → 1 network
             }
             
             total_networks_created = 0
@@ -280,11 +290,15 @@ class LearningManager:
                 logger.error(f"Invalid state_size {state_size}, expected 29")
                 return None
             
-            # FIXED: Support variable action sizes for different agent morphologies
-            # Action sizes can range from 5 (minimum viable) to 200+ (complex robots)
-            if action_size < 5 or action_size > 200:
-                logger.error(f"Invalid action_size {action_size}, must be between 5 and 200")
+            # REMOVED: Arbitrary action size limit - modern networks can handle large action spaces
+            # Research shows action embeddings and proper architecture can handle 1000+ actions
+            if action_size < 5:
+                logger.error(f"Invalid action_size {action_size}, must be at least 5")
                 return None
+            
+            # WARNING: Very large action spaces (>500) may require action embedding techniques
+            if action_size > 500:
+                logger.warning(f"Large action space detected ({action_size}). Consider implementing action embeddings for better performance.")
             
             # Get appropriate pool
             pool = self._get_or_create_pool(state_size, action_size)
@@ -392,8 +406,9 @@ class LearningManager:
             min_buffer_threshold = 5  # Refill when below 5 networks (increased from 2)
             refill_count = 8  # Add 8 networks when refilling (increased from 3)
             
-            # Common action sizes that need buffer maintenance
-            common_action_sizes = [9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41]
+            # Common action sizes that need buffer maintenance (including complex robots)
+            common_action_sizes = [9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31, 33, 35, 37, 39, 41, 
+                                 163, 165, 167, 169]
             
             total_refilled = 0
             
